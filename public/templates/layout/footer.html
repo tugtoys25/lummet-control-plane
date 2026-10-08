@@ -1,0 +1,31 @@
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="/" aria-label="{{site.name}}">
+          {{#if site.has_logo}}
+          <img class="brand-logo" src="{{site.logo_url}}" alt="" width="32" height="32" loading="lazy">
+          {{else}}
+          <span class="brand-mark" aria-hidden="true"></span>
+          {{/if}}
+          <span class="brand-name">{{site.name}}</span>
+        </a>
+        {{#if site.footer_text}}<p>{{site.footer_text}}</p>{{/if}}
+        {{#if site.has_contact}}<a class="footer-mail" href="mailto:{{site.contact_email}}">{{site.contact_email}}</a>{{/if}}
+      </div>
+      {{#each site.footer_columns}}
+      <nav class="footer-col" aria-label="{{title}}">
+        <h2>{{title}}</h2>
+        <ul>
+          {{#each links}}
+          <li><a href="{{href}}">{{label}}</a></li>
+          {{/each}}
+        </ul>
+      </nav>
+      {{/each}}
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; {{site.year}} {{site.name}}. {{ui.rights}}</span>
+    </div>
+  </div>
+</footer>

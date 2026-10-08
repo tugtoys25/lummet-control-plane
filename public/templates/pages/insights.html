@@ -1,0 +1,22 @@
+<section class="page-hero">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <h1>{{title}}</h1>
+    {{#if intro}}<p class="lede">{{intro}}</p>{{/if}}
+  </div>
+</section>
+<section class="section section-tight">
+  <div class="container">
+    {{#if has_filters}}
+    <nav class="filter-bar" aria-label="{{ui.filter_insights_label}}">
+      {{#each filters}}<a class="chip{{#if current}} is-active{{/if}}" href="{{href}}"{{#if current}} aria-current="true"{{/if}}>{{label}}</a>{{/each}}
+    </nav>
+    {{/if}}
+    {{#if insights}}
+    <div class="grid grid-3">{{#each insights}}{{> components/insight-card}}{{/each}}</div>
+    {{> components/pagination}}
+    {{else}}
+    <div class="empty-state"><p>{{ui.empty_insights}}</p></div>
+    {{/if}}
+  </div>
+</section>

@@ -1,0 +1,12 @@
+<section class="section stats-section bg-{{bg}}" id="{{key}}" aria-label="{{title}}">
+  <div class="container">
+    <dl class="stats">
+      {{#each items}}
+      <div class="stat reveal">
+        <dt>{{label}}</dt>
+        <dd class="{{#if is_text}}stat-text{{/if}}">{{value}}</dd>
+      </div>
+      {{/each}}
+    </dl>
+  </div>
+</section>

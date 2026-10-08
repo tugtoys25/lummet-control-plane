@@ -1,0 +1,13 @@
+<a class="card brand-card reveal" href="{{url}}" data-category="{{category}}">
+  <div class="brand-card-top">
+    {{#if has_logo}}
+    <img class="brand-thumb" src="{{logo_url}}" alt="" width="48" height="48" loading="lazy">
+    {{else}}
+    <span class="brand-initials" aria-hidden="true">{{initials}}</span>
+    {{/if}}
+    {{#if category}}<span class="badge">{{category}}</span>{{/if}}
+  </div>
+  <h3>{{name}}</h3>
+  {{#if summary}}<p>{{summary}}</p>{{/if}}
+  <span class="card-cta">{{ui.view_profile}} {{{icons.arrow}}}</span>
+</a>

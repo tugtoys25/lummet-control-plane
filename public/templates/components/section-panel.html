@@ -1,0 +1,28 @@
+<section class="section" id="{{key}}">
+  <div class="container">
+    <div class="panel reveal">
+      <div class="panel-glow" aria-hidden="true"></div>
+      <div class="panel-head">
+        {{#if eyebrow}}<span class="eyebrow">{{eyebrow}}</span>{{/if}}
+        <h2>{{title}}</h2>
+        {{#if body_html}}<div class="lede prose">{{{body_html}}}</div>{{/if}}
+      </div>
+      {{#if items}}
+      <div class="panel-grid">
+        {{#each items}}
+        <div class="panel-item">
+          {{#if icon_svg}}<span class="icon-tile">{{{icon_svg}}}</span>{{/if}}
+          <h3>{{title}}</h3>
+          {{#if body}}<p>{{body}}</p>{{/if}}
+        </div>
+        {{/each}}
+      </div>
+      {{/if}}
+      {{#if cta_label}}
+      <div class="panel-foot">
+        <a class="btn btn-primary btn-lg" href="{{cta_href}}">{{cta_label}} {{{icons.arrow}}}</a>
+      </div>
+      {{/if}}
+    </div>
+  </div>
+</section>

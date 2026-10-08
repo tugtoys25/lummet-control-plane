@@ -1,0 +1,6 @@
+<a class="card post-card reveal" href="{{url}}">
+  {{#if date_label}}<span class="meta"><time datetime="{{date_iso}}">{{date_label}}</time></span>{{/if}}
+  <h3>{{title}}</h3>
+  {{#if excerpt}}<p>{{excerpt}}</p>{{/if}}
+  <span class="card-cta">{{ui.read_update}} {{{icons.arrow}}}</span>
+</a>

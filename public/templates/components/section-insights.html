@@ -1,0 +1,9 @@
+<section class="section bg-{{bg}}" id="{{key}}">
+  <div class="container">
+    {{> components/section-head}}
+    <div class="grid grid-3">
+      {{#each items}}{{> components/insight-card}}{{/each}}
+    </div>
+    {{> components/section-foot}}
+  </div>
+</section>

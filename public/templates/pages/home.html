@@ -1,0 +1,42 @@
+{{#if hero}}
+<section class="hero">
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="container hero-grid">
+    <div class="hero-copy">
+      {{#if hero.eyebrow}}<span class="eyebrow eyebrow-pill">{{hero.eyebrow}}</span>{{/if}}
+      <h1>{{hero.title}}</h1>
+      {{#if hero.subtitle}}<p class="lede">{{hero.subtitle}}</p>{{/if}}
+      <div class="hero-actions">
+        {{#if hero.has_primary}}<a class="btn btn-primary btn-lg" href="{{hero.primary_href}}">{{hero.primary_label}}</a>{{/if}}
+        {{#if hero.has_secondary}}<a class="btn btn-secondary btn-lg" href="{{hero.secondary_href}}">{{hero.secondary_label}}</a>{{/if}}
+      </div>
+    </div>
+    {{#if hero.graph_svg}}
+    <div class="hero-visual">{{{hero.graph_svg}}}</div>
+    {{/if}}
+  </div>
+</section>
+{{/if}}
+
+{{#if banner}}
+<div class="container banner-ad">
+  {{#if banner.has_link}}<a href="{{banner.link_url}}" rel="sponsored noopener" target="_blank"><img src="{{banner.image_url}}" alt="{{banner.alt}}" loading="lazy"></a>
+  {{else}}<img src="{{banner.image_url}}" alt="{{banner.alt}}" loading="lazy">{{/if}}
+</div>
+{{/if}}
+
+{{#each sections}}
+  {{#if is_stats}}{{> components/section-stats}}{{/if}}
+  {{#if is_text}}{{> components/section-text}}{{/if}}
+  {{#if is_features}}{{> components/section-features}}{{/if}}
+  {{#if is_steps}}{{> components/section-steps}}{{/if}}
+  {{#if is_checklist}}{{> components/section-checklist}}{{/if}}
+  {{#if is_panel}}{{> components/section-panel}}{{/if}}
+  {{#if is_brands}}{{> components/section-brands}}{{/if}}
+  {{#if is_updates}}{{> components/section-updates}}{{/if}}
+  {{#if is_insights}}{{> components/section-insights}}{{/if}}
+  {{#if is_partners}}{{> components/section-partners}}{{/if}}
+  {{#if is_faq}}{{> components/section-faq}}{{/if}}
+  {{#if is_cta}}{{> components/section-cta}}{{/if}}
+  {{#if is_contact}}{{> components/section-contact}}{{/if}}
+{{/each}}

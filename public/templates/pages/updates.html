@@ -1,0 +1,28 @@
+<section class="page-hero">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <h1>{{title}}</h1>
+    {{#if intro}}<p class="lede">{{intro}}</p>{{/if}}
+  </div>
+</section>
+<section class="section section-tight">
+  <div class="container">
+    {{#if updates}}
+    <ol class="timeline">
+      {{#each updates}}
+      <li class="timeline-item reveal">
+        <div class="timeline-date">{{#if date_label}}<time datetime="{{date_iso}}">{{date_label}}</time>{{/if}}</div>
+        <a class="card post-card" href="{{url}}">
+          <h3>{{title}}</h3>
+          {{#if excerpt}}<p>{{excerpt}}</p>{{/if}}
+          <span class="card-cta">{{ui.read_update}} {{{icons.arrow}}}</span>
+        </a>
+      </li>
+      {{/each}}
+    </ol>
+    {{> components/pagination}}
+    {{else}}
+    <div class="empty-state"><p>{{ui.empty_updates}}</p></div>
+    {{/if}}
+  </div>
+</section>

@@ -1,0 +1,13 @@
+<section class="section bg-{{bg}}" id="{{key}}">
+  <div class="container">
+    {{> components/section-head}}
+    <div class="faq-list">
+      {{#each items}}
+      <details class="faq-item reveal">
+        <summary>{{question}}</summary>
+        <div class="faq-answer prose">{{{answer_html}}}</div>
+      </details>
+      {{/each}}
+    </div>
+  </div>
+</section>

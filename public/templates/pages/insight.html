@@ -1,0 +1,30 @@
+<article>
+  <header class="page-hero">
+    <div class="container narrow">
+      {{> components/breadcrumbs}}
+      <span class="badge">{{insight.type_label}}</span>
+      <h1>{{insight.title}}</h1>
+      <p class="meta-line">
+        {{#if insight.date_label}}<span>{{{icons.calendar}}} <time datetime="{{insight.date_iso}}">{{insight.date_label}}</time></span>{{/if}}
+        <span>{{{icons.clock}}} {{insight.reading_minutes}} {{ui.min_read}}</span>
+        {{#if insight.author_name}}<span>{{ui.by}} {{#if insight.author_url}}<a href="{{insight.author_url}}">{{insight.author_name}}</a>{{else}}{{insight.author_name}}{{/if}}</span>{{/if}}
+      </p>
+    </div>
+  </header>
+  <div class="section section-tight">
+    <div class="container narrow">
+      {{#if insight.featured_image}}<img class="article-image" src="{{insight.featured_image}}" alt="" loading="eager">{{/if}}
+      {{#if insight.source_url}}<p class="source-note">{{ui.source_label}}: {{#if insight.source_name}}{{insight.source_name}} {{/if}}<a href="{{insight.source_url}}" target="_blank" rel="noopener noreferrer">{{insight.source_host}} {{{icons.external}}}</a></p>{{/if}}
+      <div class="prose" data-article-body>{{{insight.content_html}}}</div>
+      <div class="article-actions"><button type="button" class="btn btn-secondary btn-sm" data-copy-link data-copied="{{ui.link_copied}}">{{{icons.link}}} {{ui.copy_link}}</button><a class="btn btn-ghost btn-sm" href="/insights">{{ui.all_insights}}</a></div>
+    </div>
+  </div>
+</article>
+{{#if has_more}}
+<section class="section bg-soft">
+  <div class="container">
+    <header class="section-head"><h2>{{ui.keep_reading}}</h2></header>
+    <div class="grid grid-3">{{#each more}}{{> components/insight-card}}{{/each}}</div>
+  </div>
+</section>
+{{/if}}

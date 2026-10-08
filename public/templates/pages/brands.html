@@ -1,0 +1,24 @@
+<section class="page-hero">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <h1>{{title}}</h1>
+    {{#if intro}}<p class="lede">{{intro}}</p>{{/if}}
+  </div>
+</section>
+<section class="section section-tight">
+  <div class="container">
+    {{#if brands}}
+      {{#if has_categories}}
+      <div class="filter-bar" role="group" aria-label="{{ui.filter_brands_label}}" data-filter-bar hidden>
+        <button type="button" class="chip is-active" data-filter="" aria-pressed="true">{{ui.filter_all}} ({{brands.length}})</button>
+        {{#each categories}}<button type="button" class="chip" data-filter="{{name}}" aria-pressed="false">{{name}} ({{count}})</button>{{/each}}
+      </div>
+      {{/if}}
+      <div class="grid grid-3" data-filter-grid>
+        {{#each brands}}{{> components/brand-card}}{{/each}}
+      </div>
+    {{else}}
+      <div class="empty-state"><p>{{ui.empty_brands}}</p></div>
+    {{/if}}
+  </div>
+</section>

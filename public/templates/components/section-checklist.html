@@ -1,0 +1,11 @@
+<section class="section bg-{{bg}}" id="{{key}}">
+  <div class="container">
+    {{> components/section-head}}
+    <ul class="checklist">
+      {{#each items}}
+      <li class="reveal"><span class="check">{{{check_svg}}}</span><span>{{title}}</span></li>
+      {{/each}}
+    </ul>
+    {{> components/section-foot}}
+  </div>
+</section>

@@ -1,0 +1,17 @@
+<section class="section bg-{{bg}}" id="{{key}}">
+  <div class="container">
+    {{#if image_left}}
+    <div class="split">
+      <img class="split-media reveal" src="{{image_url}}" alt="{{title}}" loading="lazy">
+      <div>{{> components/section-head}}{{> components/section-foot}}</div>
+    </div>
+    {{else}}{{#if image_right}}
+    <div class="split">
+      <div>{{> components/section-head}}{{> components/section-foot}}</div>
+      <img class="split-media reveal" src="{{image_url}}" alt="{{title}}" loading="lazy">
+    </div>
+    {{else}}
+    <div class="narrow">{{> components/section-head}}{{> components/section-foot}}</div>
+    {{/if}}{{/if}}
+  </div>
+</section>

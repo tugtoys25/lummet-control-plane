@@ -1,0 +1,39 @@
+<section class="page-hero">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <div class="brand-hero">
+      {{#if brand.has_logo}}
+      <img class="brand-hero-logo" src="{{brand.logo_url}}" alt="{{brand.name}}" width="88" height="88">
+      {{else}}
+      <span class="brand-initials brand-initials-lg" aria-hidden="true">{{brand.initials}}</span>
+      {{/if}}
+      <div>
+        {{#if brand.category}}<span class="badge">{{brand.category}}</span>{{/if}}
+        <h1>{{brand.name}}</h1>
+        {{#if brand.tagline}}<p class="lede">{{brand.tagline}}</p>{{/if}}
+      </div>
+    </div>
+    {{#if brand.website_url}}
+    <div class="hero-actions">
+      <a class="btn btn-primary btn-lg" href="{{brand.website_url}}" target="_blank" rel="noopener noreferrer">{{ui.visit_site}} {{brand.website_host}} {{{icons.external}}}</a>
+    </div>
+    {{/if}}
+  </div>
+</section>
+{{#if brand.description_html}}
+<section class="section section-tight">
+  <div class="container narrow">
+    <div class="prose">{{{brand.description_html}}}</div>
+  </div>
+</section>
+{{/if}}
+{{#if has_related}}
+<section class="section bg-soft">
+  <div class="container">
+    <header class="section-head"><h2>{{ui.more_brands}}</h2></header>
+    <div class="grid grid-3">
+      {{#each related}}{{> components/brand-card}}{{/each}}
+    </div>
+  </div>
+</section>
+{{/if}}

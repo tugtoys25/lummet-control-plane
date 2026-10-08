@@ -1,0 +1,56 @@
+<section class="page-hero">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    {{#if form.eyebrow}}<span class="eyebrow eyebrow-pill">{{form.eyebrow}}</span>{{/if}}
+    <h1>{{form.title}}</h1>
+    {{#if form.intro_html}}<div class="lede prose">{{{form.intro_html}}}</div>{{/if}}
+  </div>
+</section>
+
+<section class="section section-tight">
+  <div class="container form-layout{{#unless form.has_side}} form-layout-single{{/unless}}">
+    <div class="form-card">
+      {{#if sent}}
+      <div class="form-success" role="status">
+        <span class="icon-tile">{{{icons.check}}}</span>
+        <h2>{{form.success_title}}</h2>
+        <div class="prose">{{{form.success_html}}}</div>
+      </div>
+      {{else}}{{#if has_fields}}
+      {{#if banner}}<div class="form-alert" role="alert">{{banner}}</div>{{/if}}
+      <form method="post" action="{{form.action}}" data-form data-sending="{{ui.form_sending}}">
+        <p class="form-note">{{ui.form_required_note}}</p>
+        {{#each fields}}
+        <div class="field{{#if has_error}} has-error{{/if}}">
+          <label for="{{id}}">{{label}}{{#if required}} <span class="req" aria-hidden="true">{{ui.form_required_mark}}</span>{{/if}}</label>
+          {{#if is_textarea}}
+          <textarea id="{{id}}" name="{{name}}" rows="6" maxlength="{{max_length}}" placeholder="{{placeholder}}"{{#if required}} required{{/if}}{{#if has_error}} aria-invalid="true" aria-describedby="{{id}}-err"{{/if}}>{{value}}</textarea>
+          {{else}}{{#if is_select}}
+          <select id="{{id}}" name="{{name}}"{{#if required}} required{{/if}}{{#if has_error}} aria-invalid="true" aria-describedby="{{id}}-err"{{/if}}>
+            <option value="">{{ui.form_choose}}</option>
+            {{#each options}}<option value="{{value}}"{{#if selected}} selected{{/if}}>{{label}}</option>{{/each}}
+          </select>
+          {{else}}
+          <input id="{{id}}" type="{{input_type}}" name="{{name}}" value="{{value}}" maxlength="{{max_length}}" placeholder="{{placeholder}}" autocomplete="{{autocomplete}}"{{#if required}} required{{/if}}{{#if has_error}} aria-invalid="true" aria-describedby="{{id}}-err"{{/if}}>
+          {{/if}}{{/if}}
+          {{#if help_text}}<p class="help">{{help_text}}</p>{{/if}}
+          {{#if error}}<p class="field-error" id="{{id}}-err">{{error}}</p>{{/if}}
+        </div>
+        {{/each}}
+        <div class="hp" aria-hidden="true"><input type="text" name="{{honeypot}}" tabindex="-1" autocomplete="off" value=""></div>
+        <button class="btn btn-primary btn-lg" type="submit">{{form.submit_label}}</button>
+      </form>
+      {{else}}
+      <div class="empty-state"><p>{{ui.form_unavailable}}</p></div>
+      {{/if}}{{/if}}
+    </div>
+
+    {{#if form.has_side}}
+    <aside class="form-side card">
+      {{#if form.side_title}}<h2>{{form.side_title}}</h2>{{/if}}
+      {{#if form.side_html}}<div class="prose">{{{form.side_html}}}</div>{{/if}}
+      {{#if site.has_contact}}<p class="side-mail">{{ui.form_side_email}} <a href="mailto:{{site.contact_email}}">{{site.contact_email}}</a></p>{{/if}}
+    </aside>
+    {{/if}}
+  </div>
+</section>

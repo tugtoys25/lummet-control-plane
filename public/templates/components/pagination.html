@@ -1,0 +1,11 @@
+{{#if pager.show}}
+<nav class="pagination" aria-label="{{ui.pagination_label}}">
+  {{#if pager.prev_href}}<a class="btn btn-secondary btn-sm" href="{{pager.prev_href}}" rel="prev">{{ui.prev}}</a>{{/if}}
+  <ol>
+    {{#each pager.numbers}}
+    <li><a href="{{href}}"{{#if current}} aria-current="page" class="is-current"{{/if}}>{{number}}</a></li>
+    {{/each}}
+  </ol>
+  {{#if pager.next_href}}<a class="btn btn-secondary btn-sm" href="{{pager.next_href}}" rel="next">{{ui.next}}</a>{{/if}}
+</nav>
+{{/if}}

@@ -1,0 +1,34 @@
+<section class="page-hero">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <div class="brand-hero">
+      {{#if author.has_avatar}}
+      <img class="brand-hero-logo avatar" src="{{author.avatar_url}}" alt="" width="88" height="88">
+      {{else}}
+      <span class="brand-initials brand-initials-lg" aria-hidden="true">{{author.initials}}</span>
+      {{/if}}
+      <div>
+        <h1>{{author.name}}</h1>
+        {{#if author.title}}<p class="lede">{{author.title}}</p>{{/if}}
+      </div>
+    </div>
+    {{#if author.bio}}<p class="author-bio">{{author.bio}}</p>{{/if}}
+    {{#if author.social}}<p class="social-links">{{#each author.social}}<a href="{{href}}" target="_blank" rel="noopener noreferrer me">{{label}}</a>{{/each}}</p>{{/if}}
+  </div>
+</section>
+{{#if has_insights}}
+<section class="section section-tight">
+  <div class="container">
+    <header class="section-head"><h2>{{ui.author_insights}}</h2></header>
+    <div class="grid grid-3">{{#each insights}}{{> components/insight-card}}{{/each}}</div>
+  </div>
+</section>
+{{/if}}
+{{#if has_updates}}
+<section class="section section-tight bg-soft">
+  <div class="container">
+    <header class="section-head"><h2>{{ui.author_updates}}</h2></header>
+    <div class="grid grid-3">{{#each updates}}{{> components/update-card}}{{/each}}</div>
+  </div>
+</section>
+{{/if}}

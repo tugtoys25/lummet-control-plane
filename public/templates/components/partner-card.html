@@ -1,0 +1,13 @@
+<div class="card partner-card reveal">
+  <div class="brand-card-top">
+    {{#if has_logo}}
+    <img class="brand-thumb" src="{{logo_url}}" alt="" width="48" height="48" loading="lazy">
+    {{else}}
+    <span class="brand-initials" aria-hidden="true">{{initials}}</span>
+    {{/if}}
+    {{#if type}}<span class="badge">{{type}}</span>{{/if}}
+  </div>
+  <h3>{{name}}</h3>
+  {{#if description}}<p>{{description}}</p>{{/if}}
+  {{#if website_url}}<a class="card-cta" href="{{website_url}}" target="_blank" rel="noopener noreferrer">{{website_host}} {{{icons.external}}}</a>{{/if}}
+</div>

@@ -1,0 +1,16 @@
+<section class="page-hero">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <h1>{{title}}</h1>
+    {{#if intro}}<p class="lede">{{intro}}</p>{{/if}}
+  </div>
+</section>
+<section class="section section-tight">
+  <div class="container">
+    {{#if partners}}
+    <div class="grid grid-3">{{#each partners}}{{> components/partner-card}}{{/each}}</div>
+    {{else}}
+    <div class="empty-state"><p>{{ui.empty_partners}}</p>{{#if site.has_contact_url}}<a class="btn btn-secondary" href="{{site.contact_url}}">{{ui.partner_cta}}</a>{{/if}}</div>
+    {{/if}}
+  </div>
+</section>

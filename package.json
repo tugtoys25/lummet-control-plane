@@ -1,0 +1,12 @@
+{
+  "name": "lummet-control-plane",
+  "private": true,
+  "type": "module",
+  "description": "This package.json exists ONLY to provide a standard `npm test` entry point for the zero-dependency security/RBAC test suite added under /test. Mirrors the tenant repo's convention: tests run against Node's built-in test runner (node:test) and built-in node:sqlite (Node 22+), not against any installed package. The Worker itself has no build step and is deployed as plain JS via wrangler, same as before this file existed.",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  }
+}

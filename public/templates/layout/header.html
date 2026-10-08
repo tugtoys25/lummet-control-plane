@@ -1,0 +1,43 @@
+<header class="site-header" data-site-header data-signed-in-label="{{ui.signed_in_label}}" data-signed-in-href="{{ui.signed_in_href}}">
+  <div class="container header-inner">
+    <a class="brand" href="/" aria-label="{{site.name}}">
+      {{#if site.has_logo}}
+      <img class="brand-logo" src="{{site.logo_url}}" alt="" width="32" height="32">
+      {{else}}
+      <span class="brand-mark" aria-hidden="true"></span>
+      {{/if}}
+      <span class="brand-name">{{site.name}}</span>
+    </a>
+
+    <nav class="nav-main" aria-label="{{ui.nav_primary_label}}">
+      {{#each site.nav_main}}
+      <a href="{{href}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>
+      {{/each}}
+    </nav>
+
+    <div class="header-actions">
+      <button class="icon-btn" type="button" data-theme-toggle aria-label="{{ui.theme_toggle}}">
+        <span class="icon-sun">{{{icons.sun}}}</span><span class="icon-moon">{{{icons.moon}}}</span>
+      </button>
+      {{#each site.nav_cta}}
+      <a class="btn btn-sm {{#if is_primary}}btn-primary{{else}}btn-ghost{{/if}} hide-mobile" href="{{href}}">{{label}}</a>
+      {{/each}}
+      <button class="icon-btn nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="{{ui.menu_open}}" data-label-open="{{ui.menu_open}}" data-label-close="{{ui.menu_close}}" data-nav-toggle>
+        <span class="icon-open">{{{icons.menu}}}</span><span class="icon-close">{{{icons.close}}}</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu" data-mobile-menu hidden>
+    <nav class="container" aria-label="{{ui.nav_mobile_label}}">
+      {{#each site.nav_main}}
+      <a href="{{href}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>
+      {{/each}}
+      <div class="mobile-menu-cta">
+        {{#each site.nav_cta}}
+        <a class="btn btn-lg {{#if is_primary}}btn-primary{{else}}btn-secondary{{/if}}" href="{{href}}">{{label}}</a>
+        {{/each}}
+      </div>
+    </nav>
+  </div>
+</header>

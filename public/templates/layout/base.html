@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  {{{head_html}}}
+  {{#if site.has_logo}}
+  <link rel="icon" href="{{site.logo_url}}">
+  {{else}}
+  <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg">
+  {{/if}}
+  <script src="/static/js/theme.js"></script>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/pages.css">
+  {{#if site.accent_css}}<style>{{{site.accent_css}}}</style>{{/if}}
+</head>
+<body class="{{body_class}}">
+  <a class="skip-link" href="#main">{{ui.skip_to_content}}</a>
+  {{> layout/header}}
+  <main id="main">
+    {{{content}}}
+  </main>
+  {{> layout/footer}}
+  <script src="/static/js/nav.js" defer></script>
+  <script src="/static/js/session.js" defer></script>
+  <script src="/static/js/reveal.js" defer></script>
+  <script src="/static/js/filter.js" defer></script>
+  <script src="/static/js/article.js" defer></script>
+  <script src="/static/js/form.js" defer></script>
+</body>
+</html>

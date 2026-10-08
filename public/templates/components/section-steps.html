@@ -1,0 +1,16 @@
+<section class="section bg-{{bg}}" id="{{key}}">
+  <div class="container">
+    {{> components/section-head}}
+    <ol class="grid grid-3 steps">
+      {{#each items}}
+      <li class="card step-card reveal">
+        <span class="step-no">{{number}}</span>
+        {{#if icon_svg}}<span class="icon-tile">{{{icon_svg}}}</span>{{/if}}
+        <h3>{{title}}</h3>
+        {{#if body}}<p>{{body}}</p>{{/if}}
+      </li>
+      {{/each}}
+    </ol>
+    {{> components/section-foot}}
+  </div>
+</section>

@@ -489,9 +489,9 @@ test('the Domains page shows nameservers while waiting, escapes everything, and 
   assert.ok(!/\son(click|submit|change)=/.test(admin), 'no inline handlers (CSP)');
 });
 
-test('check-config reports a placeholder setup and exits non-zero', () => {
+test('check-config reports a placeholder setup (the template) and exits non-zero', () => {
   let out = '', code = 0;
-  try { out = execFileSync('node', ['scripts/check-config.mjs'], { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8', env: { PATH: process.env.PATH } }); }
+  try { out = execFileSync('node', ['scripts/check-config.mjs', '--config', 'wrangler.example.jsonc'], { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8', env: { PATH: process.env.PATH } }); }
   catch (e) { code = e.status; out = e.stdout; }
   assert.equal(code, 1);
   assert.match(out, /CF_API_TOKEN/); assert.match(out, /placeholder/);

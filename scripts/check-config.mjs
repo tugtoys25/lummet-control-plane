@@ -2,6 +2,7 @@
 // Checks the control plane's configuration BEFORE you deploy.
 //
 //   node scripts/check-config.mjs                 offline: wrangler.jsonc vars + .dev.vars + process environment
+//   node scripts/check-config.mjs --config wrangler.example.jsonc   check another wrangler file
 //   node scripts/check-config.mjs --online        also asks Cloudflare whether CF_API_TOKEN can do what custom domains need
 //
 // Prints NAMES of missing/invalid settings and what each would break, never values. Exit code 1 when anything that
@@ -30,7 +31,11 @@ function parseJsonc(text) {
 async function readOptional(file) { try { return await readFile(path.join(root, file), "utf8"); } catch { return null; } }
 
 const env = {};
-const wrangler = parseJsonc(await readFile(path.join(root, "wrangler.jsonc"), "utf8"));
+// --config <file> checks another wrangler file (the tests check the template, wrangler.example.jsonc, so they do not
+// depend on your real wrangler.jsonc).
+const configFlag = process.argv.indexOf("--config");
+const configFile = configFlag > -1 && process.argv[configFlag + 1] ? process.argv[configFlag + 1] : "wrangler.jsonc";
+const wrangler = parseJsonc(await readFile(path.join(root, configFile), "utf8"));
 Object.assign(env, wrangler.vars || {});
 const devVars = await readOptional(".dev.vars");
 if (devVars) for (const line of devVars.split("\n")) { const m = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/); if (m && m[2].trim()) env[m[1]] = m[2].trim(); }
@@ -41,7 +46,7 @@ const warn = [];
 for (const i of configIssues({ ...env, ENVIRONMENT: "production" })) problems.push(`${i.key}: ${i.impact}`);
 
 const dbId = wrangler.d1_databases?.[0]?.database_id;
-if (!dbId || /^0+(-0+)*$/.test(dbId)) problems.push("wrangler.jsonc d1_databases[0].database_id is still the placeholder: nothing can be stored");
+if (!dbId || /^0+(-0+)*$/.test(dbId) || /[<>]/.test(dbId)) problems.push("wrangler.jsonc d1_databases[0].database_id is still the placeholder: nothing can be stored");
 for (const [key, label] of [["PORTAL_BASE_URL", "app.example.com"], ["PLATFORM_DOMAIN_SUFFIX", "example.com"], ["WEBAUTHN_RP_ID", "example.com"], ["EMAIL_FROM", "example.com"]]) {
   if (String(env[key] || "").includes(label)) problems.push(`${key} still has the sample value (${label}); replace it with your real one`);
 }

@@ -18,6 +18,7 @@
 // immediately, since the IdP is the trust source for that.
 // =====================================================
 
+import { emailKey } from "./email-key.js";
 import { encryptSecret, decryptSecret } from "./crypto.js";
 import { verifyJwt } from "./jwt.js";
 import { hashPassword } from "./auth.js";
@@ -208,9 +209,9 @@ export async function completeLogin(env, { state, code }, { fetchImpl = fetch } 
     const userId = crypto.randomUUID();
     const unusablePasswordHash = await hashPassword(randomHex(32));
     await env.LUMMET_DB.prepare(
-      `INSERT INTO customer_users (id, email, password_hash, email_verified_at, sso_organization_id) VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)`
+      `INSERT INTO customer_users (id, email, email_key, password_hash, email_verified_at, sso_organization_id) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`
     )
-      .bind(userId, email, unusablePasswordHash, stateRow.organization_id)
+      .bind(userId, email, emailKey(email), unusablePasswordHash, stateRow.organization_id)
       .run();
     user = { id: userId, status: "active" };
   }

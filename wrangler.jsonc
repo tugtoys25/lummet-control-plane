@@ -1,201 +1,210 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "lummet-control-plane",
-  "main": "worker/index.js",
-  "compatibility_date": "2026-01-01",
-  "compatibility_flags": ["nodejs_compat"],
-
-  // Public website assets: templates (public/templates/**) are read by the
-  // Worker through this binding; only /static/* is ever served to visitors
-  // (worker/public-site/router.js), so templates are never exposed as URLs.
-  // run_worker_first keeps every request going through the Worker, which is
-  // required because the SaaS portal, staff console and APIs share this origin.
-  "assets": {
-    "binding": "ASSETS",
-    "directory": "./public",
-    "run_worker_first": true
-  },
-
-  // Bind this Worker's own, independent D1 database.
-  // This database holds ONLY control-plane metadata:
-  // the tenant registry, encrypted credential references,
-  // capability/health cache, Lummet's own admin
-  // accounts/sessions, AND (as of the SaaS merge) every
-  // customer/organization/billing/provisioning/domain/
-  // deployment/job table — see migrations 0006-0017. It
-  // never holds tenant content (casinos, reviews, news,
-  // pages, tenant end-users, etc.) — that stays in each
-  // tenant's own D1, reached only through the tenant
-  // Super API (client.js), never directly (rule #22).
-  "d1_databases": [
-    {
-      "binding": "LUMMET_DB",
-      "database_name": "lummet-control-plane-db",
-      "database_id": "cb72dfd7-71d5-42a0-95c3-ef3efd591506"
-    }
-  ],
-
-  // Workers AI binding for the AI management chat (worker/ai/intent.js).
-  // Same binding name/pattern the tenant repo already uses
-  // (en/worker/ai/*.js -> env.AI.run(...)) -- reused here rather than
-  // introducing a separate provider/dependency. If this binding is
-  // absent, intent.js falls back to a deterministic keyword parser
-  // (see intent.js's fallbackIntent) instead of failing closed.
-  "ai": {
-    "binding": "AI"
-  },
-
-  // R2 bucket for tenant backups (master prompt section 23). Optional —
-  // without it, backups.js fails closed with "backup_storage_not_configured"
-  // rather than pretending to back anything up. Create with:
-  //   wrangler r2 bucket create lummet-backups
-  //
-  // R2 bucket for published tenant template releases (roadmap 0.1) — the
-  // shared build every newly-provisioned site auto-deploys. Optional in
-  // the same fail-closed sense: without it, a new site still provisions
-  // real infrastructure but honestly stops at "provisioned" instead of
-  // "active". Create with:
-  //   wrangler r2 bucket create lummet-tenant-templates
-  "r2_buckets": [
-    { "binding": "BACKUPS", "bucket_name": "lummet-backups" },
-    { "binding": "TENANT_TEMPLATES", "bucket_name": "lummet-tenant-templates" }
-  ],
-
-  // Secrets (set via `wrangler secret put`, never here):
-  //
-  //   CREDENTIAL_KEK          — base64-encoded 32-byte AES-GCM key.
-  //                             Encrypts at rest: tenant Super API
-  //                             HMAC secrets, webhook signing secrets,
-  //                             and TOTP (2FA) secrets. Required.
-  //   WEB_SEARCH_API_KEY — optional. Only used by the AI chat's
-  //                     "/lu-agent <goal>" mode (worker/ai/web-search.js)
-  //                     when it decides a web search would help.
-  //                     Without this set, agent mode still works for
-  //                     reads/writes-preview -- web_search just reports
-  //                     "not configured" instead of a result, and the
-  //                     agent explains that rather than inventing one.
-  //                     Defaults to the Brave Search API's request shape;
-  //                     point WEB_SEARCH_ENDPOINT at a different provider
-  //                     if needed.
-  //
-  //   STRIPE_SECRET_KEY       — Stripe secret key (sk_live_... or
-  //                             sk_test_...). Required for billing
-  //                             (Phase 2) — checkout, cancel, resume,
-  //                             change-plan all fail without it. If
-  //                             unset, billing.js's stripeProvider
-  //                             returns a clear "billing not
-  //                             configured" error rather than a fake
-  //                             success (rule #5 — no fake billing).
-  //   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret
-  //                             (whsec_...), from the endpoint you
-  //                             create for POST
-  //                             /api/billing/webhook/stripe. Required
-  //                             for subscription state to stay in
-  //                             sync with Stripe (renewals, payment
-  //                             failures, cancellations).
-  //
-  //   CF_API_TOKEN            — Cloudflare API token used to
-  //                             provision per-site D1/KV/R2/Worker
-  //                             resources and custom-hostname SSL
-  //                             (Phases 3-4, infra-cloudflare.js).
-  //                             Needs: Account: Workers Scripts:Edit,
-  //                             D1:Edit, Workers KV Storage:Edit,
-  //                             Workers R2 Storage:Edit; Zone: SSL
-  //                             and Certificates:Edit (for custom
-  //                             hostnames) on the zone named by
-  //                             CF_ZONE_ID below. If unset,
-  //                             provisioning jobs fail at the
-  //                             "create Cloudflare resources" step
-  //                             with an explicit error, rather than
-  //                             pretending a site was provisioned.
-  //   CF_ACCOUNT_ID           — the Cloudflare account ID that owns
-  //                             the resources CF_API_TOKEN creates.
-  //   CF_ZONE_ID              — the zone ID of the domain used for
-  //                             SSL-for-SaaS custom hostnames
-  //                             (Phase 4 domain verification/SSL) AND for
-  //                             the per-site routes that make each
-  //                             site's platform hostname reachable.
-  //                             The token also needs Zone: Workers
-  //                             Routes: Edit here. See DEPLOYMENT.md,
-  //                             "How a new site becomes reachable".
-  //
-  //   WEBAUTHN_RP_ID          — the Relying Party ID for passkeys
-  //                             (Phase 7), e.g. "app.lummet.io".
-  //                             Must exactly match the hostname the
-  //                             customer portal is served from — a
-  //                             mismatch fails every ceremony by
-  //                             design (webauthn.js checks this).
-  //   EMAIL_PROVIDER          — set to "resend" to enable transactional
-  //                             email (signup verification, password
-  //                             reset, team invitations). Unset means
-  //                             those messages stay queued in the
-  //                             email_outbox table forever and are
-  //                             never delivered — check
-  //                             /platform/saas/email for a stuck queue.
-  //   RESEND_API_KEY          — Resend API key, required with the above.
-  //   EMAIL_FROM              — e.g. "Lummet <no-reply@yourdomain.com>";
-  //                             must be a domain verified in Resend.
-  //
-  //   WEBAUTHN_ORIGIN         — the full origin passkeys are bound
-  //                             to, e.g. "https://app.lummet.io".
-  //                             Falls back to a same-origin default
-  //                             computed from the request only in
-  //                             local/dev use; set explicitly in
-  //                             production.
-  //
-  // Optional vars:
-  //   CONTACT_EMAIL           — if set, shown on the public homepage's
-  //                             "Get in Touch" section as a mailto link.
-  //                             Left unset by default; the public site
-  //                             shows a neutral fallback instead of an
-  //                             invented address until this is configured.
-  //   PLATFORM_DOMAIN_SUFFIX  — the placeholder domain a newly
-  //                             provisioned site's tenant registry
-  //                             row is given before a real custom
-  //                             domain is attached (Phase 3). Default:
-  //                             "sites.lummet.app" — set this to a
-  //                             domain you actually control.
-  //   CF_WORKERS_DEV_SUBDOMAIN — the workers.dev subdomain used as
-  //                             the deployment health-check target
-  //                             when a site has no verified custom
-  //                             domain yet (Phase 4). Default: "workers".
-  //
-  // Routes / custom domain for the master hostname are configured
-  // separately in the Cloudflare dashboard or via `routes` here.
-  // Deliberately NOT using any hostname starting with "lummet."
-  // to avoid any collision with a tenant's lummet.<host> AI
-  // assistant subdomain — see DEPLOYMENT.md, "Choosing the master
-  // hostname".
-  // PORTAL_BASE_URL is a var, not a secret (it is not sensitive), but it
-  // gates every emailed link: without it, queueEmail() refuses to queue
-  // verification/reset/invitation messages at all rather than emailing a
-  // broken or (worse) attacker-controlled link built from a request Host
-  // header. Set it to the customer portal's real origin, e.g.
-  // "https://app.yourdomain.com".
-  "vars": {
-    "ENVIRONMENT": "production",
-    "CONTACT_EMAIL": "elijul@proton.me",
-    "PORTAL_BASE_URL": ""
-  }
-
-  // NOTE: the scheduled health-check sweep (worker/cron.js,
-  // runHealthChecks/pruneOldAuditLogs) is currently NOT wired to a
-  // Cron Trigger — Workers Free plan doesn't support them, so the
-  // "triggers.crons" block that used to run this every 5 minutes
-  // was removed. Health checks still run fine on-demand: click
-  // "Test connection" on a tenant's page, or "Run all now" on the
-  // Health page (POST /api/tenants/health-check-all). If/when this
-  // moves to a paid plan, re-add:
-  //   "triggers": { "crons": ["*/5 * * * *"] }
-  // and both scheduled() and pruneOldAuditLogs will resume running
-  // automatically — no other code changes needed. Provisioning and
-  // deployment jobs do NOT depend on this trigger: they run via
-  // ctx.waitUntil() at the moment they're started (see
-  // provisioning.startProvisioning / deployments.runJob call sites
-  // in index.js), so they progress in the background of that one
-  // request without a cron. Since v7D a maintenance sweep (every tick of
-  // POST /api/ops/alert-check, or of a Cron Trigger) restarts lost jobs,
-  // retries failed provisioning with backoff and dead-letters what keeps
-  // failing; webhook deliveries are retried the same way. Point an external
-  // pinger at /api/ops/alert-check every 5 minutes. See docs/DURABLE_JOBS.md.
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "lummet-control-plane",
+	"main": "worker/index.js",
+  "preview_urls": false,
+	"compatibility_date": "2026-01-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	// Public website assets: templates (public/templates/**) are read by the
+	// Worker through this binding; only /static/* is ever served to visitors
+	// (worker/public-site/router.js), so templates are never exposed as URLs.
+	// run_worker_first keeps every request going through the Worker, which is
+	// required because the SaaS portal, staff console and APIs share this origin.
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "./public",
+		"run_worker_first": true
+	},
+	// Bind this Worker's own, independent D1 database.
+	// This database holds ONLY control-plane metadata:
+	// the tenant registry, encrypted credential references,
+	// capability/health cache, Lummet's own admin
+	// accounts/sessions, AND (as of the SaaS merge) every
+	// customer/organization/billing/provisioning/domain/
+	// deployment/job table — see migrations 0006-0017. It
+	// never holds tenant content (casinos, reviews, news,
+	// pages, tenant end-users, etc.) — that stays in each
+	// tenant's own D1, reached only through the tenant
+	// Super API (client.js), never directly (rule #22).
+	"d1_databases": [
+		{
+			"binding": "LUMMET_DB",
+			"database_name": "lummet-control-plane-db",
+			"database_id": "7e73855b-a939-43bf-8e64-b38c4d4bce72"
+		}
+	],
+	// Workers AI binding for the AI management chat (worker/ai/intent.js).
+	// Same binding name/pattern the tenant repo already uses
+	// (en/worker/ai/*.js -> env.AI.run(...)) -- reused here rather than
+	// introducing a separate provider/dependency. If this binding is
+	// absent, intent.js falls back to a deterministic keyword parser
+	// (see intent.js's fallbackIntent) instead of failing closed.
+	"ai": {
+		"binding": "AI"
+	},
+	// R2 bucket for tenant backups (master prompt section 23). Optional —
+	// without it, backups.js fails closed with "backup_storage_not_configured"
+	// rather than pretending to back anything up. Create with:
+	//   wrangler r2 bucket create lummet-backups
+	//
+	// R2 bucket for published tenant template releases (roadmap 0.1) — the
+	// shared build every newly-provisioned site auto-deploys. Optional in
+	// the same fail-closed sense: without it, a new site still provisions
+	// real infrastructure but honestly stops at "provisioned" instead of
+	// "active". Create with:
+	//   wrangler r2 bucket create lummet-tenant-templates
+	"r2_buckets": [
+		{
+			"binding": "BACKUPS",
+			"bucket_name": "lummet-backups"
+		},
+		{
+			"binding": "TENANT_TEMPLATES",
+			"bucket_name": "lummet-tenant-templates"
+		}
+	],
+	// Secrets (set via `wrangler secret put`, never here):
+	//
+	//   CREDENTIAL_KEK          — base64-encoded 32-byte AES-GCM key.
+	//                             Encrypts at rest: tenant Super API
+	//                             HMAC secrets, webhook signing secrets,
+	//                             and TOTP (2FA) secrets. Required.
+	//   WEB_SEARCH_API_KEY — optional. Only used by the AI chat's
+	//                     "/lu-agent <goal>" mode (worker/ai/web-search.js)
+	//                     when it decides a web search would help.
+	//                     Without this set, agent mode still works for
+	//                     reads/writes-preview -- web_search just reports
+	//                     "not configured" instead of a result, and the
+	//                     agent explains that rather than inventing one.
+	//                     Defaults to the Brave Search API's request shape;
+	//                     point WEB_SEARCH_ENDPOINT at a different provider
+	//                     if needed.
+	//
+	//   STRIPE_SECRET_KEY       — Stripe secret key (sk_live_... or
+	//                             sk_test_...). Required for billing
+	//                             (Phase 2) — checkout, cancel, resume,
+	//                             change-plan all fail without it. If
+	//                             unset, billing.js's stripeProvider
+	//                             returns a clear "billing not
+	//                             configured" error rather than a fake
+	//                             success (rule #5 — no fake billing).
+	//   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret
+	//                             (whsec_...), from the endpoint you
+	//                             create for POST
+	//                             /api/billing/webhook/stripe. Required
+	//                             for subscription state to stay in
+	//                             sync with Stripe (renewals, payment
+	//                             failures, cancellations).
+	//
+	//   CF_API_TOKEN            — Cloudflare API token used to
+	//                             provision per-site D1/KV/R2/Worker
+	//                             resources and custom-hostname SSL
+	//                             (Phases 3-4, infra-cloudflare.js).
+	//                             Needs: Account: Workers Scripts:Edit,
+	//                             D1:Edit, Workers KV Storage:Edit,
+	//                             Workers R2 Storage:Edit; Zone: SSL
+	//                             and Certificates:Edit (for custom
+	//                             hostnames) on the zone named by
+	//                             CF_ZONE_ID below. If unset,
+	//                             provisioning jobs fail at the
+	//                             "create Cloudflare resources" step
+	//                             with an explicit error, rather than
+	//                             pretending a site was provisioned.
+	//   CF_ACCOUNT_ID           — the Cloudflare account ID that owns
+	//                             the resources CF_API_TOKEN creates.
+	//   CF_ZONE_ID              — the zone ID of the domain used for
+	//                             SSL-for-SaaS custom hostnames
+	//                             (Phase 4 domain verification/SSL) AND for
+	//                             the per-site routes that make each
+	//                             site's platform hostname reachable.
+	//                             The token also needs Zone: Workers
+	//                             Routes: Edit here. See DEPLOYMENT.md,
+	//                             "How a new site becomes reachable".
+	//
+	//   WEBAUTHN_RP_ID          — the Relying Party ID for passkeys
+	//                             (Phase 7), e.g. "app.lummet.io".
+	//                             Must exactly match the hostname the
+	//                             customer portal is served from — a
+	//                             mismatch fails every ceremony by
+	//                             design (webauthn.js checks this).
+	//   EMAIL_PROVIDER          — set to "resend" to enable transactional
+	//                             email (signup verification, password
+	//                             reset, team invitations). Unset means
+	//                             those messages stay queued in the
+	//                             email_outbox table forever and are
+	//                             never delivered — check
+	//                             /platform/saas/email for a stuck queue.
+	//   RESEND_API_KEY          — Resend API key, required with the above.
+	//   EMAIL_FROM              — e.g. "Lummet <no-reply@yourdomain.com>";
+	//                             must be a domain verified in Resend.
+	//
+	//   WEBAUTHN_ORIGIN         — the full origin passkeys are bound
+	//                             to, e.g. "https://app.lummet.io".
+	//                             Falls back to a same-origin default
+	//                             computed from the request only in
+	//                             local/dev use; set explicitly in
+	//                             production.
+	//
+	// Optional vars:
+	//   CONTACT_EMAIL           — if set, shown on the public homepage's
+	//                             "Get in Touch" section as a mailto link.
+	//                             Left unset by default; the public site
+	//                             shows a neutral fallback instead of an
+	//                             invented address until this is configured.
+	//   PLATFORM_DOMAIN_SUFFIX  — the placeholder domain a newly
+	//                             provisioned site's tenant registry
+	//                             row is given before a real custom
+	//                             domain is attached (Phase 3). Default:
+	//                             "sites.lummet.app" — set this to a
+	//                             domain you actually control.
+	//   CF_WORKERS_DEV_SUBDOMAIN — the workers.dev subdomain used as
+	//                             the deployment health-check target
+	//                             when a site has no verified custom
+	//                             domain yet (Phase 4). Default: "workers".
+	//
+	// Routes / custom domain for the master hostname are configured
+	// separately in the Cloudflare dashboard or via `routes` here.
+	// Deliberately NOT using any hostname starting with "lummet."
+	// to avoid any collision with a tenant's lummet.<host> AI
+	// assistant subdomain — see DEPLOYMENT.md, "Choosing the master
+	// hostname".
+	// PORTAL_BASE_URL is a var, not a secret (it is not sensitive), but it
+	// gates every emailed link: without it, queueEmail() refuses to queue
+	// verification/reset/invitation messages at all rather than emailing a
+	// broken or (worse) attacker-controlled link built from a request Host
+	// header. Set it to the customer portal's real origin, e.g.
+	// "https://app.yourdomain.com".
+	"workers_dev": true,
+	"routes": [{ "pattern": "luminousagents.com", "custom_domain": true }],
+	"vars": {
+		"ENVIRONMENT": "production",
+		"PLATFORM_DOMAIN_SUFFIX": "genteelisms.com",
+		"CONTACT_EMAIL": "elijul@proton.me",
+		"PORTAL_BASE_URL": "https://luminousagents.com",
+		"CF_WORKERS_DEV_SUBDOMAIN": "tugtoys25",
+		"WEBAUTHN_RP_ID": "luminousagents.com",
+		"WEBAUTHN_ORIGIN": "https://luminousagents.com"
+	}
+	// NOTE: the scheduled health-check sweep (worker/cron.js,
+	// runHealthChecks/pruneOldAuditLogs) is currently NOT wired to a
+	// Cron Trigger — Workers Free plan doesn't support them, so the
+	// "triggers.crons" block that used to run this every 5 minutes
+	// was removed. Health checks still run fine on-demand: click
+	// "Test connection" on a tenant's page, or "Run all now" on the
+	// Health page (POST /api/tenants/health-check-all). If/when this
+	// moves to a paid plan, re-add:
+	//   "triggers": { "crons": ["*/5 * * * *"] }
+	// and both scheduled() and pruneOldAuditLogs will resume running
+	// automatically — no other code changes needed. Provisioning and
+	// deployment jobs do NOT depend on this trigger: they run via
+	// ctx.waitUntil() at the moment they're started (see
+	// provisioning.startProvisioning / deployments.runJob call sites
+	// in index.js), so they progress in the background of that one
+	// request without a cron. Since v7D a maintenance sweep (every tick of
+	// POST /api/ops/alert-check, or of a Cron Trigger) restarts lost jobs,
+	// retries failed provisioning with backoff and dead-letters what keeps
+	// failing; webhook deliveries are retried the same way. Point an external
+	// pinger at /api/ops/alert-check every 5 minutes. See docs/DURABLE_JOBS.md.
 }

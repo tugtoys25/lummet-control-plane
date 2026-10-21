@@ -63,3 +63,62 @@ test('a cancelled/expired prior subscription still counts as "already used a tri
   const r = await plans.startTrialSubscription(e, org2.organizationId, 'plan_casino_news_starter');
   assert.equal(r.error, 'trial_already_used');
 });
+
+// ---- v7G: trivially different spellings of the same address ----
+import { emailKey } from '../worker/email-key.js';
+import { readFileSync } from 'node:fs';
+import { splitSqlStatements } from './support/d1-shim.js';
+
+const CASES = [
+  ['Person@Example.com', 'person@example.com'], ['person+trial2@example.com', 'person@example.com'], ['  PERSON+x+y@EXAMPLE.COM ', 'person@example.com'],
+  ['first.last@example.com', 'first.last@example.com'], ['f.i.r.s.t+z@gmail.com', 'first@gmail.com'], ['First.Last@GoogleMail.com', 'firstlast@gmail.com'],
+  ['+weird@example.com', '+weird@example.com'], ['a@b', 'a@b'], ['nodomain', 'nodomain'], ['', '']
+];
+
+test('emailKey: lower case, +tag removed, Gmail dots and googlemail unified, other dots kept', () => {
+  for (const [input, expected] of CASES) assert.equal(emailKey(input), expected, input);
+});
+
+test('the SQL backfill in the migration computes exactly what emailKey() does', async () => {
+  const e = env(); const db = e.LUMMET_DB;
+  // Use real rows: addresses as typed, key cleared, then run the migration's UPDATE statements again.
+  await db.prepare(`DELETE FROM customer_users`).run();
+  const inputs = CASES.map((c) => c[0]).filter((i) => i.trim() && i.includes('@') && !i.startsWith('+'));
+  for (const input of inputs) await db.prepare(`INSERT INTO customer_users (id, email, password_hash) VALUES (?, ?, 'x')`).bind(crypto.randomUUID(), input).run();
+  const sql = readFileSync(new URL('../migrations/0042_customer_email_key.sql', import.meta.url), 'utf8');
+  for (const stmt of splitSqlStatements(sql).filter((s) => s.trim().toUpperCase().startsWith('UPDATE'))) await db.prepare(stmt).run();
+  for (const input of inputs) {
+    const row = await db.prepare(`SELECT email_key k FROM customer_users WHERE email = ?`).bind(input).first();
+    assert.equal(row.k, emailKey(input), input);
+  }
+});
+
+test('a +tag or Gmail-dot variant of an address that already had a trial is refused; a different mailbox is not', async () => {
+  const e = env();
+  const first = await customerAuth.signUp(fakeSignupRequest('Some.One@Gmail.com', 'Org 1'), e);
+  assert.ok((await plans.startTrialSubscription(e, first.organizationId, 'plan_casino_news_starter')).ok);
+  for (const variant of ['someone@gmail.com', 'some.one+promo@gmail.com', 'S.o.m.e.O.n.e@googlemail.com']) {
+    const s = await customerAuth.signUp(fakeSignupRequest(variant, 'Org ' + variant), e);
+    assert.equal(s.ok, true, variant);
+    const r = await plans.startTrialSubscription(e, s.organizationId, 'plan_casino_news_starter');
+    assert.equal(r.ok, false, variant); assert.equal(r.error, 'trial_already_used', variant);
+  }
+  const other = await customerAuth.signUp(fakeSignupRequest('someone.else@gmail.com', 'Other'), e);
+  assert.ok((await plans.startTrialSubscription(e, other.organizationId, 'plan_casino_news_starter')).ok);
+});
+
+test('a +tag on a non-Gmail address is also the same person; dots elsewhere are significant', async () => {
+  const e = env();
+  const a = await customerAuth.signUp(fakeSignupRequest('jo.hn@company.example', 'A'), e);
+  await plans.startTrialSubscription(e, a.organizationId, 'plan_casino_news_starter');
+  const tagged = await customerAuth.signUp(fakeSignupRequest('jo.hn+two@company.example', 'B'), e);
+  assert.equal((await plans.startTrialSubscription(e, tagged.organizationId, 'plan_casino_news_starter')).error, 'trial_already_used');
+  const dotless = await customerAuth.signUp(fakeSignupRequest('john@company.example', 'C'), e);
+  assert.ok((await plans.startTrialSubscription(e, dotless.organizationId, 'plan_casino_news_starter')).ok, 'outside Gmail, dots can be a different mailbox');
+});
+
+test('new accounts always get a key (signup stores it)', async () => {
+  const e = env();
+  await customerAuth.signUp(fakeSignupRequest('Key.Test+1@Example.com', 'Org'), e);
+  assert.equal((await e.LUMMET_DB.prepare(`SELECT email_key k FROM customer_users`).first()).k, 'key.test@example.com');
+});

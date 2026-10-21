@@ -241,8 +241,13 @@ test('the pinger tick erases a due organization without any other trigger', asyn
   await e.LUMMET_DB.prepare(`UPDATE organizations SET scheduled_deletion_at = ? WHERE id = ?`).bind(past(), a.org).run();
   const h = new Headers({ Authorization: 'Bearer tok', 'CF-Connecting-IP': '198.51.100.250' });
   assert.equal((await worker.fetch(new Request('https://cp.test/api/ops/alert-check', { method: 'POST', headers: h }), e, ctx)).status, 200);
-  await new Promise((r) => setTimeout(r, 100));
-  assert.ok((await e.LUMMET_DB.prepare(`SELECT erased_at FROM organizations WHERE id = ?`).bind(a.org).first()).erased_at);
+  // Erasure runs in the background (waitUntil): wait for it rather than guessing how long a loaded machine needs.
+  let erasedAt = null;
+  for (let i = 0; i < 100 && !erasedAt; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    erasedAt = (await e.LUMMET_DB.prepare(`SELECT erased_at FROM organizations WHERE id = ?`).bind(a.org).first()).erased_at;
+  }
+  assert.ok(erasedAt);
 });
 
 test('v6A: erasing an organization also removes coupons reserved for it, and leaves shared coupons alone', async () => {

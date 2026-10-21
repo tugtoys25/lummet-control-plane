@@ -57,9 +57,13 @@ export async function getActiveSubscription(env, organizationId) {
  * catches the straightforward "cancel and sign up again under a new
  * org with the same email" pattern.
  *
+ * v7G: addresses are compared by email_key (lower case, "+tag" removed,
+ * Gmail dots and googlemail.com unified), so a trivial variant of the
+ * same address no longer gets a second trial.
+ *
  * NOT covered by this check, and explicitly flagged rather than
- * silently assumed solved: an operator using a fresh email address
- * each time. Closing that needs a payment-method fingerprint (e.g. a
+ * silently assumed solved: an operator using a genuinely different
+ * email address each time. Closing that needs a payment-method fingerprint (e.g. a
  * Stripe SetupIntent collected before the trial, without charging it)
  * or an email-verification-provider risk signal — either requires a
  * live account this environment cannot exercise, so it isn't built
@@ -73,8 +77,8 @@ async function hasPriorTrialElsewhere(env, organizationId) {
      JOIN organization_users ou ON ou.organization_id = s.organization_id
      JOIN customer_users u ON u.id = ou.user_id
      WHERE s.organization_id != ?
-       AND u.email IN (
-         SELECT cu.email FROM organization_users mou
+       AND u.email_key IN (
+         SELECT cu.email_key FROM organization_users mou
          JOIN customer_users cu ON cu.id = mou.user_id
          WHERE mou.organization_id = ?
        )`

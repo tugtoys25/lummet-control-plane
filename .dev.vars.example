@@ -1,0 +1,62 @@
+# Copy to .dev.vars for local `wrangler dev`, and set the SAME names in production with:
+#   wrangler secret put NAME          (one at a time; the value is read from the prompt, never from a file)
+# NEVER commit a real .dev.vars. Values below are placeholders.
+#
+# `node scripts/check-config.mjs` reports what is missing and what it would break.
+
+# ---------------------------------------------------------------- required for the platform to work at all
+# Encrypts every stored secret (tenant credentials, queued emails). `openssl rand -base64 32`.
+# Losing it means every tenant credential must be rotated. Rotation procedure: docs/KEY_ROTATION.md.
+CREDENTIAL_KEK=
+# During a key rotation only (the OLD key):
+# CREDENTIAL_KEK_PREVIOUS=
+
+# ---------------------------------------------------------------- Cloudflare (provisioning, deployments, custom domains)
+# API token created at https://dash.cloudflare.com/profile/api-tokens with ALL of these permissions:
+#   Account  > Workers Scripts : Edit          (upload site Workers, attach custom domains)
+#   Account  > Workers KV Storage : Edit
+#   Account  > Workers R2 Storage : Edit
+#   Account  > D1 : Edit
+#   Account  > Account Settings : Read
+#   Zone     > Zone : Edit                     (create the customer's zone for nameserver delegation)   <- custom domains
+#   Zone     > DNS : Edit                      (review/import/add the customer's DNS records)             <- custom domains
+#   Zone     > Workers Routes : Edit           (route the platform hostname)
+#   Account resources: Include > the platform account.  Zone resources: Include > All zones from the platform account.
+CF_API_TOKEN=
+CF_ACCOUNT_ID=
+# Zone id of PLATFORM_DOMAIN_SUFFIX (the zone that holds <slug>.sites.example.com and its wildcard record).
+CF_ZONE_ID=
+
+# ---------------------------------------------------------------- billing (Stripe)
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+# During a webhook secret rollover only:
+# STRIPE_WEBHOOK_SECRET_PREVIOUS=
+
+# ---------------------------------------------------------------- email (Resend)
+RESEND_API_KEY=
+
+# ---------------------------------------------------------------- operations
+# Bearer token for POST /api/ops/alert-check (the maintenance tick; see wrangler.jsonc). `openssl rand -hex 32`.
+ALERT_CHECK_TOKEN=
+# Where alerts go (either or both).
+ALERT_WEBHOOK_URL=
+ALERT_EMAIL=
+
+# ---------------------------------------------------------------- optional
+# Single-subdomain custom domains (docs/CUSTOM_DOMAINS.md). Default: customers.<PLATFORM_DOMAIN_SUFFIX>.
+# PLATFORM_CNAME_TARGET=
+# Set to "off" to disable connecting subdomains by CNAME.
+# SUBDOMAIN_CNAME_FLOW=
+# Cloudflare Turnstile for the sites' own login pages (the widget must allow the sites' hostnames).
+# TENANT_TURNSTILE_SITEKEY=
+# TENANT_TURNSTILE_SECRET=
+# Where visitor contact/demo form submissions are forwarded.
+# INQUIRY_WEBHOOK_URL=
+# Web search for the staff AI assistant.
+# WEB_SEARCH_ENDPOINT=
+# WEB_SEARCH_API_KEY=
+# Set to "off" ONLY to debug; it disables the private-address check on customer webhook/SSO hostnames.
+# OUTBOUND_DNS_CHECK=off
+# Load testing only (docs/LOAD_TESTING.md): never set in production.
+# LOADTEST_PASSWORD=

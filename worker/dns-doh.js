@@ -18,7 +18,14 @@ const TXT_RECORD_TYPE = 16;
 
 export async function lookupTXT(hostname) {
   const url = `${DOH_ENDPOINT}?name=${encodeURIComponent(hostname)}&type=TXT`;
-  const response = await fetch(url, { headers: { Accept: "application/dns-json" } });
+  // A resolver that cannot be reached is "no record found yet" to the caller (verification just reports not verified
+  // and can be retried), never an exception that turns a customer's Verify click into a 500.
+  let response;
+  try {
+    response = await fetch(url, { headers: { Accept: "application/dns-json" }, signal: AbortSignal.timeout(5000) });
+  } catch (_) {
+    return [];
+  }
 
   if (!response.ok) return [];
 
@@ -51,6 +58,51 @@ export async function lookupAddresses(hostname, fetchImpl = fetch) {
   try {
     const [a, aaaa] = await Promise.all([one("A"), one("AAAA")]);
     return { ok: true, addresses: [...a, ...aaaa].filter(Boolean) };
+  } catch (_) {
+    return { ok: false };
+  }
+}
+
+
+const NS_RECORD_TYPE = 2;
+
+/**
+ * The nameservers public DNS currently returns for a domain (lower case, no trailing dot). { ok: true, nameServers }
+ * or { ok: false } when the lookup itself failed. Used only to SHOW progress ("your registrar now lists our
+ * nameservers"); whether a domain is really active is always Cloudflare's answer, never this one.
+ */
+export async function lookupNS(hostname, fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl(`${DOH_ENDPOINT}?name=${encodeURIComponent(hostname)}&type=NS`, {
+      headers: { Accept: "application/dns-json" }, signal: AbortSignal.timeout(4000)
+    });
+    if (!response.ok) return { ok: false };
+    const data = await response.json();
+    const names = (Array.isArray(data.Answer) ? data.Answer : []).filter((r) => r.type === NS_RECORD_TYPE)
+      .map((r) => String(r.data || "").toLowerCase().replace(/\.$/, "")).filter(Boolean);
+    return { ok: true, nameServers: [...new Set(names)].sort() };
+  } catch (_) {
+    return { ok: false };
+  }
+}
+
+
+const CNAME_RECORD_TYPE = 5;
+
+/**
+ * The CNAME chain public DNS returns for a hostname (targets lower case, no trailing dot). { ok, targets }.
+ * Progress display only ("we can see your CNAME"); the TXT record is what proves ownership.
+ */
+export async function lookupCNAME(hostname, fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl(`${DOH_ENDPOINT}?name=${encodeURIComponent(hostname)}&type=CNAME`, {
+      headers: { Accept: "application/dns-json" }, signal: AbortSignal.timeout(4000)
+    });
+    if (!response.ok) return { ok: false };
+    const data = await response.json();
+    const targets = (Array.isArray(data.Answer) ? data.Answer : []).filter((r) => r.type === CNAME_RECORD_TYPE)
+      .map((r) => String(r.data || "").toLowerCase().replace(/\.$/, "")).filter(Boolean);
+    return { ok: true, targets };
   } catch (_) {
     return { ok: false };
   }

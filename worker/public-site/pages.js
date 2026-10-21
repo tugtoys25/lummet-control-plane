@@ -5,6 +5,7 @@
 // JSON-LD, then renders through renderPage().
 // =====================================================
 
+import * as pricingRepo from "../repositories/pricing.js";
 import * as data from "./data.js";
 import { brandModel, updateModel, publicationModel, partnerModel, authorModel, typeLabel } from "./models.js";
 import { PAGE_ALIASES } from "./links.js";
@@ -346,4 +347,86 @@ export async function notFoundPage(ctx) {
   const { site, ui } = ctx.siteCtx;
   const head = buildHead({ site, title: ui.not_found_title || "", description: "", path: ctx.url.pathname, noindex: true });
   return renderPage(ctx, { template: "404", data: {}, head, status: 404, bodyClass: "page-404" });
+}
+
+
+// -------------------------------------------------------------- pricing (v7G)
+
+const MONEY = (cents, currency) => {
+  const amount = cents / 100;
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", minimumFractionDigits: Number.isInteger(amount) ? 0 : 2 }).format(amount);
+  } catch (_) { return `${amount} ${currency || ""}`.trim(); }
+};
+const count = (v, one, many) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? `${n} ${n === 1 ? one : many}` : null; };
+
+/** The feature lines for a plan, from its entitlements. Only things a visitor can act on. */
+export function pricingFeatures(ent) {
+  const out = [
+    count(ent["sites.max"], "site", "sites"),
+    count(ent["domains.custom.max"], "custom domain", "custom domains"),
+    count(ent["users.max"], "team member", "team members"),
+    count(ent["ai.credits_monthly"], "AI credit a month", "AI credits a month"),
+    ent["analytics.level"] && ent["analytics.level"] !== "none" ? `${ent["analytics.level"][0].toUpperCase()}${ent["analytics.level"].slice(1)} analytics` : null,
+    ent["reports.enabled"] === "true" ? "Scheduled reports" : null,
+    ent["alerts.enabled"] === "true" ? "Alerts" : null,
+    ent["affiliate.enabled"] === "true" ? "Affiliate tools" : null,
+    ent["api.enabled"] === "true" ? "API access" : null
+  ];
+  return out.filter(Boolean);
+}
+
+/** Groups plans by product for one billing period; an annual plan says what it saves against its monthly twin. */
+export function pricingGroups(plans, period, ui = {}) {
+  const monthlyOf = new Map();
+  for (const p of plans) if (p.billing_period === "monthly") monthlyOf.set(`${p.product_id}|${p.name}`, p);
+  const groups = new Map();
+  for (const p of plans.filter((x) => x.billing_period === period)) {
+    const base = p.name.replace(/ \(annual\)$/, "");
+    const monthly = period === "annual" ? monthlyOf.get(`${p.product_id}|${base}`) : null;
+    let saving = "";
+    if (monthly && monthly.price_cents * 12 > p.price_cents) {
+      saving = (ui.pricing_saving || "Save {pct}% compared with paying monthly").replace("{pct}", String(Math.round((1 - p.price_cents / (monthly.price_cents * 12)) * 100)));
+    }
+    if (!groups.has(p.product_id)) groups.set(p.product_id, { name: p.product_name, category: p.category || "", plans: [] });
+    groups.get(p.product_id).plans.push({
+      name: base,
+      price: MONEY(p.price_cents, p.currency),
+      period: period === "annual" ? (ui.pricing_per_year || "per year") : (ui.pricing_per_month || "per month"),
+      trial: p.trial_days > 0 ? (ui.pricing_trial || "{n}-day free trial").replace("{n}", String(p.trial_days)) : "",
+      saving,
+      features: pricingFeatures(p.entitlements)
+    });
+  }
+  return [...groups.values()];
+}
+
+export async function pricingPage(ctx) {
+  const { site, settings, ui } = ctx.siteCtx;
+  const plans = await pricingRepo.listPricing(ctx.env);
+  const hasAnnual = plans.some((p) => p.billing_period === "annual");
+  const period = hasAnnual && ctx.url.searchParams.get("billing") === "annual" ? "annual" : "monthly";
+  const groups = pricingGroups(plans, period, ui);
+  const heading = intro(settings, "pricing", ui.title_pricing || "Pricing");
+  const description = heading.intro || `Plans and prices for ${site.name}.`;
+  const head = buildHead({
+    site,
+    title: heading.title,
+    description,
+    path: "/pricing",
+    noindex: groups.length === 0,
+    jsonLd: [
+      { "@type": "WebPage", name: heading.title, url: absoluteUrl(site, "/pricing") },
+      breadcrumbLd(site, [crumb(ui.crumb_home, "/"), crumb(heading.title, "/pricing")])
+    ]
+  });
+  return renderPage(ctx, {
+    template: "pricing",
+    data: {
+      ...heading, intro: description, groups, has_groups: groups.length > 0, has_annual: hasAnnual, monthly: period === "monthly", annual: period === "annual",
+      crumbs: crumbs([crumb(ui.crumb_home, "/"), crumb(heading.title, "/pricing")])
+    },
+    head,
+    bodyClass: "page-pricing"
+  });
 }

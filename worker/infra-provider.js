@@ -46,7 +46,7 @@
  *   Creates or updates (same call either way, matching Cloudflare's
  *   own PUT-is-upsert semantics) a Worker script's code.
  *
- * @property {(env: Object, params: {databaseId: string, sql: string}) => Promise<{ok: boolean, results: ?Array}>} runD1Query
+ * @property {(env: Object, params: {databaseId: string, sql: string, params?: Array}) => Promise<{ok: boolean, results: ?Array}>} runD1Query
  *   Executes one SQL statement against a remote D1 database — used
  *   to apply a site's own tenant-application migrations.
  *
@@ -64,5 +64,33 @@
  *   URL — kept on the provider interface (rather than an ad-hoc
  *   fetch in deployments.js) so it's fakeable the same way as every
  *   other network-touching call in this codebase.
+ *
+ * --- v1 additions (custom domains by nameserver delegation; see docs/CUSTOM_DOMAINS.md) ---
+ *
+ * @property {(env: Object, params: {name: string}) => Promise<{zoneId: string, nameServers: string[], originalNameServers: string[], cfStatus: string, status: 'pending'|'active'|'gone'}>} createZone
+ * @property {(env: Object, zoneId: string) => Promise<{zoneId: string, nameServers: string[], cfStatus: string, status: 'pending'|'active'|'gone'}>} getZone
+ *   status 'gone' = the zone was deleted/moved/deactivated or no longer exists.
+ * @property {(env: Object, zoneId: string) => Promise<{ok: boolean}>} requestActivationCheck
+ * @property {(env: Object, zoneId: string) => Promise<{ok: boolean}>} deleteZone
+ * @property {(env: Object, zoneId: string) => Promise<{ok: boolean}>} triggerDnsScan
+ * @property {(env: Object, zoneId: string) => Promise<Array<{id: string, type: string, name: string, content: string, ttl: number, proxied: boolean, priority: ?number}>>} listScannedRecords
+ * @property {(env: Object, zoneId: string, ids?: string[]) => Promise<{ok: boolean, accepted: number}>} acceptScannedRecords
+ * @property {(env: Object, zoneId: string) => Promise<Array<{id: string, type: string, name: string, content: string, ttl: number, proxied: boolean, priority: ?number}>>} listDnsRecords
+ * @property {(env: Object, zoneId: string, record: {type: string, name: string, content: string, ttl?: number, priority?: number, proxied?: boolean}) => Promise<{id: string}>} createDnsRecord
+ * @property {(env: Object, zoneId: string, recordId: string) => Promise<{ok: boolean}>} deleteDnsRecord
+ * @property {(env: Object, params: {hostname: string, workerName: string, zoneId: string, zoneName: string}) => Promise<{customDomainId: ?string}>} attachWorkerDomain
+ *   Serves a hostname of a delegated zone from a site's Worker (Cloudflare adds the DNS record and certificate).
+ * @property {(env: Object, customDomainId: string) => Promise<{ok: boolean}>} detachWorkerDomain
+ *
+ * --- v1.1 additions (single subdomains through Cloudflare for SaaS custom hostnames) ---
+ *
+ * @property {(env: Object) => Promise<{origin: ?string, status: string}>} getFallbackOrigin
+ *   The SaaS zone's fallback origin. status is "active" only when custom hostnames can really be served.
+ * @property {(env: Object, params: {origin: string}) => Promise<{ok: boolean}>} setFallbackOrigin
+ * @property {(env: Object, resourceId: string) => Promise<{status: 'pending'|'active'|'failed', hostnameStatus: string, records: Array<{type: string, name: string, value: string}>}>} getCustomHostnameDetail
+ *   Like getCustomHostnameStatus, plus any DNS records Cloudflare still wants the customer to add (ownership TXT,
+ *   certificate validation) so the dashboard can show them.
+ *
+ * createCustomHostname additionally returns { records } with the same shape.
  */
 export const CONTRACT_VERSION = 1;

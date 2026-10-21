@@ -198,6 +198,11 @@ test('staff can create and verify a backup from the console; anonymous callers c
   await e.LUMMET_DB.prepare(`UPDATE control_plane_backups SET created_at = datetime('now','-3 days')`).run();
   const tick = await call(e, 'POST', '/api/ops/alert-check', null, null, { Authorization: 'Bearer tok-123' });
   assert.equal(tick.status, 200);
-  await new Promise((r) => setTimeout(r, 50));
-  assert.equal((await e.LUMMET_DB.prepare(`SELECT COUNT(*) n FROM control_plane_backups WHERE status='complete'`).first()).n, 2);
+  // The backup runs in the background (waitUntil); wait for it instead of guessing how long a loaded machine needs.
+  let done = 0;
+  for (let i = 0; i < 100 && done < 2; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    done = (await e.LUMMET_DB.prepare(`SELECT COUNT(*) n FROM control_plane_backups WHERE status='complete'`).first()).n;
+  }
+  assert.equal(done, 2);
 });

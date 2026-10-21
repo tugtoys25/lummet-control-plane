@@ -4,6 +4,7 @@
 // Every mutating function returns {ok, ...} and the route layer
 // audits it — staff actions never bypass audit logging.
 // =====================================================
+import * as domainZonesRepo from "./repositories/domain-zones.js";
 import * as orgLifecycle from "./repositories/org-lifecycle.js";
 import * as couponRepo from "./repositories/coupons.js";
 import * as sites from "./sites.js";
@@ -277,11 +278,16 @@ const off = (n) => Math.min(Math.max(Math.floor(Number(n)) || 0, 0), 500000);
 
 export async function listAllDomains(env, { status = "", limit = 100, offset = 0 } = {}) {
   const r = await env.LUMMET_DB.prepare(
-    `SELECT d.id, d.hostname, d.status, d.ssl_status, d.is_primary, d.created_at, d.dns_verified_at, s.id AS site_id, s.name AS site, o.id AS organization_id, o.name AS organization
+    `SELECT d.id, d.hostname, d.method, d.failure_reason, d.status, d.ssl_status, d.is_primary, d.created_at, d.dns_verified_at, s.id AS site_id, s.name AS site, o.id AS organization_id, o.name AS organization
      FROM domains d JOIN sites s ON s.id = d.site_id JOIN organizations o ON o.id = s.organization_id
      WHERE (? = '' OR d.status = ?) ORDER BY d.created_at DESC, d.id LIMIT ? OFFSET ?`
   ).bind(status, status, cap(limit), off(offset)).all();
   return r.results;
+}
+
+/** Delegated domains (nameserver flow) across all organizations, for the staff Domains screen. */
+export async function listAllZones(env, opts = {}) {
+  return (await domainZonesRepo.listAllForStaff(env, opts)).map((z) => ({ ...z, name_servers: JSON.parse(z.name_servers || "[]") }));
 }
 
 export async function listAllDeployments(env, { status = "", limit = 100, offset = 0 } = {}) {

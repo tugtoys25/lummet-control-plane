@@ -50,6 +50,14 @@
 // routes return a JSON 401.
 // =====================================================
 
+import { observe } from "./observability.js";
+import * as healthRepo from "./repositories/health.js";
+import * as requestErrorsRepo from "./repositories/request-errors.js";
+import * as tenantLinks from "./tenant-links.js";
+import * as automationSweep from "./automation-sweep.js";
+import * as tenantAdmin from "./tenant-admin.js";
+import * as notificationsRepo from "./repositories/notifications.js";
+import { renderInsightAnalytics, renderInsightReports, renderInsightCampaigns, renderInsightAlerts, renderInsightNotifications, renderInsightSearch, renderInsightContent } from "./views/customer-pages/insights.js";
 import { finalizeResponse, handleCspReport } from "./csp.js";
 import * as auth from "./auth.js";
 import * as registry from "./registry.js";
@@ -77,6 +85,7 @@ import { provisioning } from "./provisioning.js";
 import * as jobsModule from "./jobs.js";
 import * as jobRunner from "./job-runner.js";
 import { domains } from "./domains.js";
+import { zoneDomains } from "./zone-domains.js";
 import { deployments } from "./deployments.js";
 import { tenantPortal } from "./tenant-portal.js";
 import { getUsageSnapshot } from "./usage.js";
@@ -113,10 +122,12 @@ import { getMonthlyUsage, checkUsageLimit, recordUsage } from "./usage.js";
 import * as staffSaas from "./staff-saas.js";
 import {
   renderSaasOverview, renderOrganizationsPage, renderOrganizationDetailPage, renderSubscriptionsPage,
-  renderPlansPage, renderJobsPage, renderJobDetailPage, renderEmailPage, renderTenantTemplatePage, renderCouponsPage, renderOpsAlertsPage, renderCpBackupsPage, renderKeyRotationPage, renderDomainsAdminPage, renderDeploymentsAdminPage, renderWebhooksAdminPage, renderApiKeysAdminPage, renderBackupsAdminPage
+  renderPlansPage, renderJobsPage, renderJobDetailPage, renderEmailPage, renderTenantTemplatePage, renderCouponsPage, renderOpsAlertsPage, renderServerErrorsPage, renderCpBackupsPage, renderKeyRotationPage, renderDomainsAdminPage, renderDeploymentsAdminPage, renderWebhooksAdminPage, renderApiKeysAdminPage, renderBackupsAdminPage
 } from "./views/pages/saas-admin.js";
 import { backups } from "./backups.js";
 import * as tenantTemplate from "./tenant-template.js";
+import * as staffTokens from "./staff-tokens.js";
+import * as rollouts from "./rollouts.js";
 import * as automations from "./automations.js";
 import { queueEmail, flushOutbox, portalLink, emailConfigured } from "./email.js";
 import * as alerts from "./alerts.js";
@@ -315,9 +326,48 @@ function withSecurityHeaders(response) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+/**
+ * How a rollout starts the deployment job of the site it is on. With a JOB_QUEUE binding the job goes on the
+ * durable queue. Without one: an interactive caller (the staff page, the CI script: both wait for the answer)
+ * runs the job to the end inside the request, so it is not cut off 30 seconds after the response; the
+ * maintenance tick (a pinger that wants a quick reply) hands it to waitUntil and the job sweep covers a loss.
+ */
+function makeRolloutDispatch(env, ctx, { inline }) {
+  const queued = !!env.JOB_QUEUE && typeof env.JOB_QUEUE.send === "function";
+  return async (jobId) => {
+    if (inline && !queued) { await jobRunner.runJobById(env, jobId).catch(() => {}); return; }
+    await jobRunner.dispatchJob(env, ctx, jobId);
+  };
+}
+
+/**
+ * Starts a deployment of the site's current published release, used after a custom domain becomes the site's primary
+ * address so the Worker learns its new URL. Best effort: the domain is already live whether or not this succeeds.
+ */
+function makeDomainRedeploy(env, ctx) {
+  return async (siteId) => {
+    const release = await tenantTemplate.getCurrentRelease(env);
+    if (!release.ok) return;
+    const result = await deployments.startDeployment(env, {
+      siteId, version: release.version, migrations: release.migrations, scriptContent: release.scriptContent, actorType: "system"
+    });
+    if (result.ok) await jobRunner.dispatchJob(env, ctx, result.jobId);
+  };
+}
+
 export default {
   async fetch(request, env, ctx) {
-    return withSecurityHeaders(await finalizeResponse(await handleRequest(request, env, ctx), env));
+    const requestId = crypto.randomUUID();
+    const startedAt = Date.now();
+    const holder = { error: null };
+    let response = await handleRequest(request, env, ctx, requestId, holder);
+    const seen = await observe(env, ctx, { requestId, method: request.method.toUpperCase(), pathname: new URL(request.url).pathname, status: response.status, startedAt, error: holder.error });
+    response = withSecurityHeaders(await finalizeResponse(response, env));
+    // Request id for support ("quote this"), and the time the Worker spent, for anyone watching the network tab.
+    const headers = new Headers(response.headers);
+    headers.set("X-Request-Id", requestId);
+    headers.set("Server-Timing", `app;dur=${seen ? seen.durationMs : Date.now() - startedAt}`);
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   },
 
   async scheduled(event, env, ctx) {
@@ -325,18 +375,28 @@ export default {
   },
 
   // Cloudflare Queues consumer for background jobs. Only used when a JOB_QUEUE queue is bound
-  // (see wrangler.example.jsonc); without it jobs run via ctx.waitUntil and the sweep.
+  // (see docs/DURABLE_JOBS.md); without it jobs run via ctx.waitUntil and the sweep.
   async queue(batch, env) {
     return jobRunner.handleQueueBatch(batch, env);
   }
 };
 
-async function handleRequest(request, env, ctx) {
+async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(), holder = {}) {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method.toUpperCase();
-    const requestId = crypto.randomUUID();
     const isApiRoute = path.startsWith("/api/");
+
+    // Liveness for uptime monitors: no auth, no data, nothing about the deployment. 200 only if the database answers.
+    if ((method === "GET" || method === "HEAD") && path === "/api/health") {
+      try {
+        await healthRepo.ping(env);
+        return json({ ok: true }, 200);
+      } catch (error) {
+        holder.error = error;
+        return json({ ok: false }, 503);
+      }
+    }
 
     // CSP violation reports (browsers send these on their own, possibly with cookies): log and drop, no auth, no state.
     if (method === "POST" && path === "/api/csp-report") return handleCspReport(request);
@@ -358,7 +418,7 @@ async function handleRequest(request, env, ctx) {
         if (origin && origin !== "null") { try { bad = new URL(origin).host !== url.host; } catch (_) { bad = true; } }
         else if (origin === "null") bad = true;                                   // sandboxed/opaque origins
         else if (fetchSite && !["same-origin", "none"].includes(fetchSite)) bad = true;
-        if (bad) return json({ success: false, error: "cross_site_request_blocked" }, 403);
+        if (bad) { console.warn("csrf_blocked", JSON.stringify({ origin, fetchSite, host: url.host })); return json({ success: false, error: "cross_site_request_blocked" }, 403); }
       }
 
       // ---------------------------------------------
@@ -1456,6 +1516,144 @@ async function handleRequest(request, env, ctx) {
             }
           }
 
+          // -------------------------------------------
+          // Custom domains by nameserver delegation (v1; docs/CUSTOM_DOMAINS.md). Reading is open to any member;
+          // everything that changes DNS or routing needs admin+. Every call is scoped to this organization inside
+          // the service (a zone of another organization answers 404).
+          // -------------------------------------------
+          const zonesListMatch = subPath.match(/^\/sites\/([^/]+)\/domain-zones$/);
+          if (zonesListMatch) {
+            const [, siteId] = zonesListMatch;
+            const targetSite = await sites.getSite(env, siteId);
+            if (!targetSite || targetSite.organization_id !== organizationId) return json({ success: false, error: "not_found" }, 404);
+            if (method === "GET") return json({ success: true, data: await zoneDomains.listForSite(env, siteId) });
+            if (method === "POST") {
+              const guard = await requireOrgRole(organizationId, "admin");
+              if (guard) return guard;
+              const body = await request.json().catch(() => ({}));
+              const result = await zoneDomains.addZone(env, { siteId, domain: body.domain, actorUserId: customer.id, organizationId });
+              await logAudit(env, {
+                actorType: "customer_user", customerUserId: customer.id, organizationId,
+                endpoint: path, method, resource: "domain_zone", resourceId: result.ok ? result.zoneId : null, action: "create",
+                success: result.ok, statusCode: result.ok ? 200 : result.status,
+                errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
+              });
+              if (!result.ok) return json({ success: false, error: result.error, ...(result.limit !== undefined ? { limit: result.limit } : {}) }, result.status);
+              const { ok, ...data } = result;
+              return json({ success: true, ...data }, 201);
+            }
+          }
+
+          // Single subdomains (v1.1): inside an already-delegated zone of this site, or kept at the customer's own DNS
+          // with a CNAME + TXT record. Same permissions and audit as the zone routes above.
+          const subListMatch = subPath.match(/^\/sites\/([^/]+)\/subdomains$/);
+          if (subListMatch) {
+            const [, siteId] = subListMatch;
+            const targetSite = await sites.getSite(env, siteId);
+            if (!targetSite || targetSite.organization_id !== organizationId) return json({ success: false, error: "not_found" }, 404);
+            if (method === "GET") return json({ success: true, data: await zoneDomains.listSubdomainsForSite(env, siteId) });
+            if (method === "POST") {
+              const guard = await requireOrgRole(organizationId, "admin");
+              if (guard) return guard;
+              const body = await request.json().catch(() => ({}));
+              const result = await zoneDomains.addSubdomain(env, { siteId, hostname: body.hostname, actorUserId: customer.id, organizationId, redeploy: makeDomainRedeploy(env, ctx) });
+              await logAudit(env, {
+                actorType: "customer_user", customerUserId: customer.id, organizationId,
+                endpoint: path, method, resource: "domain", resourceId: result.ok ? result.domainId : null, action: "create_subdomain",
+                success: result.ok, statusCode: result.ok ? 201 : result.status,
+                errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
+              });
+              if (!result.ok) return json({ success: false, error: result.error, ...(result.limit !== undefined ? { limit: result.limit } : {}) }, result.status);
+              const { ok, ...data } = result;
+              return json({ success: true, ...data }, 201);
+            }
+          }
+
+          const subCheckMatch = subPath.match(/^\/subdomains\/([^/]+)\/check$/);
+          const subReadMatch = subPath.match(/^\/subdomains\/([^/]+)$/);
+          if ((subCheckMatch && method === "POST") || (subReadMatch && method === "GET")) {
+            const domainId = (subCheckMatch || subReadMatch)[1];
+            if (subCheckMatch) {
+              const guard = await requireOrgRole(organizationId, "admin");
+              if (guard) return guard;
+            }
+            const result = subCheckMatch
+              ? await zoneDomains.checkSubdomain(env, domainId, { manual: true, organizationId, redeploy: makeDomainRedeploy(env, ctx) })
+              : await (async () => {
+                  const row = await domains.getDomain(env, domainId);
+                  const rowSite = row ? await sites.getSite(env, row.site_id) : null;
+                  if (!row || row.method !== "cname" || !rowSite || rowSite.organization_id !== organizationId) return { ok: false, status: 404, error: "not_found" };
+                  return { ok: true, ...(await zoneDomains.subdomainView(env, domainId)) };
+                })();
+            if (subCheckMatch) {
+              await logAudit(env, {
+                actorType: "customer_user", customerUserId: customer.id, organizationId,
+                endpoint: path, method, resource: "domain", resourceId: domainId, action: "check",
+                success: result.ok, statusCode: result.ok ? 200 : result.status,
+                errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
+              });
+            }
+            if (!result.ok) return json({ success: false, error: result.error }, result.status);
+            const { ok, ...data } = result;
+            return json({ success: true, ...data });
+          }
+
+          const zoneMatch = subPath.match(/^\/domain-zones\/([^/]+)(?:\/(check|records)(?:\/([^/]+))?)?$/);
+          if (zoneMatch) {
+            const [, zoneId, zoneAction, zoneSub] = zoneMatch;
+            const isRead = method === "GET";
+            if (!isRead) {
+              const guard = await requireOrgRole(organizationId, "admin");
+              if (guard) return guard;
+            }
+            const audit = async (action, result) => logAudit(env, {
+              actorType: "customer_user", customerUserId: customer.id, organizationId,
+              endpoint: path, method, resource: "domain_zone", resourceId: zoneId, action,
+              success: result.ok, statusCode: result.ok ? 200 : result.status,
+              errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
+            });
+            const done = (result) => {
+              if (!result.ok) return json({ success: false, error: result.error }, result.status);
+              const { ok, ...data } = result;
+              return json({ success: true, ...data });
+            };
+
+            if (!zoneAction && isRead) {
+              const detail = await zoneDomains.view(env, zoneId);
+              const zoneSite = detail ? await sites.getSite(env, detail.zone.site_id) : null;
+              if (!detail || !zoneSite || zoneSite.organization_id !== organizationId) return json({ success: false, error: "not_found" }, 404);
+              return json({ success: true, ...detail });
+            }
+            if (!zoneAction && method === "DELETE") {
+              const acknowledge = new URL(request.url).searchParams.get("acknowledge") === "1";
+              const result = await zoneDomains.removeZone(env, zoneId, { organizationId, actorUserId: customer.id, acknowledgeOutage: acknowledge });
+              await audit("remove", result);
+              return done(result);
+            }
+            if (zoneAction === "check" && method === "POST" && !zoneSub) {
+              const result = await zoneDomains.checkZone(env, zoneId, { manual: true, organizationId, redeploy: makeDomainRedeploy(env, ctx) });
+              await audit("check", result);
+              return done(result);
+            }
+            if (zoneAction === "records" && !zoneSub && isRead) return done(await zoneDomains.listRecords(env, zoneId, { organizationId }));
+            if (zoneAction === "records" && !zoneSub && method === "POST") {
+              const body = await request.json().catch(() => ({}));
+              const result = await zoneDomains.addRecord(env, zoneId, body, { organizationId, actorUserId: customer.id });
+              await audit("record_add", result);
+              return done(result);
+            }
+            if (zoneAction === "records" && zoneSub === "import" && method === "POST") {
+              const result = await zoneDomains.importScanned(env, zoneId, { organizationId, actorUserId: customer.id });
+              await audit("record_import", result);
+              return done(result);
+            }
+            if (zoneAction === "records" && zoneSub && zoneSub !== "import" && method === "DELETE") {
+              const result = await zoneDomains.deleteRecord(env, zoneId, zoneSub, { organizationId, actorUserId: customer.id });
+              await audit("record_remove", result);
+              return done(result);
+            }
+          }
+
           const domainActionMatch = subPath.match(/^\/domains\/([^/]+)\/(verify|request-ssl|check-ssl|set-primary)$/);
           if (method === "POST" && domainActionMatch) {
             const guard = await requireOrgRole(organizationId, "admin");
@@ -1497,7 +1695,9 @@ async function handleRequest(request, env, ctx) {
               return json({ success: false, error: "not_found" }, 404);
             }
 
-            const result = await domains.removeDomain(env, domainId, { actorUserId: customer.id });
+            const result = domainRow.method && domainRow.method !== "txt"
+              ? await zoneDomains.removeAnyHostname(env, domainRow, { actorUserId: customer.id })
+              : await domains.removeDomain(env, domainId, { actorUserId: customer.id });
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
               endpoint: path, method, resource: "domain", resourceId: domainId, action: "remove",
@@ -1686,6 +1886,47 @@ async function handleRequest(request, env, ctx) {
             return json(result.data);
           }
 
+          // Set (or reset) the password of the caller's OWN login to a live site's dashboard. Admin and above.
+          // The password travels in this request body only: it is never stored, logged or put in the audit row.
+          const dashAdminMatch = subPath.match(/^\/sites\/([^/]+)\/dashboard-admin$/);
+          if (method === "POST" && dashAdminMatch) {
+            const guard = await requireOrgRole(organizationId, "admin");
+            if (guard) return guard;
+            if (!(await customerAuth.throttle(env, request, "dashboard_admin_password", 10))) {
+              return json({ success: false, error: "rate_limited" }, 429);
+            }
+            const body = await request.json().catch(() => ({}));
+            const result = await tenantAdmin.setDashboardPassword(env, {
+              siteId: dashAdminMatch[1], organizationId, email: customer.email, password: body.password
+            });
+            await logAudit(env, {
+              actorType: "customer_user", customerUserId: customer.id, organizationId,
+              endpoint: path, method, resource: "site_dashboard_admin", resourceId: dashAdminMatch[1], action: "set_password",
+              success: result.ok, statusCode: result.ok ? 200 : result.status,
+              errorMessage: result.ok ? null : (result.detail || result.error), requestId, ipHash: customerIpHash
+            });
+            if (!result.ok) return json({ success: false, error: result.error }, result.status);
+            return json({ success: true, email: result.email });
+          }
+
+          // Switch off tracking links of a live site (editor and above). Reversible on the site's own dashboard.
+          const disableLinksMatch = subPath.match(/^\/sites\/([^/]+)\/tracking-links\/disable$/);
+          if (method === "POST" && disableLinksMatch) {
+            const guard = await requireOrgRole(organizationId, "editor");
+            if (guard) return guard;
+            const body = await request.json().catch(() => ({}));
+            const result = await tenantLinks.disableTrackingLinks(env, { organizationId, siteId: disableLinksMatch[1], ids: body.ids });
+            await logAudit(env, {
+              actorType: "customer_user", customerUserId: customer.id, organizationId,
+              endpoint: path, method, resource: "tracking_link", resourceId: disableLinksMatch[1],
+              action: `disable:${result.ok ? result.disabled + "/" + result.results.length : (Array.isArray(body.ids) ? body.ids.length : 0)}`,
+              success: result.ok && result.failed === 0, statusCode: result.ok ? 200 : result.status,
+              errorMessage: result.ok ? (result.failed ? `${result.failed} failed` : null) : result.error, requestId, ipHash: customerIpHash
+            });
+            if (!result.ok) return json({ success: false, error: result.error }, result.status);
+            return json({ success: true, results: result.results, disabled: result.disabled, failed: result.failed });
+          }
+
           const runReportMatch = subPath.match(/^\/sites\/([^/]+)\/reports\/([^/]+)\/run$/);
           if (method === "POST" && runReportMatch) {
             const guard = await requireOrgRole(organizationId, "analyst");
@@ -1860,6 +2101,24 @@ async function handleRequest(request, env, ctx) {
             });
             if (!result.ok) return json({ success: false, error: result.error }, result.status);
             return json({ success: true, data: result.data });
+          }
+
+          // In-app notifications (the automation_alerts inbox): any member reads, analyst+ acknowledges/resolves.
+          if (method === "GET" && subPath === "/notifications") {
+            const status = new URL(request.url).searchParams.get("status") === "all" ? "all" : "open";
+            return json({ success: true, data: await notificationsRepo.list(env, organizationId, { status }), open: await notificationsRepo.countOpen(env, organizationId) });
+          }
+          const notifyMatch = subPath.match(/^\/notifications\/(\d+)\/(acknowledge|resolve)$/);
+          if (method === "POST" && notifyMatch) {
+            const guard = await requireOrgRole(organizationId, "analyst");
+            if (guard) return guard;
+            const changed = await notificationsRepo.setStatus(env, organizationId, Number(notifyMatch[1]), notifyMatch[2] === "resolve" ? "resolved" : "acknowledged");
+            await logAudit(env, {
+              actorType: "customer_user", customerUserId: customer.id, organizationId,
+              endpoint: path, method, resource: "notification", resourceId: notifyMatch[1], action: notifyMatch[2],
+              success: changed, statusCode: changed ? 200 : 404, requestId, ipHash: customerIpHash
+            });
+            return changed ? json({ success: true }) : json({ success: false, error: "not_found" }, 404);
           }
 
           if (method === "GET" && subPath === "/search") {
@@ -2091,8 +2350,89 @@ async function handleRequest(request, env, ctx) {
         // The same tick drives the durable-job safety net and webhook retries (docs/DURABLE_JOBS.md).
         const jobSweep = await jobRunner.sweepJobs(env, { launch: (p) => ctx.waitUntil(p.catch(() => {})), wait: false }).catch(() => ({ results: [] }));
         ctx.waitUntil(webhooksModule.sweepDeliveries(env).catch(() => {}));
+        // Custom domains waiting for nameserver delegation, certificates or routing (docs/CUSTOM_DOMAINS.md).
+        ctx.waitUntil(zoneDomains.sweep(env, { redeploy: makeDomainRedeploy(env, ctx) }).catch(() => {}));
+        // A running tenant release rollout takes its next step (docs/TENANT_RELEASES.md).
+        ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
+        ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
+        ctx.waitUntil(requestErrorsRepo.purgeOlderThanDays(env, 14).catch(() => {}));
         const result = await alerts.runAlertCheck(env);
         return json({ success: true, skipped: result.skipped || null, results: (result.results || []).map((r) => ({ key: r.key, action: r.action })), jobs: jobSweep.results.map((r) => ({ jobId: r.jobId, action: r.action })) });
+      }
+
+      // ---------------------------------------------
+      // CI release API (v1.2, docs/TENANT_RELEASES.md). Authenticated by a STAFF API TOKEN (Authorization:
+      // Bearer lmst_...), never by a session cookie, and only for these routes: publish a tenant release and run
+      // a rollout. Every route names the scope it needs; a token cannot reach any other staff API.
+      // ---------------------------------------------
+      if (path.startsWith("/api/ci/tenant-release/")) {
+        const rest = path.slice("/api/ci/tenant-release/".length);
+        const ciIpHash = await customerAuth.hashIPForRateLimit(request);
+        if (!(await customerAuth.isUnderLimit(env, ciIpHash, "ci_bad_token", 20))) return json({ success: false, error: "rate_limited" }, 429);
+        const ciHeader = request.headers.get("Authorization") || "";
+        const ciToken = await staffTokens.verifyStaffToken(env, ciHeader.startsWith("Bearer ") ? ciHeader.slice(7) : "");
+        if (!ciToken) {
+          await customerAuth.recordFailure(env, ciIpHash, "ci_bad_token");
+          return json({ success: false, error: "unauthorized" }, 401);
+        }
+        const needScope = (scope) => (staffTokens.hasStaffScope(ciToken, scope) ? null : json({ success: false, error: "forbidden_scope", required: scope }, 403));
+        const ciActor = `token:${ciToken.prefix}`;
+        const ciAudit = (resource, resourceId, action, result) => logAudit(env, {
+          adminId: null, actorType: "staff_token", initiatedBy: ciActor, endpoint: path, method, resource, resourceId, action,
+          success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash: ciIpHash
+        });
+        const ciBody = async () => (await request.json().catch(() => ({})));
+        const reply = (result, extra = {}) => (result.ok ? json({ success: true, ...extra }) : json({ success: false, error: result.error, ...(result.rolloutId ? { rolloutId: result.rolloutId } : {}), ...(result.missing ? { missing: result.missing, missingCount: result.missingCount } : {}) }, result.status || 400));
+
+        if (method === "GET" && rest === "releases") {
+          const denied = needScope("release:publish"); if (denied) return denied;
+          return json({ success: true, data: await tenantTemplate.listReleases(env) });
+        }
+        if (method === "PUT" && rest === "assets") {
+          const denied = needScope("release:publish"); if (denied) return denied;
+          if (Number(request.headers.get("Content-Length") || 0) > 25 * 1024 * 1024) return json({ success: false, error: "asset_too_large" }, 413);
+          const r = await tenantTemplate.putAsset(env, { path: url.searchParams.get("path") || "", bytes: new Uint8Array(await request.arrayBuffer()) });
+          if (!r.ok) return json({ success: false, error: r.error }, r.status);
+          return json({ success: true, hash: r.hash, size: r.size });
+        }
+        if (method === "POST" && rest === "publish") {
+          const denied = needScope("release:publish"); if (denied) return denied;
+          const b = await ciBody();
+          const r = await tenantTemplate.publishRelease(env, { version: b.version, scriptContent: b.scriptContent, migrations: b.migrations, assets: b.assets, notes: b.notes, createdBy: ciActor });
+          await ciAudit("tenant_template_release", b.version, "publish", r);
+          return reply(r, { version: b.version, assetCount: r.assetCount });
+        }
+        if (method === "POST" && rest === "rollouts") {
+          const denied = needScope("rollout:run"); if (denied) return denied;
+          const b = await ciBody();
+          const r = await rollouts.startRollout(env, { version: b.version || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: ciActor });
+          await ciAudit("tenant_rollout", r.rolloutId || "none", "start", r);
+          if (!r.ok) return reply(r);
+          // Take the first step now, so the first site starts without waiting for anything else.
+          const first = r.nothingToDo ? r : await rollouts.advanceRollout(env, r.rolloutId, { dispatch: makeRolloutDispatch(env, ctx, { inline: true }) });
+          return json({ success: true, ...first, nothingToDo: !!r.nothingToDo }, 202);
+        }
+        const ciRollout = matchPath("/api/ci/tenant-release/rollouts/:id", path);
+        const ciRolloutAction = matchPath("/api/ci/tenant-release/rollouts/:id/:action", path);
+        if (method === "GET" && ciRollout) {
+          const denied = needScope("rollout:run"); if (denied) return denied;
+          const r = await rollouts.getRollout(env, ciRollout.id);
+          return r.ok ? json({ success: true, ...r }) : reply(r);
+        }
+        if (method === "POST" && ciRolloutAction) {
+          const denied = needScope("rollout:run"); if (denied) return denied;
+          const { id, action } = ciRolloutAction;
+          if (action === "advance") {
+            const r = await rollouts.advanceRollout(env, id, { dispatch: makeRolloutDispatch(env, ctx, { inline: true }) });
+            return r.ok ? json({ success: true, ...r }) : reply(r);
+          }
+          if (action === "cancel" || action === "resume") {
+            const r = action === "cancel" ? await rollouts.cancelRollout(env, id) : await rollouts.resumeRollout(env, id);
+            await ciAudit("tenant_rollout", id, action, r);
+            return reply(r);
+          }
+        }
+        return json({ success: false, error: "not_found" }, 404);
       }
 
       if (path.startsWith("/api/v1/")) {
@@ -2142,6 +2482,17 @@ async function handleRequest(request, env, ctx) {
             const site = await siteInScope(siteId);
             if (!site) return json({ success: false, error: "not_found" }, 404);
             return json({ success: true, data: await domains.listDomainsForSite(env, siteId) });
+          }
+
+          if (method === "GET" && rest === "/domain-zones") {
+            if (!apiKeys.hasScope(apiAuth, "domains:read")) return json({ success: false, error: "insufficient_scope" }, 403);
+            const site = await siteInScope(siteId);
+            if (!site) return json({ success: false, error: "not_found" }, 404);
+            const zonesView = await zoneDomains.listForSite(env, siteId);
+            return json({ success: true, data: zonesView.map((v) => ({
+              id: v.zone.id, domain: v.zone.zone_name, status: v.zone.status, phase: v.progress.phase, nameServers: v.zone.name_servers,
+              activatedAt: v.zone.activated_at, hostnames: v.hostnames.map((h) => ({ hostname: h.hostname, status: h.status, isPrimary: !!h.is_primary }))
+            })) });
           }
 
           if (method === "GET" && rest === "/analytics/overview") {
@@ -2232,12 +2583,22 @@ async function handleRequest(request, env, ctx) {
         // Hide nav links for features this plan doesn't include, so a Starter
         // customer isn't offered pages that only say "upgrade". Mirrors the
         // route-level requireEntitlement checks; the routes remain the access control.
-        const [hasBackups, hasAutomations] = await Promise.all([
+        const [hasBackups, hasAutomations, analyticsLevel, hasReports, hasAffiliate, hasAlerts, openNotifications] = await Promise.all([
           entitlementsService.requireEntitlement(env, activeOrgId, "backups.enabled"),
-          entitlementsService.requireEntitlement(env, activeOrgId, "automations.enabled")
+          entitlementsService.requireEntitlement(env, activeOrgId, "automations.enabled"),
+          entitlementsService.checkEntitlement(env, activeOrgId, "analytics.level"),
+          entitlementsService.requireEntitlement(env, activeOrgId, "reports.enabled"),
+          entitlementsService.requireEntitlement(env, activeOrgId, "affiliate.enabled"),
+          entitlementsService.requireEntitlement(env, activeOrgId, "alerts.enabled"),
+          notificationsRepo.countOpen(env, activeOrgId)
         ]);
-        const hiddenNavKeys = [...(hasBackups ? [] : ["backups"]), ...(hasAutomations ? [] : ["automations"])];
-        const shell = (opts) => renderCustomerShell({ hiddenNavKeys, ...opts });
+        const hasAnalytics = !!analyticsLevel && analyticsLevel !== "none";
+        const hiddenNavKeys = [
+          ...(hasBackups ? [] : ["backups"]), ...(hasAutomations ? [] : ["automations"]),
+          ...(hasAnalytics ? [] : ["analytics"]), ...(hasReports ? [] : ["reports"]),
+          ...(hasAffiliate ? [] : ["campaigns"]), ...(hasAlerts ? [] : ["alerts"])
+        ];
+        const shell = (opts) => renderCustomerShell({ hiddenNavKeys, navBadges: { notifications: openNotifications }, ...opts });
         const myMembership = myOrgs.find((o) => o.id === activeOrgId);
         const canManage = myMembership ? roleAtLeast(myMembership.my_role, "admin") : false;
 
@@ -2256,6 +2617,36 @@ async function handleRequest(request, env, ctx) {
               bodyHtml: renderOverviewPage({ organization: activeOrg, subscription, plan, usage, sites: sitesList })
             })
           );
+        }
+
+        // ---- insight pages (v7F): the data comes from the JSON routes above; these only render and explain ----
+        const insightPage = async (title, key, render) => {
+          const sitesList = await sites.listSitesForOrganization(env, activeOrgId);
+          return html(shell({
+            title, activeKey: key, customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId,
+            bodyHtml: await render(sitesList)
+          }));
+        };
+        if (path === "/app/analytics") return insightPage("Analytics", "analytics", (s) => renderInsightAnalytics({ sites: s, entitled: hasAnalytics, canDisable: hasAffiliate && (myMembership ? roleAtLeast(myMembership.my_role, "editor") : false) }));
+        if (path === "/app/reports") return insightPage("Reports", "reports", (s) => renderInsightReports({ sites: s, entitled: hasReports, canRun: myMembership ? roleAtLeast(myMembership.my_role, "analyst") : false }));
+        if (path === "/app/campaigns") return insightPage("Campaigns", "campaigns", (s) => renderInsightCampaigns({ sites: s, entitled: hasAffiliate, canCreate: myMembership ? roleAtLeast(myMembership.my_role, "editor") : false }));
+        if (path === "/app/alerts") return insightPage("Alerts", "alerts", (s) => renderInsightAlerts({ sites: s, entitled: hasAlerts, canAck: myMembership ? roleAtLeast(myMembership.my_role, "analyst") : false }));
+        if (path === "/app/content") return insightPage("Content", "content", (s) => renderInsightContent({ sites: s, email: portalCustomer.email, canManage: myMembership ? roleAtLeast(myMembership.my_role, "admin") : false }));
+        if (path === "/app/notifications") {
+          const status = new URL(request.url).searchParams.get("status") === "all" ? "all" : "open";
+          const items = await notificationsRepo.list(env, activeOrgId, { status });
+          return html(shell({
+            title: "Notifications", activeKey: "notifications", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId,
+            bodyHtml: renderInsightNotifications({ items, status, canManage: myMembership ? roleAtLeast(myMembership.my_role, "analyst") : false })
+          }));
+        }
+        if (path === "/app/search") {
+          const q = (new URL(request.url).searchParams.get("q") || "").trim().slice(0, 100);
+          const results = q ? await searchOrganization(env, activeOrgId, q) : null;
+          return html(shell({
+            title: "Search", activeKey: "search", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId,
+            bodyHtml: renderInsightSearch({ query: q, results })
+          }));
         }
 
         if (path === "/app/usage") {
@@ -2278,12 +2669,19 @@ async function handleRequest(request, env, ctx) {
         if (path === "/app/domains") {
           const sitesList = await sites.listSitesForOrganization(env, activeOrgId);
           const domainsBySite = {};
-          for (const site of sitesList) domainsBySite[site.id] = await domains.listDomainsForSite(env, site.id);
+          const zonesBySite = {};
+          const subdomainsBySite = {};
+          for (const site of sitesList) {
+            // Hostnames served through a delegated zone, and CNAME-connected subdomains, have their own cards.
+            domainsBySite[site.id] = (await domains.listDomainsForSite(env, site.id)).filter((d) => !d.method || d.method === "txt");
+            zonesBySite[site.id] = await zoneDomains.listForSite(env, site.id);
+            subdomainsBySite[site.id] = await zoneDomains.listSubdomainsForSite(env, site.id);
+          }
           return html(
             shell({
               title: "Domains", activeKey: "domains", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderDomainsPage({ sites: sitesList, domainsBySite, canManage })
+              bodyHtml: renderDomainsPage({ sites: sitesList, domainsBySite, zonesBySite, subdomainsBySite, canManage })
             })
           );
         }
@@ -3638,6 +4036,41 @@ async function handleRequest(request, env, ctx) {
               const r = await flushOutbox(env);
               return staffAudit("email_outbox", "all", "flush", r.skipped ? { ok: false, status: 409, error: r.skipped } : { ok: true });
             }
+            // ---- Tenant release rollouts and staff API tokens (v1.2, docs/TENANT_RELEASES.md) ----
+            const rolloutAudit = async (resourceId, action, result, extra = {}) => {
+              await logAudit(env, {
+                adminId: admin.id, endpoint: path, method, resource: "tenant_rollout", resourceId, action,
+                success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash
+              });
+              return result.ok ? json({ success: true, ...result, ...extra }) : json({ success: false, error: result.error, ...(result.rolloutId ? { rolloutId: result.rolloutId } : {}) }, result.status || 400);
+            };
+            if (path === "/api/platform/saas/rollouts") {
+              const b = await staffBody();
+              const r = await rollouts.startRollout(env, { version: b.version || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: `admin:${admin.id}` });
+              return rolloutAudit(r.rolloutId || "none", "start", r);
+            }
+            const rolloutAct = matchPath("/api/platform/saas/rollouts/:id/:action", path);
+            if (rolloutAct) {
+              if (rolloutAct.action === "advance") {
+                // The open staff page calls this every few seconds while a rollout runs. Not audited per call: it decides nothing.
+                const r = await rollouts.advanceRollout(env, rolloutAct.id, { dispatch: makeRolloutDispatch(env, ctx, { inline: true }) });
+                return r.ok ? json({ success: true, ...r }) : json({ success: false, error: r.error }, r.status || 400);
+              }
+              if (rolloutAct.action === "cancel") return rolloutAudit(rolloutAct.id, "cancel", await rollouts.cancelRollout(env, rolloutAct.id));
+              if (rolloutAct.action === "resume") return rolloutAudit(rolloutAct.id, "resume", await rollouts.resumeRollout(env, rolloutAct.id));
+            }
+            if (path === "/api/platform/saas/staff-tokens") {
+              const b = await staffBody();
+              const r = await staffTokens.createStaffToken(env, { name: b.name, scopes: b.scopes, createdBy: String(admin.id), expiresInDays: b.expiresInDays });
+              await logAudit(env, {
+                adminId: admin.id, endpoint: path, method, resource: "staff_api_token", resourceId: r.ok ? r.tokenId : null, action: "create",
+                success: r.ok, statusCode: r.ok ? 200 : r.status || 400, errorMessage: r.ok ? null : r.error, requestId, ipHash
+              });
+              // The only time the token is ever shown.
+              return r.ok ? json({ success: true, token: r.token, prefix: r.prefix, expiresAt: r.expiresAt, scopes: r.scopes }) : json({ success: false, error: r.error }, r.status || 400);
+            }
+            const tokenRevoke = matchPath("/api/platform/saas/staff-tokens/:id/revoke", path);
+            if (tokenRevoke) return staffAudit("staff_api_token", tokenRevoke.id, "revoke", await staffTokens.revokeStaffToken(env, tokenRevoke.id));
             if (path === "/api/platform/saas/tenant-template/publish") {
               const b = await staffBody();
               const r = await tenantTemplate.publishRelease(env, {
@@ -3660,6 +4093,12 @@ async function handleRequest(request, env, ctx) {
             const r = await tenantTemplate.putAsset(env, { path: assetPath, bytes });
             if (!r.ok) return json({ success: false, error: r.error }, r.status);
             return json({ success: true, hash: r.hash, size: r.size });
+          }
+          if (method === "GET" && path === "/api/platform/saas/rollouts") return json({ success: true, data: await rollouts.dashboard(env) });
+          const rolloutGet = method === "GET" ? matchPath("/api/platform/saas/rollouts/:id", path) : null;
+          if (rolloutGet) {
+            const r = await rollouts.getRollout(env, rolloutGet.id);
+            return r.ok ? json({ success: true, ...r }) : json({ success: false, error: r.error }, r.status || 404);
           }
           if (method === "GET" && path === "/api/platform/saas/tenant-template") {
             return json({ success: true, data: await tenantTemplate.listReleases(env) });
@@ -4029,6 +4468,8 @@ async function handleRequest(request, env, ctx) {
         if (path === "/platform/saas/key-rotation") return html(await renderKeyRotationPage(env, admin));
         if (path === "/platform/saas/cp-backups") return html(await renderCpBackupsPage(env, admin));
         if (path === "/platform/saas/alerts") return html(await renderOpsAlertsPage(env, admin));
+        if (path === "/platform/saas/errors") return html(await renderServerErrorsPage(env, admin));
+        if (path === "/platform/saas/errors") return html(await renderServerErrorsPage(env, admin));
         if (path === "/platform/saas/domains") return html(await renderDomainsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/deployments") return html(await renderDeploymentsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/webhooks") return html(await renderWebhooksAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
@@ -4106,8 +4547,9 @@ async function handleRequest(request, env, ctx) {
 
       return html("Not found.", 404);
     } catch (error) {
-      if (isApiRoute) return json({ success: false, error: "internal_error" }, 500);
-      return html("Something went wrong.", 500);
+      holder.error = error;   // fetch() logs and records it with the request id; nothing about the request is put in the log here
+      if (isApiRoute) return json({ success: false, error: "internal_error", requestId }, 500);
+      return html(`Something went wrong. If you contact support, quote this reference: ${requestId}`, 500);
     }
 }
 
@@ -4126,6 +4568,9 @@ async function runScheduled(event, env, ctx) {
   ctx.waitUntil(erasure.sweepExpiredFinancialRecords(env).catch(() => {}));
   ctx.waitUntil(jobRunner.sweepJobs(env, { launch: (p) => ctx.waitUntil(p.catch(() => {})), wait: false }).catch(() => {}));
   ctx.waitUntil(webhooksModule.sweepDeliveries(env).catch(() => {}));
+  ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
+  ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
+  ctx.waitUntil(requestErrorsRepo.purgeOlderThanDays(env, 14).catch(() => {}));
 }
 
 // -----------------------------------------------------

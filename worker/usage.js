@@ -32,7 +32,7 @@ export async function getUsageSnapshot(env, organizationId) {
     .first();
 
   const domainsRow = await env.LUMMET_DB.prepare(
-    `SELECT COUNT(*) c FROM domains d
+    `SELECT COUNT(DISTINCT COALESCE(d.zone_id, d.id)) c FROM domains d
      JOIN sites s ON s.id = d.site_id
      WHERE s.organization_id = ? AND d.status != 'removed'`
   )

@@ -44,9 +44,12 @@ export const ORG_DELETE = [
 export const SITE_DELETE = [
   ["deployments", "site_id = ?"],
   ["domains", "site_id = ?"],                      // domain events cascade
+  ["domain_zones", "site_id = ?"],                 // delegated domains; zone events cascade (provider zones are deleted first, see erasure.js)
   ["site_migrations_applied", "site_id = ?"],
   ["site_status_events", "site_id = ?"],
-  ["site_resources", "site_id = ?"]
+  ["site_resources", "site_id = ?"],
+  ["tenant_rollout_items", "site_id = ?"],         // the site's line in a release rollout (the rollout itself is platform data)
+  ["automation_sweep_state", "site_id = ?"]
 ];
 
 /** Kept for FINANCIAL_RETENTION_YEARS after erasure, then removed by the retention sweep. */
@@ -81,6 +84,6 @@ export const OUT_OF_SCOPE = {
   lummet_admins: "staff data", lummet_ai_conversations: "staff data", lummet_ai_pending_operations: "staff data",
   lummet_auth_attempts: "hashed IP only, pruned by age", lummet_brands: "tenant registry", lummet_mfa_challenges: "staff data",
   lummet_sessions: "staff data", tenant_api_credentials: "removed with the tenant registry row", tenant_capabilities: "removed with the tenant registry row",
-  tenant_health: "removed with the tenant registry row", tenant_template_releases: "platform releases", domain_events: "cascades with domains",
+  tenant_health: "removed with the tenant registry row", tenant_template_releases: "platform releases", staff_api_tokens: "staff data: CI credentials, stored hashed", tenant_rollouts: "platform releases: which release went to which sites, no personal data", tenant_rollout_items: "erased per site (see SITE_DELETE) and cascades with tenant_rollouts", domain_events: "cascades with domains", domain_zone_events: "cascades with domain_zones",
   webhook_deliveries: "cascades with webhooks", job_steps: "cascades with jobs", tenants: "removed per site, see eraseOrganization"
 };

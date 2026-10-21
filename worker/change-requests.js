@@ -19,6 +19,7 @@
 
 import { checkEntitlement } from "./entitlements.js";
 import * as sites from "./sites.js";
+import * as requestsRepo from "./repositories/change-requests.js";
 
 async function requiresApproval(env, organizationId) {
   return (await checkEntitlement(env, organizationId, "approval_workflows.enabled")) === true;
@@ -43,38 +44,20 @@ export async function requestSiteDeletion(env, { organizationId, siteId, actorUs
     return { ok: true, requiresApproval: false };
   }
 
-  const existing = await env.LUMMET_DB.prepare(
-    `SELECT id FROM change_requests WHERE organization_id = ? AND resource_id = ? AND type = 'site_deletion' AND status = 'pending'`
-  )
-    .bind(organizationId, siteId)
-    .first();
-  if (existing) return { ok: false, status: 409, error: "deletion_already_requested" };
+  if (await requestsRepo.findPendingSiteDeletion(env, organizationId, siteId)) return { ok: false, status: 409, error: "deletion_already_requested" };
 
   const id = crypto.randomUUID();
-  await env.LUMMET_DB.prepare(
-    `INSERT INTO change_requests (id, organization_id, type, resource_id, requested_by, reason) VALUES (?, ?, 'site_deletion', ?, ?, ?)`
-  )
-    .bind(id, organizationId, siteId, actorUserId || null, reason || null)
-    .run();
+  await requestsRepo.insertSiteDeletion(env, { id, organizationId, siteId, requestedBy: actorUserId, reason });
 
   return { ok: true, requiresApproval: true, changeRequestId: id };
 }
 
 export async function listChangeRequests(env, organizationId, { status } = {}) {
-  const result = status
-    ? await env.LUMMET_DB.prepare(`SELECT * FROM change_requests WHERE organization_id = ? AND status = ? ORDER BY created_at DESC`)
-        .bind(organizationId, status)
-        .all()
-    : await env.LUMMET_DB.prepare(`SELECT * FROM change_requests WHERE organization_id = ? ORDER BY created_at DESC`)
-        .bind(organizationId)
-        .all();
-  return result.results || [];
+  return requestsRepo.list(env, organizationId, status);
 }
 
 async function getPendingRequest(env, organizationId, changeRequestId) {
-  return env.LUMMET_DB.prepare(`SELECT * FROM change_requests WHERE id = ? AND organization_id = ? AND status = 'pending'`)
-    .bind(changeRequestId, organizationId)
-    .first();
+  return requestsRepo.findPending(env, organizationId, changeRequestId);
 }
 
 export async function approveChangeRequest(env, { organizationId, changeRequestId, approverUserId }) {
@@ -92,11 +75,7 @@ export async function approveChangeRequest(env, { organizationId, changeRequestI
     if (!deletion.ok) return deletion;
   }
 
-  await env.LUMMET_DB.prepare(
-    `UPDATE change_requests SET status = 'approved', approved_by = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?`
-  )
-    .bind(approverUserId || null, changeRequestId)
-    .run();
+  await requestsRepo.markApproved(env, changeRequestId, approverUserId);
 
   return { ok: true };
 }
@@ -105,11 +84,7 @@ export async function rejectChangeRequest(env, { organizationId, changeRequestId
   const request = await getPendingRequest(env, organizationId, changeRequestId);
   if (!request) return { ok: false, status: 404, error: "not_found" };
 
-  await env.LUMMET_DB.prepare(
-    `UPDATE change_requests SET status = 'rejected', approved_by = ?, reason = COALESCE(?, reason), resolved_at = CURRENT_TIMESTAMP WHERE id = ?`
-  )
-    .bind(approverUserId || null, reason || null, changeRequestId)
-    .run();
+  await requestsRepo.markRejected(env, changeRequestId, approverUserId, reason);
 
   return { ok: true };
 }

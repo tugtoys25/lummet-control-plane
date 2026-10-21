@@ -6,6 +6,7 @@
 // entitlement key was needed for this.
 // =====================================================
 
+import * as brandingRepo from "./repositories/branding.js";
 import { checkEntitlement } from "./entitlements.js";
 
 function isHttpsUrl(value) {
@@ -18,9 +19,7 @@ function isHttpsUrl(value) {
 }
 
 export async function getBranding(env, organizationId) {
-  const row = await env.LUMMET_DB.prepare(`SELECT * FROM organization_branding WHERE organization_id = ?`)
-    .bind(organizationId)
-    .first();
+  const row = await brandingRepo.find(env, organizationId);
 
   return (
     row || {
@@ -53,9 +52,7 @@ export async function updateBranding(env, organizationId, updates) {
     }
   }
 
-  const existing = await env.LUMMET_DB.prepare(`SELECT organization_id FROM organization_branding WHERE organization_id = ?`)
-    .bind(organizationId)
-    .first();
+  const existing = await brandingRepo.exists(env, organizationId);
 
   const brandName = updates.brandName !== undefined ? updates.brandName : null;
   const logoUrl = updates.logoUrl !== undefined ? updates.logoUrl : null;
@@ -64,21 +61,9 @@ export async function updateBranding(env, organizationId, updates) {
   const supportUrl = updates.supportUrl !== undefined ? updates.supportUrl : null;
   const hideLummetBranding = updates.hideLummetBranding ? 1 : 0;
 
-  if (existing) {
-    await env.LUMMET_DB.prepare(
-      `UPDATE organization_branding SET brand_name = ?, logo_url = ?, favicon_url = ?, primary_color = ?, support_url = ?, hide_lummet_branding = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE organization_id = ?`
-    )
-      .bind(brandName, logoUrl, faviconUrl, primaryColor, supportUrl, hideLummetBranding, organizationId)
-      .run();
-  } else {
-    await env.LUMMET_DB.prepare(
-      `INSERT INTO organization_branding (organization_id, brand_name, logo_url, favicon_url, primary_color, support_url, hide_lummet_branding)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(organizationId, brandName, logoUrl, faviconUrl, primaryColor, supportUrl, hideLummetBranding)
-      .run();
-  }
+  const values = { brandName, logoUrl, faviconUrl, primaryColor, supportUrl, hideLummetBranding };
+  if (existing) await brandingRepo.update(env, organizationId, values);
+  else await brandingRepo.insert(env, organizationId, values);
 
   return { ok: true };
 }

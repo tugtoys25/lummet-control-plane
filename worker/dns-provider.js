@@ -17,5 +17,12 @@
  *   array if none, or on any resolution failure — domain
  *   verification treats "no records found" and "lookup failed"
  *   identically: not yet verified, safe to retry).
+ *
+ * @property {(hostname: string) => Promise<{ok: boolean, nameServers?: string[]}>} lookupNS
+ *   (v1) The nameservers public DNS currently answers for a domain, lower case without the trailing dot.
+ *   { ok: false } when the lookup failed. Progress display only; never proof that a zone is active.
+ *
+ * @property {(hostname: string) => Promise<{ok: boolean, targets?: string[]}>} lookupCNAME
+ *   (v1.1) The CNAME targets public DNS answers for a hostname. Progress display only.
  */
 export const CONTRACT_VERSION = 1;

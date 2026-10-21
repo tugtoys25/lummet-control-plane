@@ -3,6 +3,7 @@
 // Only URLs that actually resolve to published content are listed.
 // =====================================================
 
+import * as pricingRepo from "../repositories/pricing.js";
 import * as data from "./data.js";
 import { xmlEscape } from "./format.js";
 import { pageCanonicalPath } from "./pages.js";
@@ -34,6 +35,7 @@ export async function sitemapXml(ctx) {
   if (publications.length) urls.push({ loc: `${base}/insights` });
   for (const p of publications) urls.push({ loc: `${base}/insights/${p.slug}`, lastmod: day(p.updated_at || p.published_at) });
   if (partners.length) urls.push({ loc: `${base}/partners` });
+  if ((await pricingRepo.listPricing(env)).length) urls.push({ loc: `${base}/pricing` });
   for (const pg of pages) urls.push({ loc: `${base}${pageCanonicalPath(pg.slug)}`, lastmod: day(pg.updated_at) });
   for (const f of publishedForms) urls.push({ loc: `${base}${formPath(f.form_key)}`, lastmod: day(f.updated_at) });
   for (const a of authors) urls.push({ loc: `${base}/authors/${a.slug}`, lastmod: day(a.updated_at) });

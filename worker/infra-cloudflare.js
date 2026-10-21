@@ -40,7 +40,10 @@ async function cloudflareRequest(env, method, path, body) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) {
     const message = data?.errors?.[0]?.message || `Cloudflare API error (HTTP ${response.status})`;
-    throw new Error(message);
+    const error = new Error(message);
+    error.httpStatus = response.status;                      // lets callers tell "not found" from "rejected"
+    error.cfCode = data?.errors?.[0]?.code ?? null;
+    throw error;
   }
   return data.result;
 }
@@ -204,7 +207,8 @@ export async function uploadWorkerScript(env, { workerName, scriptContent, bindi
 
   const metadata = {
     main_module: "index.js",
-    compatibility_date: "2024-09-23",
+    // Match the tenant repo (lummet-tenant/wrangler.jsonc). Override with TENANT_COMPAT_DATE if a release needs another date.
+    compatibility_date: env.TENANT_COMPAT_DATE || "2026-01-01",
     compatibility_flags: ["nodejs_compat"],
     bindings
   };
@@ -230,9 +234,22 @@ export async function uploadWorkerScript(env, { workerName, scriptContent, bindi
   return { ok: true };
 }
 
-export async function runD1Query(env, { databaseId, sql }) {
-  const result = await cloudflareRequest(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${databaseId}/query`, { sql });
+export async function runD1Query(env, { databaseId, sql, params }) {
+  // With params the statement must be a single one using ? placeholders; values are bound by D1, never spliced into SQL.
+  const body = Array.isArray(params) ? { sql, params } : { sql };
+  const result = await cloudflareRequest(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${databaseId}/query`, body);
   return { ok: true, results: Array.isArray(result) ? result : [result] };
+}
+
+/** DNS records Cloudflare still wants for a custom hostname: ownership TXT and certificate validation records. */
+function customHostnameRecords(result) {
+  const out = [];
+  const own = result?.ownership_verification;
+  if (own && own.type && own.name && own.value) out.push({ type: String(own.type).toUpperCase(), name: own.name, value: own.value });
+  for (const v of Array.isArray(result?.ssl?.validation_records) ? result.ssl.validation_records : []) {
+    if (v.txt_name && v.txt_value) out.push({ type: "TXT", name: v.txt_name, value: v.txt_value });
+  }
+  return out;
 }
 
 export async function createCustomHostname(env, { hostname }) {
@@ -241,7 +258,30 @@ export async function createCustomHostname(env, { hostname }) {
     hostname,
     ssl: { method: "http", type: "dv" }
   });
-  return { resourceId: result.id };
+  return { resourceId: result.id, records: customHostnameRecords(result) };
+}
+
+/** Status plus the records Cloudflare is still waiting for. */
+export async function getCustomHostnameDetail(env, resourceId) {
+  if (!env.CF_ZONE_ID) throw new Error("CF_ZONE_ID is not configured on this Worker");
+  const result = await cloudflareRequest(env, "GET", `/zones/${env.CF_ZONE_ID}/custom_hostnames/${resourceId}`);
+  let status = normalizeCustomHostnameStatus(result?.ssl?.status);
+  // A hostname Cloudflare itself calls blocked/deleted/moved will never become active.
+  if (["blocked", "deleted", "moved"].includes(String(result?.status))) status = "failed";
+  return { status, hostnameStatus: String(result?.status || ""), records: customHostnameRecords(result) };
+}
+
+/** Cloudflare for SaaS needs a fallback origin on the SaaS zone before any custom hostname can be served. */
+export async function getFallbackOrigin(env) {
+  if (!env.CF_ZONE_ID) throw new Error("CF_ZONE_ID is not configured on this Worker");
+  const result = await cloudflareRequest(env, "GET", `/zones/${env.CF_ZONE_ID}/custom_hostnames/fallback_origin`);
+  return { origin: result?.origin || null, status: String(result?.status || "") };
+}
+
+export async function setFallbackOrigin(env, { origin }) {
+  if (!env.CF_ZONE_ID) throw new Error("CF_ZONE_ID is not configured on this Worker");
+  await cloudflareRequest(env, "PUT", `/zones/${env.CF_ZONE_ID}/custom_hostnames/fallback_origin`, { origin });
+  return { ok: true };
 }
 
 // The ONLY place a Cloudflare-specific custom-hostname SSL status
@@ -273,4 +313,136 @@ export async function checkHealth(env, { url }) {
   } catch (error) {
     return { ok: false, statusCode: null };
   }
+}
+
+
+// -----------------------------------------------------
+// v1: custom domains by nameserver delegation.
+//
+// The customer's root domain becomes a Cloudflare zone (type "full") in the platform account; the customer sets the
+// two nameservers Cloudflare assigns at their registrar. Once the zone is ACTIVE the hostnames are attached to the
+// site's Worker with Workers Custom Domains (Cloudflare then creates the DNS record and the certificate itself).
+//
+// Token permissions needed (see docs/CUSTOM_DOMAINS.md): Account > Workers Scripts: Edit, Zone > Zone: Edit,
+// Zone > DNS: Edit, Zone > Workers Routes: Edit, all for the platform account and "All zones".
+// HONESTY NOTE: written against Cloudflare's documented API; not exercised against a live account here. The
+// staging checklist in docs/CUSTOM_DOMAINS.md says exactly what to run.
+// -----------------------------------------------------
+
+/** Cloudflare zone status -> the three states the control plane cares about. */
+export function normalizeZoneStatus(cfStatus) {
+  if (cfStatus === "active") return "active";
+  if (cfStatus === "pending" || cfStatus === "initializing") return "pending";
+  return "gone";                                             // moved | deleted | deactivated | anything unexpected
+}
+
+function zoneResult(result) {
+  return {
+    zoneId: result.id,
+    nameServers: Array.isArray(result.name_servers) ? result.name_servers : [],
+    originalNameServers: Array.isArray(result.original_name_servers) ? result.original_name_servers : [],
+    cfStatus: result.status,
+    status: normalizeZoneStatus(result.status)
+  };
+}
+
+/**
+ * Adds a root domain as a full-setup zone. Idempotent for OUR account: if the zone is already ours (a retry after a
+ * half-finished attempt) it is returned instead of an error. A domain that is active in someone else's Cloudflare
+ * account is refused by Cloudflare and surfaces as an error the caller turns into "domain_unavailable".
+ */
+export async function createZone(env, { name }) {
+  try {
+    const result = await cloudflareRequest(env, "POST", "/zones", { account: { id: env.CF_ACCOUNT_ID }, name, type: "full" });
+    return zoneResult(result);
+  } catch (err) {
+    if (!/already exists|duplicate/i.test(String(err.message))) throw err;
+    const found = await cloudflareRequest(env, "GET", `/zones?name=${encodeURIComponent(name)}&account.id=${encodeURIComponent(env.CF_ACCOUNT_ID)}`);
+    const mine = (Array.isArray(found) ? found : []).find((z) => z.name === name);
+    if (!mine) throw err;
+    return zoneResult(mine);
+  }
+}
+
+export async function getZone(env, zoneId) {
+  try {
+    return zoneResult(await cloudflareRequest(env, "GET", `/zones/${zoneId}`));
+  } catch (err) {
+    if (err.httpStatus === 404 || /not found|does not exist|invalid zone/i.test(String(err.message))) {
+      return { zoneId, nameServers: [], originalNameServers: [], cfStatus: "deleted", status: "gone" };
+    }
+    throw err;
+  }
+}
+
+/** Asks Cloudflare to re-check delegation now. Cloudflare rate-limits this; callers treat a refusal as non-fatal. */
+export async function requestActivationCheck(env, zoneId) {
+  await cloudflareRequest(env, "PUT", `/zones/${zoneId}/activation_check`);
+  return { ok: true };
+}
+
+export async function deleteZone(env, zoneId) {
+  await cloudflareRequest(env, "DELETE", `/zones/${zoneId}`);
+  return { ok: true };
+}
+
+/** Starts Cloudflare's asynchronous scan for the domain's existing records (results are reviewed, not auto-added). */
+export async function triggerDnsScan(env, zoneId) {
+  await cloudflareRequest(env, "POST", `/zones/${zoneId}/dns_records/scan/trigger`);
+  return { ok: true };
+}
+
+export async function listScannedRecords(env, zoneId) {
+  const result = await cloudflareRequest(env, "GET", `/zones/${zoneId}/dns_records/scan/review`);
+  return (Array.isArray(result) ? result : []).map(dnsRecord);
+}
+
+/** Accepts the scanned records with the given ids (all of them when ids is omitted). */
+export async function acceptScannedRecords(env, zoneId, ids) {
+  const list = Array.isArray(ids) ? ids : (await listScannedRecords(env, zoneId)).map((r) => r.id);
+  if (!list.length) return { ok: true, accepted: 0 };
+  await cloudflareRequest(env, "POST", `/zones/${zoneId}/dns_records/scan/review`, { accepts: list.map((id) => ({ id })), rejects: [] });
+  return { ok: true, accepted: list.length };
+}
+
+function dnsRecord(r) {
+  return { id: r.id, type: r.type, name: r.name, content: r.content, ttl: r.ttl, proxied: !!r.proxied, priority: r.priority ?? null };
+}
+
+export async function listDnsRecords(env, zoneId) {
+  const out = [];
+  for (let page = 1; page <= 5; page++) {                     // 500 records is far beyond a normal site
+    const result = await cloudflareRequest(env, "GET", `/zones/${zoneId}/dns_records?per_page=100&page=${page}`);
+    const rows = Array.isArray(result) ? result : [];
+    out.push(...rows.map(dnsRecord));
+    if (rows.length < 100) break;
+  }
+  return out;
+}
+
+export async function createDnsRecord(env, zoneId, { type, name, content, ttl = 1, priority, proxied = false }) {
+  const body = { type, name, content, ttl, proxied };
+  if (priority !== undefined && priority !== null) body.priority = priority;
+  return dnsRecord(await cloudflareRequest(env, "POST", `/zones/${zoneId}/dns_records`, body));
+}
+
+export async function deleteDnsRecord(env, zoneId, recordId) {
+  await cloudflareRequest(env, "DELETE", `/zones/${zoneId}/dns_records/${recordId}`);
+  return { ok: true };
+}
+
+/**
+ * Serves one hostname of a delegated zone from the site's Worker (Workers Custom Domain). Cloudflare creates the
+ * proxied DNS record and issues the certificate. Idempotent: the same PUT updates an existing attachment.
+ */
+export async function attachWorkerDomain(env, { hostname, workerName, zoneId, zoneName }) {
+  const result = await cloudflareRequest(env, "PUT", `/accounts/${env.CF_ACCOUNT_ID}/workers/domains`, {
+    hostname, service: workerName, environment: "production", zone_id: zoneId, zone_name: zoneName
+  });
+  return { customDomainId: result?.id || null, certId: result?.cert_id || null };
+}
+
+export async function detachWorkerDomain(env, customDomainId) {
+  await cloudflareRequest(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/workers/domains/${customDomainId}`);
+  return { ok: true };
 }

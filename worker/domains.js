@@ -107,6 +107,7 @@ export function createDomainService({ dns, infra }) {
   async function verifyDns(env, domainId) {
     const domain = await getDomain(env, domainId);
     if (!domain) return { ok: false, status: 404, error: "not_found" };
+    if (domain.method && domain.method !== "txt") return { ok: false, status: 409, error: "managed_by_nameserver_flow" };
     if (domain.status !== "pending") return { ok: false, status: 409, error: `cannot verify a domain in status ${domain.status}` };
 
     const expectedValue = `lummet-site-verification=${domain.verification_token}`;
@@ -130,6 +131,7 @@ export function createDomainService({ dns, infra }) {
   async function requestSsl(env, domainId) {
     const domain = await getDomain(env, domainId);
     if (!domain) return { ok: false, status: 404, error: "not_found" };
+    if (domain.method && domain.method !== "txt") return { ok: false, status: 409, error: "managed_by_nameserver_flow" };
     if (domain.status !== "dns_verified") {
       return { ok: false, status: 409, error: `cannot request SSL for a domain in status ${domain.status}` };
     }
@@ -150,6 +152,7 @@ export function createDomainService({ dns, infra }) {
   async function checkSsl(env, domainId) {
     const domain = await getDomain(env, domainId);
     if (!domain) return { ok: false, status: 404, error: "not_found" };
+    if (domain.method && domain.method !== "txt") return { ok: false, status: 409, error: "managed_by_nameserver_flow" };
     if (domain.status !== "ssl_pending") {
       return { ok: false, status: 409, error: `no pending SSL request for a domain in status ${domain.status}` };
     }
@@ -199,6 +202,7 @@ export function createDomainService({ dns, infra }) {
   async function removeDomain(env, domainId, { actorUserId } = {}) {
     const domain = await getDomain(env, domainId);
     if (!domain) return { ok: false, status: 404, error: "not_found" };
+    if (domain.method && domain.method !== "txt") return { ok: false, status: 409, error: "managed_by_nameserver_flow" };
 
     if (domain.ssl_resource_id) {
       // Best-effort cleanup — a failure here shouldn't block the

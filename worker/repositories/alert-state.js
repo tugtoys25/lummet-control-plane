@@ -19,7 +19,15 @@ const COUNT_QUERIES = {
     AND (e.kind != 'organization' OR EXISTS (SELECT 1 FROM organizations o WHERE o.id = e.subject_id AND o.scheduled_deletion_at IS NOT NULL AND o.erased_at IS NULL))
     AND e.id = (SELECT e2.id FROM erasure_log e2 WHERE e2.kind = e.kind AND e2.subject_id = e.subject_id ORDER BY e2.created_at DESC, e2.rowid DESC LIMIT 1)`,
   // 7-day window so an old failure the provider never retried does not alert forever.
+  // 5 or more server errors (5xx or unhandled exceptions) within 15 minutes; below that it is noise, not an incident.
+  server_errors: `SELECT CASE WHEN COUNT(*) >= 5 THEN COUNT(*) ELSE 0 END n FROM request_errors WHERE created_at >= datetime('now','-15 minutes')`,
   failed_billing_webhooks: `SELECT COUNT(*) n FROM billing_webhook_events WHERE status = 'failed' AND received_at >= datetime('now','-7 days')`,
+  // Custom domains the platform could not connect: a zone that failed in the last 14 days, or an active zone whose
+  // hostname keeps failing to attach. A customer who simply has not changed their nameservers yet is NOT an incident.
+  // Only the LATEST rollout counts: once staff resume it, cancel it, or a newer one runs, the alert clears.
+  failed_rollout: `SELECT COUNT(*) AS n FROM tenant_rollouts WHERE status = 'failed' AND id = (SELECT id FROM tenant_rollouts ORDER BY created_at DESC, rowid DESC LIMIT 1)`,
+  failed_domains: `SELECT (SELECT COUNT(*) FROM domain_zones WHERE status = 'failed' AND updated_at >= datetime('now','-14 days'))
+    + (SELECT COUNT(*) FROM domains WHERE method = 'nameservers' AND status = 'dns_verified' AND failure_reason IS NOT NULL) AS n`,
   backup_stale: `SELECT CASE WHEN COALESCE((SELECT MAX(created_at) FROM control_plane_backups WHERE status IN ('complete','expired')), '1970-01-01') < datetime('now','-36 hours') THEN 1 ELSE 0 END n`
 };
 

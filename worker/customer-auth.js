@@ -8,6 +8,7 @@
 // — master prompt rule against duplicate auth systems).
 // =====================================================
 
+import { emailKey } from "./email-key.js";
 import { hashPassword, verifyPassword } from "./auth.js";
 import { createOrganization } from "./organizations.js";
 import { getTotpStatus, verifyFactorForLogin } from "./totp.js";
@@ -150,9 +151,9 @@ export async function signUp(request, env) {
   const passwordHash = await hashPassword(password);
 
   await env.LUMMET_DB.prepare(
-    `INSERT INTO customer_users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)`
+    `INSERT INTO customer_users (id, email, email_key, password_hash, full_name) VALUES (?, ?, ?, ?, ?)`
   )
-    .bind(userId, email, passwordHash, body.fullName || null)
+    .bind(userId, email, emailKey(email), passwordHash, body.fullName || null)
     .run();
 
   const org = await createOrganization(env, { name: organizationName, ownerUserId: userId });

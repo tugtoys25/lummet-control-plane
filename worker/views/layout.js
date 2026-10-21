@@ -197,6 +197,7 @@ const NAV = [
       { label: "API keys", href: "/platform/saas/api-keys", key: "saas-apikeys" },
       { label: "Backups", href: "/platform/saas/backups", key: "saas-backups" },
       { label: "Alerts", href: "/platform/saas/alerts", key: "saas-alerts" },
+      { label: "Server errors", href: "/platform/saas/errors", key: "saas-errors" },
       { label: "DB backups", href: "/platform/saas/cp-backups", key: "saas-cpbackups" },
       { label: "Key rotation", href: "/platform/saas/key-rotation", key: "saas-keyrotation" },
       { label: "Jobs", href: "/platform/saas/jobs", key: "saas-jobs" },

@@ -9,15 +9,10 @@
 // own organizations, never between tenants (a customer never
 // sees the tenant registry at all).
 //
-// SCOPE NOTE: only pages that actually exist link anywhere —
-// Overview, Sites, Billing, Team. Nav items for pages not yet
-// built (Analytics, Domains, Reports, Campaigns, Alerts, Media,
-// Integrations, Automations, AI, API Keys, Notifications,
-// Settings, Support — master prompt section 8's fuller list)
-// are rendered as visibly disabled, not as links that would 404
-// — see the "not yet built" reasoning in the completion report.
-// Their backend APIs already exist (tenant-portal.js, domains.js)
-// for a future pass to wire up.
+// SCOPE NOTE: only pages that actually exist link anywhere. What is still
+// not built (Integrations, Support) is shown as visibly disabled, not as a
+// link that would 404. Nav entries for features a plan does not include are
+// hidden (see hiddenNavKeys in index.js); the routes stay the access control.
 // =====================================================
 
 import { nonceToken, onClick, onChange } from "../csp.js";
@@ -27,6 +22,12 @@ import { STYLES } from "./legacy-styles.js";
 const NAV = [
   { label: "Overview", href: "/app/overview", key: "overview" },
   { label: "Sites", href: "/app/sites", key: "sites" },
+  { label: "Content", href: "/app/content", key: "content" },
+  { label: "Analytics", href: "/app/analytics", key: "analytics" },
+  { label: "Reports", href: "/app/reports", key: "reports" },
+  { label: "Campaigns", href: "/app/campaigns", key: "campaigns" },
+  { label: "Alerts", href: "/app/alerts", key: "alerts" },
+  { label: "Notifications", href: "/app/notifications", key: "notifications" },
   { label: "Domains", href: "/app/domains", key: "domains" },
   { label: "Deployments", href: "/app/deployments", key: "deployments" },
   { label: "Team", href: "/app/team", key: "team" },
@@ -35,21 +36,19 @@ const NAV = [
   { label: "Backups", href: "/app/backups", key: "backups" },
   { label: "Automations", href: "/app/automations", key: "automations" },
   { label: "API & webhooks", href: "/app/developer", key: "developer" },
+  { label: "Search", href: "/app/search", key: "search" },
   { label: "Settings", href: "/app/settings", key: "settings" },
   { label: "Account", href: "/app/account", key: "account" }
 ];
 
-const COMING_SOON = [
-  "Analytics", "Reports", "Campaigns", "Alerts",
-  "Media", "Integrations", "Notifications", "Settings", "Support"
-];
+const COMING_SOON = ["Integrations", "Support"];
 
-function renderNav(activeKey, hiddenNavKeys = []) {
+function renderNav(activeKey, hiddenNavKeys = [], navBadges = {}) {
   // Entries the plan doesn't include are hidden, except the page the user
   // is currently on (reached by URL), which explains the limit itself.
   const hidden = new Set(hiddenNavKeys);
   const links = NAV.filter((item) => !hidden.has(item.key) || item.key === activeKey).map(
-    (item) => `<a href="${item.href}" class="${item.key === activeKey ? "active" : ""}">${escapeHtml(item.label)}</a>`
+    (item) => `<a href="${item.href}" class="${item.key === activeKey ? "active" : ""}">${escapeHtml(item.label)}${navBadges[item.key] > 0 ? ` <span class="badge badge-past_due">${Number(navBadges[item.key])}</span>` : ""}</a>`
   ).join("");
 
   const disabled = COMING_SOON.map(
@@ -91,7 +90,7 @@ function renderOrgSwitcher(organizations, activeOrganizationId) {
  * decision is made by the route handler before calling this, same
  * as the staff shell's tenant switcher.
  */
-export function renderCustomerShell({ title, activeKey, customer, organizations, activeOrganizationId, bodyHtml, hiddenNavKeys = [] }) {
+export function renderCustomerShell({ title, activeKey, customer, organizations, activeOrganizationId, bodyHtml, hiddenNavKeys = [], navBadges = {} }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -122,7 +121,7 @@ export function renderCustomerShell({ title, activeKey, customer, organizations,
 <body>
   <nav class="sidebar">
     <div class="brand"><span class="dot">●</span> Lummet</div>
-    ${renderNav(activeKey, hiddenNavKeys)}
+    ${renderNav(activeKey, hiddenNavKeys, navBadges)}
   </nav>
   <div class="main">
     <div class="topbar">

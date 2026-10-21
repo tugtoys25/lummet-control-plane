@@ -18,12 +18,14 @@ const TRIGGER_LABEL = {
   "subscription.changed": "The subscription changes",
   "payment.failed": "A payment fails",
   "usage.limit_reached": "A usage limit is reached",
-  "report.completed": "A report finishes"
+  "report.completed": "A report finishes",
+  "tracking_link.unhealthy": "A tracking link becomes unhealthy"
 };
 
 const ACTION_LABEL = {
   notify_owners: "Email owners and admins",
   create_alert: "Create an alert in the portal",
+  disable_tracking_link: "Disable that tracking link (reversible)",
   count_usage: "Count the run in usage"
 };
 
@@ -72,6 +74,8 @@ export function renderAutomationsPage({ rules, runs, enabled, canManage, trigger
           <select id="rule-trigger">${triggerOptions}</select>
           <label for="rule-action">Then</label>
           <select id="rule-action">${actionOptions}</select>
+          <label for="rule-health">Only for tracking links that are (when the trigger is a tracking link)</label>
+          <select id="rule-health"><option value="">any unhealthy state</option><option value="broken">broken</option><option value="timeout">timing out</option><option value="restricted">restricted</option><option value="warning">warning</option></select>
           <label for="rule-message">Message (optional)</label>
           <input type="text" id="rule-message" maxlength="500" />
           <label for="rule-max">Maximum runs per hour</label>
@@ -113,11 +117,14 @@ export function renderAutomationsPage({ rules, runs, enabled, canManage, trigger
         e.preventDefault();
         var message = document.getElementById('rule-message').value.trim();
         var action = { type: document.getElementById('rule-action').value };
-        if (message && action.type !== 'count_usage') action.params = { message: message };
+        if (message && action.type !== 'count_usage' && action.type !== 'disable_tracking_link') action.params = { message: message };
+        var conditions = [];
+        var cond = document.getElementById('rule-health');
+        if (cond && cond.value && document.getElementById('rule-trigger').value === 'tracking_link.unhealthy') conditions.push({ field: 'healthStatus', op: 'eq', value: cond.value });
         send('POST', base(), {
           name: document.getElementById('rule-name').value,
           triggerEvent: document.getElementById('rule-trigger').value,
-          conditions: [], actions: [action],
+          conditions: conditions, actions: [action],
           maxRunsPerHour: parseInt(document.getElementById('rule-max').value, 10) || 10
         }, 'Could not create the rule');
       });

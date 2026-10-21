@@ -483,3 +483,9 @@ The public site (`/`, `/brands`, `/updates`, `/insights`, `/partners`,
 A maintenance sweep (every tick of `POST /api/ops/alert-check`; point a pinger at it every 5 minutes) restarts lost
 background jobs, retries failed provisioning with backoff, dead-letters what keeps failing, and retries failed webhook
 deliveries. Optional Cloudflare Queue support. See `docs/DURABLE_JOBS.md` and `docs/CHANGES_V7D.md`.
+
+## Custom domains (v1)
+
+Customers connect their own domain by changing its nameservers; the dashboard tracks progress until the site is live with
+HTTPS. See `docs/CUSTOM_DOMAINS.md` (flow, API, limits, staging test), `docs/CONFIGURATION.md` (every setting) and
+`docs/CHANGES_V1.md`. Check a setup with `node scripts/check-config.mjs [--online]`.

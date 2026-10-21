@@ -32,6 +32,12 @@ Every HTML response gets:
    token from another isolate. Public pages have no executable scripts (only JSON-LD) and are edge-cached; a test
    enforces that `public-site/` never uses `nonceToken`.
 
+## Pages that bring their own policy
+The public site sets its own `Content-Security-Policy` (`script-src 'self'`, because it loads its scripts as same-origin files
+from `/static/js/`). `finalizeResponse()` leaves a response that already has a policy exactly as it is. (v7E replaced it with
+the nonce-only policy, which would have blocked those scripts under `CSP_MODE=enforce`; fixed in v7G and covered by tests that
+render the real public site.)
+
 ## Rollout (the one thing to do before enforcing)
 `CSP_MODE` is `report-only` unless set to `enforce`. In report-only the baseline is enforced as before and the script
 policy is only reported to `POST /api/csp-report`, which logs `{"csp_violation":true,"directive":...,"blocked":...,

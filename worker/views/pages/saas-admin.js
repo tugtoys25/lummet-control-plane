@@ -1,5 +1,6 @@
 // Staff console screens for the SaaS layer (master prompt section 45).
 // Super-admin only — the route layer enforces that; hiding nav is not security.
+import * as errorsRepo from "../../repositories/request-errors.js";
 import { configIssues } from "../../config-check.js";
 import * as alertsModule from "../../alerts.js";
 import * as cpBackupModule from "../../cp-backup.js";
@@ -7,6 +8,8 @@ import * as keyRotationModule from "../../key-rotation.js";
 import { renderShell, escapeHtml as h } from "../layout.js";
 import * as staff from "../../staff-saas.js";
 import * as tenantTemplate from "../../tenant-template.js";
+import * as rolloutsModule from "../../rollouts.js";
+import * as staffTokensModule from "../../staff-tokens.js";
 import { nonceToken, onClick, onSubmit, onChange } from "../../csp.js";
 
 const money = (c) => (c == null ? "custom" : `$${(c / 100).toFixed(2)}`);
@@ -17,7 +20,7 @@ const table = (heads, rows, empty = "Nothing here yet.") =>
     : `<p style="color:var(--text-dim)">${h(empty)}</p>`;
 
 // Shared client helper: POST JSON to a staff API, then reload.
-const SCRIPT = `<script nonce="${nonceToken()}">
+const buildScript = () => `<script nonce="${nonceToken()}">
 function act(url, body, confirmMsg) {
   if (confirmMsg && !confirm(confirmMsg)) return;
   fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
@@ -36,6 +39,46 @@ function actPublishTemplate(f) {
   try { var d = JSON.parse(f.payload.value); act('/api/platform/saas/tenant-template/publish', d); }
   catch (e) { alert('Invalid JSON: ' + e.message); }
 }
+// Staff API token: shown ONCE, built with textContent so nothing from the response is ever parsed as HTML.
+function actCreateStaffToken(f) {
+  var scopes = [];
+  if (f.publish.checked) scopes.push('release:publish');
+  if (f.rollout.checked) scopes.push('rollout:run');
+  fetch('/api/platform/saas/staff-tokens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.name.value, scopes: scopes, expiresInDays: parseInt(f.days.value, 10) }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d.success) { alert('Failed: ' + (d.error || 'unknown')); return; }
+      var box = document.getElementById('new-token-box');
+      box.textContent = '';
+      box.style.display = 'block';
+      var a = document.createElement('p'); a.textContent = 'Copy this token now. It is shown only once and cannot be recovered:';
+      var c = document.createElement('code'); c.textContent = d.token; c.style.wordBreak = 'break-all'; c.style.userSelect = 'all'; c.style.display = 'block';
+      var b = document.createElement('p'); b.textContent = 'Store it as the repository secret LUMMET_STAFF_TOKEN. It expires ' + String(d.expiresAt).slice(0, 10) + '. Reload this page once you have copied it.';
+      box.appendChild(a); box.appendChild(c); box.appendChild(b);
+    });
+}
+// While a rollout is running and this page is open, keep it moving (the server also advances it from the maintenance tick).
+function rolloutDriver() {
+  var el = document.getElementById('rollout-drive');
+  if (!el) return;
+  var id = el.getAttribute('data-rollout');
+  var out = document.getElementById('rollout-progress');
+  var last = el.getAttribute('data-progress');
+  function again(ms) { setTimeout(tick, ms); }
+  function tick() {
+    fetch('/api/platform/saas/rollouts/' + encodeURIComponent(id) + '/advance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.success) { if (out) out.textContent = 'Could not advance: ' + (d.error || 'unknown'); return again(15000); }
+        if (out) out.textContent = d.progress;
+        if (d.done || d.progress !== last) return location.reload();
+        again(d.busy ? 6000 : 4000);
+      })
+      .catch(function () { again(15000); });
+  }
+  tick();
+}
+rolloutDriver();
 </script>`;
 
 // ---- paging for staff lists ----
@@ -57,7 +100,7 @@ function pager(path, params, page, hasMore) {
 }
 
 async function shell(env, admin, title, activeKey, body) {
-  return renderShell({ title, activeKey, admin, env, bodyHtml: `<h1>${h(title)}</h1>${body}${SCRIPT}` });
+  return renderShell({ title, activeKey, admin, env, bodyHtml: `<h1>${h(title)}</h1>${body}${buildScript()}` });
 }
 
 export async function renderSaasOverview(env, admin) {
@@ -177,8 +220,27 @@ export async function renderEmailPage(env, admin) {
 }
 
 
+function renderStaffTokensSection(tokens) {
+  return `<h2>Staff API tokens (CI)</h2>
+    <p style="color:var(--text-dim)">A token lets an unattended job (a GitHub Actions run) publish releases and start rollouts without a browser session. It works only for the release API, only for the access ticked below, and expires. Only a hash is stored: the token is shown once when you create it. Revoking takes effect immediately.</p>
+    ${table(["Name", "Prefix", "Access", "Status", "Last used", "Expires", ""], tokens.map((t) => [h(t.name), h(t.token_prefix), h(t.scopes.join(", ")), badge(t.status), h(t.last_used_at || "never"), h(t.expires_at || "never"),
+      t.status === "active" ? `<button class="btn btn-danger"${onClick("act", [`/api/platform/saas/staff-tokens/${t.id}/revoke`, {}, `Revoke token ${t.token_prefix}? Anything using it stops working immediately.`])}>Revoke</button>` : ""]), "No tokens yet.")}
+    <div class="card">
+      <h3>New token</h3>
+      <form${onSubmit("actCreateStaffToken", ["$el"], { prevent: true })}>
+        <label>Name</label><input name="name" required maxlength="80" placeholder="GitHub Actions: lummet-tenant" />
+        <label><input type="checkbox" name="publish" checked /> Publish releases</label>
+        <label><input type="checkbox" name="rollout" /> Run rollouts</label>
+        <label>Expires in (days, at most ${h(staffTokensModule.MAX_EXPIRY_DAYS)})</label><input name="days" type="number" min="1" max="${h(staffTokensModule.MAX_EXPIRY_DAYS)}" value="${h(staffTokensModule.DEFAULT_EXPIRY_DAYS)}" />
+        <button class="btn" style="margin-top:8px">Create token</button>
+      </form>
+      <div id="new-token-box" class="card" style="display:none;margin-top:12px"></div>
+    </div>`;
+}
+
 export async function renderTenantTemplatePage(env, admin) {
   const releases = await tenantTemplate.listReleases(env);
+  const tokens = await staffTokensModule.listStaffTokens(env);
   return shell(env, admin, "Tenant template releases", "saas-releases", `
     <p style="color:var(--text-dim)">The shared build every newly-provisioned site automatically deploys.
     Publish a new release with the output of <code>scripts/build-tenant-worker.mjs</code>
@@ -190,7 +252,8 @@ export async function renderTenantTemplatePage(env, admin) {
     <form${onSubmit("actPublishTemplate", ["$el"], { prevent: true })}>
       <textarea name="payload" rows="8" style="width:100%;font-family:monospace" placeholder='{"version":"2024.06.01","scriptContent":"...","migrations":[{"name":"0001_x.sql","sql":"..."}],"notes":"..."}'></textarea>
       <button class="btn" style="margin-top:8px">Publish</button>
-    </form>`);
+    </form>
+    ${renderStaffTokensSection(tokens)}`);
 }
 
 export async function renderCouponsPage(env, admin) {
@@ -241,14 +304,48 @@ const statusFilter = (status, options) => `<form method="get" style="display:fle
 export async function renderDomainsAdminPage(env, admin, { status = "", page: rawPage } = {}) {
   const page = pageNumber(rawPage);
   const { rows, hasMore } = paged(await staff.listAllDomains(env, { status, ...pageArgs(page) }));
-  return shell(env, admin, "Domains", "saas-domains", `${statusFilter(status, ["pending", "dns_verified", "ssl_pending", "active", "failed", "removed"])}
-    ${table(["Hostname", "Site", "Organization", "Status", "SSL", "Primary", "Added"], rows.map((d) => [h(d.hostname), h(d.site), orgLink(d.organization_id, d.organization), badge(d.status), badge(d.ssl_status), d.is_primary ? "yes" : "", h(d.created_at)]), "No domains.")}${pager("/platform/saas/domains", { status }, page, hasMore)}`);
+  const zones = page === 1 ? await staff.listAllZones(env, { status: ["pending", "active", "failed", "expired"].includes(status) ? status : "", limit: 50 }) : [];
+  const zoneSection = zones.length ? `<h3>Delegated domains (nameserver flow)</h3>${table(["Domain", "Site", "Organization", "Zone", "Nameservers seen", "Last checked", "Checks", "Note"],
+    zones.map((z) => [h(z.zone_name), h(z.site), orgLink(z.organization_id, z.organization), badge(z.status), z.nameservers_detected_at ? "yes" : "no", h(z.last_checked_at || ""), h(z.check_count), h(z.failure_reason || (z.status === "pending" && z.expires_at ? `expires ${String(z.expires_at).slice(0, 10)}` : ""))]), "")}<h3>Hostnames</h3>` : "";
+  return shell(env, admin, "Domains", "saas-domains", `${zoneSection}${statusFilter(status, ["awaiting_nameservers", "pending", "dns_verified", "ssl_pending", "active", "failed", "expired", "removed"])}
+    ${table(["Hostname", "Connected by", "Site", "Organization", "Status", "SSL", "Primary", "Added"], rows.map((d) => [h(d.hostname), h({ nameservers: "nameservers", cname: "CNAME + TXT" }[d.method] || "TXT (earlier)"), h(d.site), orgLink(d.organization_id, d.organization), badge(d.status) + (d.failure_reason ? ` <span class="muted">${h(String(d.failure_reason).slice(0, 80))}</span>` : ""), badge(d.ssl_status), d.is_primary ? "yes" : "", h(d.created_at)]), "No domains.")}${pager("/platform/saas/domains", { status }, page, hasMore)}`);
+}
+
+const ROLLOUT_ITEM_BADGE = { pending: "waiting", running: "deploying", succeeded: "updated", skipped: "skipped", failed: "failed" };
+
+function renderRolloutSection(d) {
+  const intro = `<p style="color:var(--text-dim)">Publishing a release only stores it: sites keep running what they have until a deployment replaces it. A rollout deploys the active release to every live site <strong>one at a time</strong>. It waits for each site's health check before starting the next, <strong>stops at the first failure</strong> (the remaining sites are not touched, and a site that failed keeps serving its old version), and skips sites already on the release or not live. Details: docs/TENANT_RELEASES.md.</p>`;
+  if (!d.active) return `<h2>Release rollout</h2>${intro}<p style="color:var(--text-dim)">No tenant release has been published yet, so there is nothing to roll out.</p>`;
+  const fleet = d.fleet.length ? d.fleet.map((r) => `${h(r.version || "no version recorded")}: ${h(r.n)}`).join(" &middot; ") : "no live sites";
+  const summary = `<p>Active release <strong>${h(d.active.version)}</strong> (published ${h(d.active.created_at || "")}). Live sites: ${h(d.totalLive)}, on the active release: ${h(d.onActive)}, behind: <strong>${h(d.outdated)}</strong>.<br><span style="color:var(--text-dim)">By version: ${fleet}</span></p>`;
+  let controls = "";
+  if (d.running) {
+    controls = `<p><span id="rollout-progress">${h(d.shown ? d.shown.progress : "")}</span> <button class="btn btn-danger"${onClick("act", [`/api/platform/saas/rollouts/${d.running.id}/cancel`, {}, "Cancel this rollout? Sites not yet updated will stay on their current version. A deployment already under way finishes on its own."])}>Cancel rollout</button></p>
+      <div id="rollout-drive" data-rollout="${h(d.running.id)}" data-progress="${h(d.shown ? d.shown.progress : "")}" style="display:none"></div>
+      <p style="color:var(--text-dim)">This page keeps the rollout moving while it is open; it also continues from the scheduled maintenance tick if you close it.</p>`;
+  } else if (d.outdated > 0) {
+    controls = `<p><button class="btn"${onClick("act", ["/api/platform/saas/rollouts", {}, `Roll out ${d.active.version} to ${d.outdated} site(s), one at a time? It stops at the first failure.`])}>Roll out ${h(d.active.version)} to ${h(d.outdated)} site${d.outdated === 1 ? "" : "s"}</button></p>`;
+  } else {
+    controls = `<p style="color:var(--text-dim)">Every live site is on the active release.</p>`;
+  }
+  let shown = "";
+  if (d.shown) {
+    const r = d.shown;
+    const failedControls = r.status === "failed"
+      ? `<p><button class="btn"${onClick("act", [`/api/platform/saas/rollouts/${r.rolloutId}/resume`, {}, "Try the failed site again and continue with the rest?"])}>Resume</button> <button class="btn btn-danger"${onClick("act", [`/api/platform/saas/rollouts/${r.rolloutId}/cancel`, {}, "Cancel this rollout? The remaining sites stay on their current version."])}>Cancel rollout</button></p>` : "";
+    shown = `<h3>${d.running ? "Current rollout" : "Latest rollout"}: ${h(r.version)} ${badge(r.status)}</h3>
+      <p style="color:var(--text-dim)">Started ${h(r.createdAt || "")} by ${h(r.startedBy || "")}${r.completedAt ? `, finished ${h(r.completedAt)}` : ""}. ${h(r.progress)}.${r.error ? ` <strong>${h(r.error)}</strong>` : ""}</p>${failedControls}
+      ${table(["Site", "Status", "Detail", "Started", "Finished"], r.items.map((i) => [h(i.site_name || i.site_slug || i.site_id), badge(ROLLOUT_ITEM_BADGE[i.status] || i.status), h(i.detail || ""), h(i.started_at || ""), h(i.completed_at || "")]), "No sites.")}`;
+  }
+  const history = d.recent.length > 1 ? `<h3>Earlier rollouts</h3>${table(["Version", "Status", "Sites", "Started by", "Started", "Note"], d.recent.slice(1).map((r) => [h(r.version), badge(r.status), h(r.total), h(r.startedBy || ""), h(r.createdAt), h(r.error || "")]), "")}` : "";
+  return `<h2>Release rollout</h2>${intro}${summary}${controls}${shown}${history}`;
 }
 
 export async function renderDeploymentsAdminPage(env, admin, { status = "", page: rawPage } = {}) {
   const page = pageNumber(rawPage);
   const { rows, hasMore } = paged(await staff.listAllDeployments(env, { status, ...pageArgs(page) }));
-  return shell(env, admin, "Deployments", "saas-deployments", `${statusFilter(status, ["queued", "building", "migrating", "deploying", "checking", "active", "failed", "rolled_back"])}
+  const rollout = page === 1 && !status ? renderRolloutSection(await rolloutsModule.dashboard(env)) + "<h2>Deployments</h2>" : "";
+  return shell(env, admin, "Deployments", "saas-deployments", `${rollout}${statusFilter(status, ["queued", "building", "migrating", "deploying", "checking", "active", "failed", "rolled_back"])}
     ${table(["Site", "Organization", "Version", "Type", "Status", "By", "Started", "Error"], rows.map((d) => [h(d.site), orgLink(d.organization_id, d.organization), h(d.version) + (d.is_current ? " (current)" : ""), d.is_rollback ? "rollback" : "deploy", badge(d.status), h(d.actor_type), h(d.created_at), h(d.error_message || "")]), "No deployments.")}${pager("/platform/saas/deployments", { status }, page, hasMore)}`);
 }
 
@@ -288,6 +385,18 @@ export async function renderOpsAlertsPage(env, admin) {
       ${env.ALERT_CHECK_TOKEN ? "" : " The external trigger endpoint is off because ALERT_CHECK_TOKEN is not set."}</p>
     <button class="btn"${onClick("act", ["/api/platform/saas/alerts/check", {}, "Run the alert check now?"])}>Run check now</button>
     ${table(["Check", "Firing", "Last count", "First seen", "Last notified"], rows.map((r) => [h(r.key), r.firing ? badge("failed") : badge("active"), h(r.last_count), h(r.first_seen_at || "—"), h(r.last_notified_at || "—")]), "Nothing has fired yet.")}`);
+}
+
+export async function renderServerErrorsPage(env, admin) {
+  const [recent, summary] = await Promise.all([errorsRepo.listRecent(env, 100), errorsRepo.summaryLastHours(env, 24)]);
+  return shell(env, admin, "Server errors", "saas-errors", `
+    <p style="color:var(--text-dim)">Every response with a 5xx status, and every unhandled exception, with the request reference shown to the person (header
+      <code>X-Request-Id</code>). Only the route (ids replaced), status and the error's own message are kept, for 14 days. An alert fires when
+      ${h(5)} or more happen within 15 minutes.</p>
+    <h2>Last 24 hours, by route</h2>
+    ${table(["Route", "Status", "Count", "Last seen"], summary.map((r) => [h(r.route), h(r.status), h(r.n), h(r.last_seen)]), "No server errors in the last 24 hours.")}
+    <h2>Most recent</h2>
+    ${table(["When", "Request", "Route", "Status", "Error"], recent.map((r) => [h(r.created_at), `<code>${h(r.request_id)}</code>`, h(`${r.method} ${r.route}`), h(r.status), h(r.error_name ? `${r.error_name}: ${r.message || ""}` : "—")]), "Nothing recorded.")}`);
 }
 
 export async function renderCpBackupsPage(env, admin) {

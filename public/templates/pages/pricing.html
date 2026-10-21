@@ -1,0 +1,37 @@
+<section class="page-hero">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <h1>{{title}}</h1>
+    {{#if intro}}<p class="lede">{{intro}}</p>{{/if}}
+  </div>
+</section>
+<section class="section section-tight">
+  <div class="container">
+    {{#if has_groups}}
+      {{#if has_annual}}
+      <div class="filter-bar" role="group" aria-label="{{ui.pricing_billing_label}}">
+        <a class="chip{{#if monthly}} is-active{{/if}}" href="/pricing">{{ui.pricing_monthly}}</a>
+        <a class="chip{{#if annual}} is-active{{/if}}" href="/pricing?billing=annual">{{ui.pricing_annual}}</a>
+      </div>
+      {{/if}}
+      {{#each groups}}
+      <h2 class="pricing-product">{{name}}</h2>
+      <div class="grid grid-3">
+        {{#each plans}}
+        <article class="card pricing-plan">
+          <h3>{{name}}</h3>
+          <p class="pricing-price"><strong>{{price}}</strong> {{period}}</p>
+          {{#if saving}}<p class="pricing-saving">{{saving}}</p>{{/if}}
+          {{#if trial}}<p>{{trial}}</p>{{/if}}
+          <ul>{{#each features}}<li>{{this}}</li>{{/each}}</ul>
+          <a class="btn btn-primary" href="/app/login">{{ui.pricing_cta}}</a>
+        </article>
+        {{/each}}
+      </div>
+      {{/each}}
+      <p class="pricing-note">{{ui.pricing_note}}</p>
+    {{else}}
+      <div class="empty-state"><p>{{ui.pricing_empty}} <a href="/contact">{{ui.pricing_contact}}</a></p></div>
+    {{/if}}
+  </div>
+</section>

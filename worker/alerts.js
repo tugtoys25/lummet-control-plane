@@ -34,7 +34,10 @@ const CHECKS = [
   { key: "stale_email_queue", title: "Emails queued for over 30 minutes", path: "/platform/saas/email", },
   { key: "unhealthy_tenants", title: "Tenants failing health checks", path: "/tenants/health", },
   { key: "incomplete_deletions", title: "Organization or account deletions that could not fully clean up (external resources may be left behind)", path: "/platform/saas/organizations", },
+  { key: "server_errors", title: "Server errors in the last 15 minutes (5 or more)", path: "/platform/saas/errors", },
   { key: "failed_billing_webhooks", title: "Billing webhook events that failed processing (last 7 days)", path: "/platform/saas/subscriptions", },
+  { key: "failed_rollout", title: "The latest tenant release rollout stopped on a failure (the remaining sites are still on the old version)", path: "/platform/saas/deployments", },
+  { key: "failed_domains", title: "Custom domains the platform could not connect (Cloudflare zone failed or hostname will not attach)", path: "/platform/saas/domains", },
   // Names of missing production settings (never values). Counted from env, not the database.
   { key: "config_incomplete", title: "Production configuration is incomplete", path: "/platform/saas",
     count: (env) => configIssues(env).length,

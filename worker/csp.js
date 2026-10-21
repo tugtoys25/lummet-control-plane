@@ -127,6 +127,18 @@ export async function finalizeResponse(response, env) {
   const mode = cspMode(env);
   const token = nonceToken();
 
+  // A response that brings its own policy keeps it exactly as it is. The public site does: it loads same-origin script
+  // files under its own `script-src 'self'`, and replacing that with a nonce-only policy would block all of them.
+  // (It never contains the secret token; stripping it anyway costs nothing and keeps the guarantee unconditional.)
+  if (headers.has("Content-Security-Policy") || headers.has("Content-Security-Policy-Report-Only")) {
+    if (response.body && (isHtml(ct) || isTextual(ct))) {
+      const text = await response.text();
+      headers.delete("Content-Length");
+      return new Response(text.includes(token) ? text.split(token).join("") : text, { status: response.status, statusText: response.statusText, headers });
+    }
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
+
   if (response.body && isHtml(ct)) {
     let html = await response.text();
     const nonce = makeNonce();

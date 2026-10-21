@@ -38,7 +38,7 @@ Customers see `attempt`, `status` (`delivered`, `failed` = will retry, `retrying
 
 ## Optional: Cloudflare Queues (paid plan)
 
-With a queue bound as `JOB_QUEUE` (see the commented block in `wrangler.example.jsonc`) new jobs are put on the queue
+With a queue bound as `JOB_QUEUE` (create the queues with `wrangler queues create lummet-jobs` and `lummet-jobs-dlq`, then add a `queues` block to `wrangler.jsonc`: a producer binding `JOB_QUEUE` on `lummet-jobs` and a consumer on `lummet-jobs` with `max_batch_size` 1, `max_retries` 5 and `dead_letter_queue` `lummet-jobs-dlq`) new jobs are put on the queue
 instead of `ctx.waitUntil()`, the Worker's `queue` handler runs them, Cloudflare redelivers on error and moves
 messages that keep failing to the dead-letter queue, and the sweep enqueues its resumes/retries too. If the queue
 refuses a message the code falls back to `waitUntil`. Without the binding nothing changes.

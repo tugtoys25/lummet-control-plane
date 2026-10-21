@@ -52,6 +52,7 @@ const ROUTES = [
   ["/insights", pages.insightsPage],
   ["/insights/:slug", pages.insightPage],
   ["/partners", pages.partnersPage],
+  ["/pricing", pages.pricingPage],
   ["/authors/:slug", pages.authorPage],
   ["/contact", (ctx) => forms.formPage(ctx, { key: "contact" })],
   ["/demo", (ctx) => forms.formPage(ctx, { key: "demo" })],

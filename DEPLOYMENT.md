@@ -545,6 +545,12 @@ LUMMET_STAFF_COOKIE='<staff session cookie>' \
   --base https://your-control-plane.example.com --version 2026.10.04 --notes "what changed"
 ```
 
+For unattended use (CI) authenticate with a **staff API token** instead of a
+cookie (`LUMMET_STAFF_TOKEN=lmst_...`), and add `--rollout --wait` to also
+deploy the release to every site, one at a time. Publishing alone changes no
+site. The whole chain, the GitHub Actions workflow and the rollout rules are in
+`docs/TENANT_RELEASES.md`.
+
 Add `--dry-run --skip-build` first to see the file count and size. Requires
 the `TENANT_TEMPLATES` R2 binding and a super-admin session. Assets come from
 `en/static`, `en/templates` and `en/lummet` (not `en/worker`, tests or
@@ -622,3 +628,18 @@ public-site migrations by hand (the old 0006-0010), do NOT run 0033-0037: record
 
     wrangler d1 execute lummet-control-plane-db --remote --command \
       "INSERT OR IGNORE INTO schema_migrations (filename) VALUES ('0033_public_site_schema.sql'),('0034_seed_lummet_content.sql'),('0035_contact_demo_forms.sql'),('0036_signed_in_header.sql'),('0037_repair_select_options.sql')"
+
+---
+
+## Custom domains and configuration (v1)
+
+* Migration `0045_domain_zones.sql` adds delegated custom domains (nameserver flow). It is applied by
+* Migration `0046_subdomain_domains.sql` adds single-subdomain support (CNAME + TXT through Cloudflare for SaaS). The CNAME
+  path also needs a fallback origin: `node scripts/setup-custom-hostnames.mjs` (docs/CUSTOM_DOMAINS.md).
+  `node scripts/migrate.mjs` like every other migration.
+* The Cloudflare API token now also needs **Zone Edit** and **DNS Edit** on all zones of the platform account. The full
+  permission list is in `.dev.vars.example`; the customer-facing flow, API, limits and the staging test are in
+  `docs/CUSTOM_DOMAINS.md`.
+* All variables and secrets, what each does and what breaks without it: `docs/CONFIGURATION.md`. Check a setup with
+  `node scripts/check-config.mjs` (add `--online` to test the Cloudflare token).
+* The maintenance tick (`POST /api/ops/alert-check` or a Cron Trigger) also advances custom domains.

@@ -127,3 +127,16 @@ test('SSO: token and key-set endpoints are resolved; the browser-side authorizat
   const authOnly = await sso.configureSso(env, org, { ...base, authorizationEndpoint: 'https://internal-idp.example.com/auth' });
   assert.equal(authOnly.ok, true, 'the browser follows that URL, not this server');
 });
+
+test('lookupTXT: an unreachable resolver means "no record yet", not an exception (verification must not 500)', async () => {
+  const { lookupTXT } = await import('../worker/dns-doh.js');
+  const real = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => { throw new TypeError('fetch failed'); };
+    assert.deepEqual(await lookupTXT('_lummet.example.com'), []);
+    globalThis.fetch = async () => new Response('nope', { status: 503 });
+    assert.deepEqual(await lookupTXT('_lummet.example.com'), []);
+    globalThis.fetch = async () => new Response(JSON.stringify({ Answer: [{ type: 16, data: '"lummet-verify=abc"' }, { type: 5, data: 'x.' }] }), { status: 200 });
+    assert.deepEqual(await lookupTXT('_lummet.example.com'), ['lummet-verify=abc']);
+  } finally { globalThis.fetch = real; }
+});

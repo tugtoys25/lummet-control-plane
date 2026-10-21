@@ -22,8 +22,7 @@ Not run against live Cloudflare, Stripe or Resend.
 - **Production configuration check** (`worker/config-check.js`): with `ENVIRONMENT=production`, missing settings (names only)
   show as a banner on the staff SaaS overview and raise a `config_incomplete` alert. An empty `PORTAL_BASE_URL` used to
   make sign-up succeed while queueing no emails.
-- `wrangler.example.jsonc` with no real ids. `wrangler.jsonc` itself was left as it was; replace its database id and
-  contact email if this archive is shared.
+- A wrangler config with no real ids (since consolidated into `wrangler.jsonc`).
 
 ## Could not reproduce
 The dev team reported a red control-plane suite (coupon reservation, `column index out of range`) and a tenant suite that

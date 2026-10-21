@@ -6,6 +6,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createTestDb, applyMigrations } from './support/d1-shim.js';
 import worker from '../worker/index.js';
 import * as csp from '../worker/csp.js';
+import { createAssets } from './support/public-env.js';
 
 const html = (body, extra = {}) => new Response(body, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', ...extra } });
 const nonceOf = (r) => (r.headers.get('Content-Security-Policy') || r.headers.get('Content-Security-Policy-Report-Only') || '').match(/'nonce-([^']+)'/)?.[1];
@@ -193,7 +194,7 @@ test('source scan: pages that carry scripts are never edge-cached (a cached nonc
 });
 
 // ---- real pages through the real Worker ----
-function env(extra = {}) { const db = createTestDb(); applyMigrations(db); return { LUMMET_DB: db, CREDENTIAL_KEK: btoa('k'.repeat(32)), CSP_MODE: 'enforce', ...extra }; }
+function env(extra = {}) { const db = createTestDb(); applyMigrations(db); return { LUMMET_DB: db, ASSETS: createAssets(), CONTACT_EMAIL: 'hello@example.test', CREDENTIAL_KEK: btoa('k'.repeat(32)), CSP_MODE: 'enforce', ...extra }; }
 const ctx = { waitUntil(p) { Promise.resolve(p).catch(() => {}); } };
 async function get(e, path, cookie, method = 'GET', body) {
   const h = new Headers({ 'CF-Connecting-IP': '198.51.100.' + (Math.floor(Math.random() * 200) + 1) });
@@ -206,6 +207,14 @@ const cookieOf = (res) => (res.headers.get('Set-Cookie') || '').split(';')[0];
 function checkPage(label, { res, text }) {
   assert.match(res.headers.get('Content-Type') || '', /html/, label);
   const n = nonceOf(res);
+  if (!n) {
+    // A page that brings its own policy (the public site): scripts may only be same-origin files, never inline.
+    assert.match(res.headers.get('Content-Security-Policy'), /script-src 'self'/, `${label}: own policy`);
+    for (const [, attrs] of text.matchAll(/<script\b([^>]*)>/g)) assert.ok(/\ssrc="\/static\//.test(attrs) || /ld\+json/.test(attrs), `${label}: inline script on a script-src 'self' page: ${attrs}`);
+    assert.equal(/<[^>]*(?<![\w.-])on(click|submit|change|input)=/.test(text), false, `${label}: no inline handler`);
+    assert.equal(/lnt[0-9a-f]{32}/.test(text), false, `${label}: no secret token`);
+    return 0;
+  }
   assert.ok(n, `${label}: has a nonce`);
   assert.match(res.headers.get('Content-Security-Policy'), /script-src 'nonce-[^']+'; script-src-attr 'none'/, label);
   assert.equal(/lnt[0-9a-f]{32}/.test(text), false, `${label}: the secret token never leaves the Worker`);
@@ -227,7 +236,8 @@ function checkPage(label, { res, text }) {
 test('real pages: staff console, customer portal and public site all satisfy the policy', async () => {
   const e = env();
   const pages = [];
-  pages.push(['public home', await get(e, '/')]);
+  const home = await get(e, '/'); assert.equal(home.res.status, 200, 'the public home really rendered');
+  pages.push(['public home', home]);
   pages.push(['staff login', await get(e, '/login')]);
   pages.push(['customer login', await get(e, '/app/login')]);
   await get(e, '/api/auth/bootstrap', null, 'POST', { email: 'root@example.com', password: 'Correct-Horse-Battery-9' });
@@ -281,4 +291,30 @@ test('production configuration check asks for CSP_MODE=enforce and warns when th
   assert.ok(!keys({ CSP_MODE: 'enforce' }).includes('CSP_MODE'));
   assert.ok(!keys({}).includes('OUTBOUND_DNS_CHECK'), 'on by default in production');
   assert.ok(keys({ OUTBOUND_DNS_CHECK: 'off' }).includes('OUTBOUND_DNS_CHECK'));
+});
+
+
+test('a response that carries its own CSP keeps it untouched, in both modes (the public site loads same-origin scripts under script-src \'self\')', async () => {
+  const own = "default-src 'self'; script-src 'self'; frame-ancestors 'self'";
+  for (const mode of ['enforce', 'report-only']) {
+    const r = await csp.finalizeResponse(html('<script src="/static/js/nav.js"></script>', { 'Content-Security-Policy': own }), { CSP_MODE: mode });
+    assert.equal(r.headers.get('Content-Security-Policy'), own, mode);
+    assert.equal(r.headers.get('Content-Security-Policy-Report-Only'), null, mode);
+    assert.equal(await r.text(), '<script src="/static/js/nav.js"></script>');
+  }
+  const leaked = await csp.finalizeResponse(html(`x${csp.nonceToken()}y`, { 'Content-Security-Policy': own }), {});
+  assert.equal(await leaked.text(), 'xy', 'the secret still never leaves');
+});
+
+test('the real public site is served with its own policy and its scripts are not blocked, in enforce mode', async () => {
+  const e = env();
+  for (const path of ['/', '/brands', '/pricing', '/contact']) {
+    const { res, text } = await get(e, path);
+    assert.equal(res.status, 200, path);
+    const header = res.headers.get('Content-Security-Policy');
+    assert.match(header, /script-src 'self'/, path);
+    assert.doesNotMatch(header, /nonce-/, path);
+    assert.match(text, /<script src="\/static\/js\/nav\.js"/, path);
+    assert.doesNotMatch(text, /\son(click|submit|change|input)=/, path);
+  }
 });

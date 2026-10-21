@@ -12,8 +12,11 @@
 //
 // Known consequence: the Super API secret is baked in at deploy time, so
 // rotating a tenant credential needs a redeploy to reach the site.
-// Optional tenant email/Turnstile variables (RESEND_*, TURNSTILE_SECRET)
-// are NOT set here; add them if tenants should send mail.
+// Optional Turnstile for the site's own login/register pages: set TENANT_TURNSTILE_SITEKEY and
+// TENANT_TURNSTILE_SECRET on the control plane and every deploy passes them on as TURNSTILE_SITEKEY /
+// TURNSTILE_SECRET. Without them a site has no Turnstile and relies on its attempt limiter (that is how it can
+// be signed in to at all). The widget's allowed hostnames must include the site's hostnames (a Cloudflare setting).
+// Email variables (RESEND_*) are NOT set here; add them if tenants should send mail.
 // =====================================================
 import * as siteResources from "./repositories/site-resources.js";
 import { decryptSecret } from "./crypto.js";
@@ -42,6 +45,10 @@ export async function buildSiteBindings(env, { site, deploymentId, host, hasAsse
     { type: "plain_text", name: "SUPER_API_CREDENTIAL_ID", text: credential.credential_id },
     { type: "secret_text", name: "SUPER_API_SECRET", text: secret }
   ];
+  if (env.TENANT_TURNSTILE_SITEKEY && env.TENANT_TURNSTILE_SECRET) {
+    bindings.push({ type: "plain_text", name: "TURNSTILE_SITEKEY", text: String(env.TENANT_TURNSTILE_SITEKEY) });
+    bindings.push({ type: "secret_text", name: "TURNSTILE_SECRET", text: String(env.TENANT_TURNSTILE_SECRET) });
+  }
   if (hasAssets) bindings.push({ type: "assets", name: "ASSETS" });
   return bindings;
 }

@@ -18,6 +18,8 @@
 import * as entitlementsService from "./entitlements.js";
 import { queueEmail, flushOutbox, portalLink } from "./email.js";
 import { recordUsage } from "./usage.js";
+import { disableTrackingLinks } from "./tenant-links.js";
+import { logAudit } from "./audit.js";
 
 const OPS = {
   eq: (a, b) => a === b,
@@ -29,7 +31,7 @@ const OPS = {
   in: (a, b) => Array.isArray(b) && b.includes(a)
 };
 
-export const TRIGGER_EVENTS = ["site.created", "site.provisioned", "site.deployed", "site.failed", "domain.verified", "subscription.changed", "payment.failed", "usage.limit_reached", "report.completed"];
+export const TRIGGER_EVENTS = ["site.created", "site.provisioned", "site.deployed", "site.failed", "domain.verified", "subscription.changed", "payment.failed", "usage.limit_reached", "report.completed", "tracking_link.unhealthy"];
 
 export const ACTIONS = {
   // Email every owner/admin of the organization.
@@ -54,6 +56,20 @@ export const ACTIONS = {
     await env.LUMMET_DB.prepare(`INSERT INTO automation_alerts (organization_id, rule_id, message) VALUES (?, ?, ?)`)
       .bind(organizationId, rule.id, String(params.message || `${rule.name}: ${event.type}`).slice(0, 500)).run();
     return { alert: true };
+  },
+  // Switch off the tracking link an event is about (tracking_link.unhealthy). Reversible on the site's dashboard.
+  async disable_tracking_link(env, { organizationId, rule, event }) {
+    const siteId = event.data?.siteId, linkId = event.data?.trackingLinkId;
+    if (typeof siteId !== "string" || !Number.isInteger(linkId)) throw new Error("event_has_no_tracking_link");
+    const r = await disableTrackingLinks(env, { organizationId, siteId, ids: [linkId] });
+    await logAudit(env, {
+      actorType: "system", initiatedBy: "automation", organizationId, endpoint: "automation:" + rule.id, method: "PUT",
+      resource: "tracking_link", resourceId: `${siteId}:${linkId}`, action: "disable", success: r.ok && r.disabled === 1,
+      statusCode: r.ok ? 200 : r.status, errorMessage: r.ok ? (r.results[0].ok ? null : r.results[0].error) : r.error
+    });
+    if (!r.ok) throw new Error(r.error);
+    if (r.disabled !== 1) throw new Error(r.results[0].error || "tenant_error");
+    return { disabled: linkId };
   },
   // Meter an automation execution for usage reporting.
   async count_usage(env, { organizationId, rule, event }) {

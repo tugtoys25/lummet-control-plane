@@ -19,6 +19,7 @@ const PREVIOUS_HREFS = [
   "/platform/saas/api-keys",
   "/platform/saas/backups",
   "/platform/saas/alerts",
+  "/platform/saas/errors",
   "/platform/saas/cp-backups",
   "/platform/saas/key-rotation",
   "/platform/saas/jobs",

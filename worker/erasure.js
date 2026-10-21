@@ -13,6 +13,8 @@
 //   - sweepExpiredFinancialRecords: removes retained billing records after the policy period.
 // Nothing here is legal advice; see retention-policy.js.
 // =====================================================
+import { createZoneDomainService } from "./zone-domains.js";
+import * as dohResolver from "./dns-doh.js";
 import * as policy from "./retention-policy.js";
 import { verifyPassword, hashPassword } from "./auth.js";
 import * as cloudflareProvider from "./infra-cloudflare.js";
@@ -117,6 +119,8 @@ async function deleteExternalResources(env, org, infra) {
         await env.LUMMET_DB.prepare(`UPDATE domains SET status = 'removed', ssl_resource_id = NULL, removed_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(d.id).run();
       }
     }
+    // Delegated custom domains (v1): detach hostnames from the Worker and delete the Cloudflare zones.
+    failures.push(...(await createZoneDomainService({ infra, dns: dohResolver }).cleanupForSite(env, site.id)));
     const resources = (await env.LUMMET_DB.prepare(`SELECT id, resource_type, resource_id, resource_name FROM site_resources WHERE site_id = ? AND status = 'active'`).bind(site.id).all()).results;
     const order = { route: 0, worker: 1, d1: 2, kv: 3, r2: 4 };      // stop routing, then the Worker, so nothing is serving while its data goes
     for (const r of resources.sort((a, b) => (order[a.resource_type] ?? 9) - (order[b.resource_type] ?? 9))) {

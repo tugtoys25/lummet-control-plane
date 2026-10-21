@@ -15,6 +15,8 @@
 // straightforward once a write endpoint actually exists.
 // =====================================================
 
+import * as apiKeysRepo from "./repositories/api-keys.js";
+
 const VALID_SCOPES = ["sites:read", "domains:read", "analytics:read", "usage:read"];
 
 async function sha256Hex(text) {
@@ -47,11 +49,8 @@ export async function createApiKey(env, { organizationId, siteId, name, scopes, 
     return { ok: false, status: 422, error: "invalid_scopes", invalidScopes };
   }
 
-  if (siteId) {
-    const site = await env.LUMMET_DB.prepare(`SELECT id FROM sites WHERE id = ? AND organization_id = ?`)
-      .bind(siteId, organizationId)
-      .first();
-    if (!site) return { ok: false, status: 422, error: "invalid_site" };
+  if (siteId && !(await apiKeysRepo.siteBelongsToOrganization(env, siteId, organizationId))) {
+    return { ok: false, status: 422, error: "invalid_site" };
   }
 
   const id = crypto.randomUUID();
@@ -60,35 +59,20 @@ export async function createApiKey(env, { organizationId, siteId, name, scopes, 
   const token = `lmk_${prefix}_${secret}`;
   const tokenHash = await sha256Hex(token);
 
-  await env.LUMMET_DB.prepare(
-    `INSERT INTO customer_api_keys (id, organization_id, site_id, name, key_prefix, key_hash, scopes, created_by, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(id, organizationId, siteId || null, trimmedName, prefix, tokenHash, JSON.stringify(requestedScopes), actorUserId || null, expiresAt || null)
-    .run();
+  await apiKeysRepo.insert(env, { id, organizationId, siteId, name: trimmedName, prefix, keyHash: tokenHash, scopes: requestedScopes, createdBy: actorUserId, expiresAt });
 
   return { ok: true, keyId: id, token, prefix };
 }
 
 export async function listApiKeys(env, organizationId) {
-  const result = await env.LUMMET_DB.prepare(
-    `SELECT id, site_id, name, key_prefix, scopes, status, created_at, last_used_at, expires_at
-     FROM customer_api_keys WHERE organization_id = ? ORDER BY created_at DESC`
-  )
-    .bind(organizationId)
-    .all();
-  return (result.results || []).map((row) => ({ ...row, scopes: JSON.parse(row.scopes) }));
+  const rows = await apiKeysRepo.listForOrganization(env, organizationId);
+  return rows.map((row) => ({ ...row, scopes: JSON.parse(row.scopes) }));
 }
 
 export async function revokeApiKey(env, organizationId, keyId) {
-  const key = await env.LUMMET_DB.prepare(`SELECT id FROM customer_api_keys WHERE id = ? AND organization_id = ?`)
-    .bind(keyId, organizationId)
-    .first();
-  if (!key) return { ok: false, status: 404, error: "not_found" };
+  if (!(await apiKeysRepo.existsInOrganization(env, keyId, organizationId))) return { ok: false, status: 404, error: "not_found" };
 
-  await env.LUMMET_DB.prepare(`UPDATE customer_api_keys SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP WHERE id = ?`)
-    .bind(keyId)
-    .run();
+  await apiKeysRepo.markRevoked(env, keyId);
   return { ok: true };
 }
 
@@ -102,14 +86,12 @@ export async function verifyApiKey(env, token) {
   if (!token || !token.startsWith("lmk_")) return null;
 
   const tokenHash = await sha256Hex(token);
-  const row = await env.LUMMET_DB.prepare(`SELECT * FROM customer_api_keys WHERE key_hash = ?`).bind(tokenHash).first();
+  const row = await apiKeysRepo.findByHash(env, tokenHash);
   if (!row) return null;
   if (row.status !== "active") return null;
   if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return null;
 
-  await env.LUMMET_DB.prepare(`UPDATE customer_api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?`)
-    .bind(row.id)
-    .run();
+  await apiKeysRepo.touchLastUsed(env, row.id);
 
   return { keyId: row.id, organizationId: row.organization_id, siteId: row.site_id, scopes: JSON.parse(row.scopes) };
 }

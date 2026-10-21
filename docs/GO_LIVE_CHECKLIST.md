@@ -69,12 +69,38 @@ Bindings (already in `wrangler.jsonc`): `LUMMET_DB` (D1), `AI`, `BACKUPS` (R2),
 | `STAFF_2FA_REQUIRED=true` | var | Forcing staff 2FA | Optional (see section 6) |
 | `WEB_SEARCH_ENDPOINT`, `WEB_SEARCH_API_KEY` | secret | AI assistant web search | Feature off |
 | `CONTACT_EMAIL` | var | Public homepage mailto link | Neutral text shown |
+| `CSP_MODE` | var | `enforce` turns the script policy on (default: report only; see `CSP.md`) | Injected scripts are reported, not blocked; the configuration banner stays on |
+| `OUTBOUND_DNS_CHECK` | var, optional | `off` disables the check that webhook and SSO hostnames do not resolve to private addresses | On by default in production |
+| `TENANT_TURNSTILE_SITEKEY`, `TENANT_TURNSTILE_SECRET` | var / secret, both or neither | Turnstile on every site's own login and register pages (passed to each site on every deploy) | Sites have no Turnstile and rely on their attempt limiter |
+| `LOG_REQUESTS`, `SLOW_REQUEST_MS` | var, optional | `all` logs every request; slow-request threshold (default 2000) | Failures and slow requests only |
 
 ## 2a. Configuration check (v7C)
 
 With `ENVIRONMENT=production`, the staff SaaS overview shows a red banner naming every missing setting from the table
-above, and the alert check reports it. Treat an empty banner as part of the go-live gate. `wrangler.example.jsonc` is a
-template with no real ids.
+above, and the alert check reports it. Treat an empty banner as part of the go-live gate. `wrangler.jsonc` ships with placeholder ids only;
+replace the D1 database id, `PORTAL_BASE_URL` and `CONTACT_EMAIL` before deploying.
+
+## 2b. First administrator of each new site (v7G)
+
+Customers set their own dashboard login from the portal (Content page > "Set dashboard password"): their portal email, role admin,
+only a hash written into the site's database. No operator step. (The old `SETUP_TOKEN` procedure in `CHANGES_V7F.md` still works
+but is no longer needed.) The Worker's `CF_API_TOKEN` must be allowed to query the site databases (D1 edit).
+
+## 2c. Publishing annual plans and the pricing page (v7G)
+
+Annual plans exist but are retired. For each one you want to sell: create the Stripe price, then Staff > Plans > "Stripe id",
+check "Price", and "Reactivate". `/pricing` lists only active plans, so it shows nothing until you do (monthly plans are
+already active). Review the public pricing words under public UI strings.
+
+## 2d. Automations on tracking-link health (v7H)
+
+The `tracking_link.unhealthy` trigger is fed by the maintenance tick, so it works only when the pinger (or a Cron Trigger) calls
+`/api/ops/alert-check` regularly. Apply migration `0043`. The portal's Disable button works without the tick.
+
+## 2e. Finding a failure (v7I)
+
+Every response has an `X-Request-Id`; a failed page shows it as "quote this reference". Search the Worker logs for that id and open
+Staff > Server errors. The `server_errors` alert (5+ in 15 minutes) needs the alert channel from section 2a. Apply migration `0044`.
 
 ## 3. Deploy order
 
@@ -108,7 +134,10 @@ template with no real ids.
 
 ## 5. Staging verification script
 
-Do each once on staging, tick it off, and record the date.
+The full, ordered runbook with commands, thresholds and a results table is **`STAGING_VALIDATION.md`**; start there. The short list below is
+the minimum. Do each once on staging, tick it off, and record the date.
+
+- [ ] Run `node scripts/staging-checks.mjs --base https://<staging control plane> --with-signup`: **0 blockers**.
 
 - [ ] Run `node scripts/smoke-test.mjs --base https://<staging control plane>`: signup, trial, site creation, **active**,
       then the site's homepage and stylesheet load over HTTPS. **[verify]**
@@ -149,3 +178,13 @@ Do each once on staging, tick it off, and record the date.
 - **Checkout and the billing portal are built but never run against Stripe.** Card entry happens on Stripe's hosted page.
 - **Static asset upload, per-site routes and the tenant cron have never run against a live Cloudflare account.** Use the smoke test.
 - **Staff lists are paged at 50 and have no search**; add filters before you have hundreds of organizations.
+
+## Custom domains (v1)
+
+Apply migration `0045`. Give `CF_API_TOKEN` Zone Edit and DNS Edit (list in `.dev.vars.example`) and make sure the
+Single subdomains by CNAME (optional, v1.1): apply migration `0046`, enable Cloudflare for SaaS on the platform zone and run
+`node scripts/setup-custom-hostnames.mjs` (see docs/CUSTOM_DOMAINS.md). Until the fallback origin is active, adding a
+subdomain that is not inside an already delegated domain is refused with a clear message.
+maintenance tick runs, because it drives nameserver tracking, certificates and expiry of unfinished claims. Run
+`node scripts/check-config.mjs --online`, then the staging test in docs/CUSTOM_DOMAINS.md with a spare domain. Confirm the
+Cloudflare account's zone allowance fits the number of customer domains you expect.

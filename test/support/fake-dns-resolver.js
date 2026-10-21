@@ -8,12 +8,27 @@
 
 export function createFakeDnsResolver() {
   const records = new Map(); // hostname -> string[]
+  const nsRecords = new Map(); // domain -> string[]  (v1: what public DNS says the nameservers are)
+  const cnameRecords = new Map(); // hostname -> string[]  (v1.1)
+  let nsFailure = false;
   const calls = [];
 
   return {
     _calls: calls,
     _setTXTRecords(hostname, values) {
       records.set(hostname, values);
+    },
+    _setNameservers(domain, list) { nsRecords.set(domain, list); },
+    _failNsLookups(v = true) { nsFailure = v; },
+    _setCNAME(hostname, targets) { cnameRecords.set(hostname, targets); },
+    async lookupCNAME(hostname) {
+      calls.push({ method: "lookupCNAME", hostname });
+      return { ok: true, targets: (cnameRecords.get(hostname) || []).slice() };
+    },
+    async lookupNS(domain) {
+      calls.push({ method: "lookupNS", domain });
+      if (nsFailure) return { ok: false };
+      return { ok: true, nameServers: (nsRecords.get(domain) || []).slice().sort() };
     },
     async lookupTXT(hostname) {
       calls.push({ method: "lookupTXT", hostname });

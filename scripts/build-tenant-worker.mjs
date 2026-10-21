@@ -30,7 +30,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 function parseArgs(argv) {
-  const args = { version: null, notes: null, migrationsDir: "migrations", out: null };
+  const args = { version: null, notes: null, migrationsDir: "en/migrations", out: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--version") args.version = argv[++i];
     else if (argv[i] === "--notes") args.notes = argv[++i];
@@ -38,7 +38,7 @@ function parseArgs(argv) {
     else if (argv[i] === "--out") args.out = argv[++i];
   }
   if (!args.version) {
-    console.error("Usage: node build-tenant-worker.mjs --version <tag> [--notes \"...\"] [--migrations-dir migrations] [--out release.json]");
+    console.error("Usage: node build-tenant-worker.mjs --version <tag> [--notes \"...\"] [--migrations-dir en/migrations] [--out release.json]");
     console.error("Run from the lummet-tenant repo root (where wrangler.jsonc lives).");
     process.exit(2);
   }
@@ -82,11 +82,12 @@ function buildScript() {
 }
 
 function collectMigrations(dir) {
-  if (!existsSync(dir)) { console.error(`Migrations directory "${dir}" not found — continuing with zero migrations.`); return []; }
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort()
-    .map((name) => ({ name, sql: readFileSync(join(dir, name), "utf8") }));
+  // A missing directory used to mean "publish zero migrations" silently, which gives new sites an empty database.
+  if (!existsSync(dir)) { console.error(`Migrations directory "${dir}" not found. Pass --migrations-dir (the tenant repo keeps them in en/migrations).`); process.exit(2); }
+  // Only numbered forward migrations: never rollback_*.sql, schema.sql or notes, which sort after the digits and would run last.
+  const names = readdirSync(dir).filter((f) => /^\d{4}_.+\.sql$/.test(f) && !f.toLowerCase().includes("rollback")).sort();
+  if (!names.length) { console.error(`No numbered migrations (NNNN_name.sql) found in "${dir}".`); process.exit(2); }
+  return names.map((name) => ({ name, sql: readFileSync(join(dir, name), "utf8") }));
 }
 
 function main() {

@@ -416,7 +416,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         const fetchSite = request.headers.get("Sec-Fetch-Site");
         let bad = false;
         if (origin && origin !== "null") { try { bad = new URL(origin).host !== url.host; } catch (_) { bad = true; } }
-        else if (origin === "null") bad = fetchSite !== "same-origin"; // no-referrer makes browsers send Origin: null on same-origin form posts                                   // sandboxed/opaque origins
+        else if (origin === "null") bad = true;                                   // sandboxed/opaque origins
         else if (fetchSite && !["same-origin", "none"].includes(fetchSite)) bad = true;
         if (bad) { console.warn("csrf_blocked", JSON.stringify({ origin, fetchSite, host: url.host })); return json({ success: false, error: "cross_site_request_blocked" }, 403); }
       }

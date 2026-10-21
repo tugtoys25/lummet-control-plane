@@ -106,7 +106,7 @@ export async function renderTwoFactorPage(env, admin, { status, required }) {
           $('setup-box').style.display = 'none';
           var box = $('codes-box'); box.style.display = 'block';
           box.innerHTML = '<div class="flash flash-success">Two-factor is on. Save these backup codes now. Each works once and they will not be shown again.</div><pre></pre><a class="btn btn-primary" href="/">Continue</a>';
-          box.querySelector('pre').textContent = d.backupCodes.join('\\n');
+          box.querySelector('pre').textContent = d.backupCodes.join('\n');
         });
       };
       if ($('off-btn')) $('off-btn').onclick = function () {

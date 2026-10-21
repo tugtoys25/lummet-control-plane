@@ -178,8 +178,6 @@
 	// "https://app.yourdomain.com".
 	"workers_dev": true,
 	"routes": [{ "pattern": "luminousagents.com", "custom_domain": true }],
-	"queues": { "producers": [{ "binding": "JOB_QUEUE", "queue": "lummet-jobs" }], "consumers": [{ "queue": "lummet-jobs", "max_batch_size": 1, "max_retries": 5, "dead_letter_queue": "lummet-jobs-dlq" }] },
-	"triggers": { "crons": ["*/5 * * * *"] },
 	"vars": {
 		"ENVIRONMENT": "production",
 		"PLATFORM_DOMAIN_SUFFIX": "genteelisms.com",

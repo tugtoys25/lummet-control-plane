@@ -1,27 +1,60 @@
-name: Deploy
+name: Deploy Lummet Control Plane
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
-
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+  push:
+    branches:
+      - main
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  test:
+    # The suite must pass on every Node version we might deploy or develop with, not just one
+    # (node:sqlite behaviour differs between builds). A failure here blocks the deploy job below.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Run tests
+        run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test --if-present
-      - run: npx wrangler deploy
+
+      - name: Install Wrangler
+        run: npm install -g wrangler
+
+      - name: Apply pending database migrations
+        # Closes roadmap item 0.3. Safe to run on every deploy: it only
+        # ever applies migrations this database hasn't seen before (see
+        # scripts/migrate.mjs and its tests in test/migrate.test.js). An
+        # existing production database must be bootstrapped ONCE first —
+        # see DEPLOYMENT.md, "Migration automation" — before this step
+        # is added to the workflow for that database.
+        run: node scripts/migrate.mjs --db lummet-control-plane-db --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy Worker
+        run: wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

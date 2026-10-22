@@ -255,26 +255,6 @@ export function renderDomainsPage({ sites, domainsBySite, zonesBySite = {}, subd
     ${sections}
     ${addForm}
 
-    <style>
-      .domain-site-title { margin-top: 1.5rem; }
-      .domain-zone-head { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
-      .domain-zone-head h2 { margin: 0; }
-      .domain-steps { list-style: none; padding: 0; margin: 1rem 0; display: grid; gap: .5rem; }
-      .domain-step { display: grid; grid-template-columns: 1.5rem 1fr; column-gap: .5rem; align-items: baseline; }
-      .domain-step-detail { grid-column: 2; font-size: .85em; opacity: .75; }
-      .domain-step-done .domain-step-icon { color: #1a7f37; }
-      .domain-step-current .domain-step-icon { color: #bf8700; }
-      .domain-step-failed .domain-step-icon { color: #cf222e; }
-      .domain-step-todo { opacity: .6; }
-      .domain-instructions { border: 1px solid rgba(127,127,127,.35); border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
-      .ns-row { display: flex; align-items: center; gap: .75rem; margin: .35rem 0; }
-      .domain-howto li { margin: .25rem 0; }
-      .domain-zone-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
-      .domain-records table { margin-top: .75rem; }
-      .domain-records form { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; margin-top: .75rem; }
-      .domain-mode { border: 0; padding: 0; margin: .75rem 0; display: grid; gap: .5rem; }
-      .muted { opacity: .75; }
-    </style>
 
     <script nonce="${nonceToken()}">
       var LUMMET_DOMAIN_MESSAGES = ${JSON.stringify(ERROR_MESSAGES)};

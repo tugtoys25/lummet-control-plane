@@ -113,11 +113,11 @@ test('notifications page: shows open items with actions, escapes messages, and t
   assert.equal(page.status, 200);
   assert.doesNotMatch(page.text, /<img src=x/); assert.match(page.text, /&lt;img src=x/);
   assert.match(page.text, /data-onclick="lummetNotify" data-args="\[\d+,&quot;acknowledge&quot;\]"/);
-  assert.match(page.text, /Notifications <span class="badge badge-past_due">2<\/span>/);
+  assert.match(page.text, /Notifications<span class="nav-badge"[^>]*>2<\/span>/);
   const other = await call(e, 'GET', '/app/notifications?status=all', null, o.cookie);
   assert.match(other.text, /Show open only/);
   const clean = await org(e, 'q@example.com');
-  assert.doesNotMatch((await call(e, 'GET', '/app/overview', null, clean.cookie)).text, /Notifications <span class="badge/);
+  assert.doesNotMatch((await call(e, 'GET', '/app/overview', null, clean.cookie)).text, /class="nav-badge"/);
 });
 
 test('search page: finds this organization\'s sites, domains and members, escapes everything, and ignores other organizations', async () => {

@@ -31,6 +31,8 @@ export const ICONS = {
   layout: svg(`<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>`),
   forms: svg(`<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>`),
   platform: svg(`<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>`),
+  team: svg(`<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>`),
+  bolt: svg(`<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>`),
   menu: svg(`<path d="M4 6h16M4 12h16M4 18h16"/>`),
   chevron: svg(`<path d="m9 6 6 6-6 6"/>`),
   sun: svg(`<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>`),
@@ -466,5 +468,55 @@ export const STYLES = `
   @media print {
     .sidebar, .topbar, .nav-backdrop { display: none !important; }
     .app { display: block; }
+  }
+`;
+
+// Extra rules for the customer portal (customer-layout.js). Everything above is shared with the staff
+// console so the two look and behave the same; this only maps the portal's own markup (status badges,
+// stat values, domain wizard, filter rows, nav badges) onto the same tokens in both themes.
+export const CUSTOMER_STYLES = `
+  .stat .value { font-size: clamp(1.4rem, 3vw, 1.9rem); font-weight: 700; letter-spacing: -0.02em; }
+  .stat .sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .badge-trialing, .badge-active, .badge-paid, .badge-ready, .badge-live, .badge-completed, .badge-verified, .badge-done, .badge-healthy, .badge-accepted { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .badge-past_due, .badge-suspended, .badge-pending, .badge-provisioning, .badge-running, .badge-queued, .badge-open, .badge-warning, .badge-paused, .badge-unverified { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+  .badge-canceled, .badge-failed, .badge-expired, .badge-error, .badge-revoked, .badge-unhealthy, .badge-critical { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger-text); }
+  .muted { color: var(--text-dim); opacity: 1; }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 14px; }
+  .filters select, .filters input { width: auto; min-width: 150px; margin-bottom: 0; }
+  code, pre { font-family: "SF Mono", Consolas, monospace; font-size: 13px; }
+  code { background: var(--panel-2); border: 1px solid var(--panel-border); border-radius: 6px; padding: 1px 6px; word-break: break-all; }
+  pre { background: var(--bg); border: 1px solid var(--panel-border); border-radius: var(--radius-sm); padding: 12px 14px; overflow-x: auto; margin: 0 0 14px; }
+  pre code { background: none; border: 0; padding: 0; word-break: normal; }
+  details:not(.nav-group):not(.user-menu) { margin-bottom: 14px; }
+  .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+  .card form:last-child input:last-child, .card form:last-child select:last-child { margin-bottom: 0; }
+
+  .nav-links a.has-badge { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .nav-badge { min-width: 20px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; text-align: center; background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+  .nav-disabled { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; color: var(--text-dim); font-size: 13.5px; opacity: .55; cursor: default; }
+  .nav-disabled em { font-style: normal; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--panel-2); }
+
+  .domain-site-title { margin-top: 1.5rem; }
+  .domain-zone-head { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+  .domain-zone-head h2 { margin: 0; }
+  .domain-steps { list-style: none; padding: 0; margin: 1rem 0; display: grid; gap: .5rem; }
+  .domain-step { display: grid; grid-template-columns: 1.5rem 1fr; column-gap: .5rem; align-items: baseline; }
+  .domain-step-detail { grid-column: 2; font-size: .85em; color: var(--text-dim); }
+  .domain-step-done .domain-step-icon { color: var(--ok); }
+  .domain-step-current .domain-step-icon { color: var(--warn); }
+  .domain-step-failed .domain-step-icon { color: var(--danger); }
+  .domain-step-todo { opacity: .6; }
+  .domain-instructions { background: var(--panel-2); border: 1px solid var(--panel-border); border-radius: var(--radius-sm); padding: 1rem; margin: 1rem 0; }
+  .ns-row { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; margin: .35rem 0; }
+  .domain-howto li { margin: .25rem 0; }
+  .domain-zone-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+  .domain-records table { margin-top: .75rem; }
+  .domain-records form { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; margin-top: .75rem; }
+  .domain-records form input, .domain-records form select { width: auto; flex: 1 1 140px; margin-bottom: 0; }
+  .domain-mode { border: 0; padding: 0; margin: .75rem 0; display: grid; gap: .5rem; }
+  @media (max-width: 560px) {
+    .filters select, .filters input { width: 100%; }
+    .domain-records form input, .domain-records form select { flex-basis: 100%; }
   }
 `;

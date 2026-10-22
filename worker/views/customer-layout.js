@@ -1,69 +1,152 @@
 // =====================================================
-// CUSTOMER PORTAL SHELL (master prompt section 8)
+// CUSTOMER PORTAL SHELL
 //
-// Reuses legacy-styles.js STYLES and layout.js escapeHtml (same visual language as
-// the staff console — deliberately, this is one product) rather
-// than duplicating ~170 lines of CSS. What's different from the
-// staff shell: navigation is entitlement-aware instead of
-// permission-aware, and the switcher is between the customer's
-// own organizations, never between tenants (a customer never
-// sees the tenant registry at all).
+// Same shell as the staff console (layout.js): the same stylesheet, icons, grouped collapsible sidebar with
+// a page finder, sticky topbar, light/dark theme and phone drawer, all from shell-assets.js. A customer's
+// dashboard therefore looks and behaves like the admin one; only the navigation data differs.
 //
-// SCOPE NOTE: only pages that actually exist link anywhere. What is still
-// not built (Integrations, Support) is shown as visibly disabled, not as a
-// link that would 404. Nav entries for features a plan does not include are
-// hidden (see hiddenNavKeys in index.js); the routes stay the access control.
+// What is different from the staff shell, on purpose:
+//   - Navigation is entitlement-aware instead of permission-aware. Entries for features the plan does not
+//     include are hidden (see hiddenNavKeys in index.js); the routes themselves stay the access control.
+//   - The switcher moves between the customer's own organizations, never tenants. Customers never see the
+//     tenant registry. The select keeps id="org-switcher" because several pages read it.
+//   - Pages that are not built yet (Integrations, Support) are listed as visibly disabled, never as links
+//     that would 404.
+//
+// Pages call renderCustomerShell({ title, activeKey, customer, organizations, activeOrganizationId, bodyHtml,
+// hiddenNavKeys, navBadges }); that contract is unchanged.
 // =====================================================
 
 import { nonceToken, onClick, onChange } from "../csp.js";
 import { escapeHtml } from "./layout.js";
-import { STYLES } from "./legacy-styles.js";
+import { ICONS, STYLES, CUSTOMER_STYLES, BOOT_SCRIPT, CLIENT_SCRIPT } from "./shell-assets.js";
 
+// Grouping follows the staff console: a workspace group first, then what the customer measures, earns,
+// runs, automates and administers. Every group is collapsible and the one holding the current page is open.
 const NAV = [
-  { label: "Overview", href: "/app/overview", key: "overview" },
-  { label: "Sites", href: "/app/sites", key: "sites" },
-  { label: "Content", href: "/app/content", key: "content" },
-  { label: "Analytics", href: "/app/analytics", key: "analytics" },
-  { label: "Reports", href: "/app/reports", key: "reports" },
-  { label: "Campaigns", href: "/app/campaigns", key: "campaigns" },
-  { label: "Alerts", href: "/app/alerts", key: "alerts" },
-  { label: "Notifications", href: "/app/notifications", key: "notifications" },
-  { label: "Domains", href: "/app/domains", key: "domains" },
-  { label: "Deployments", href: "/app/deployments", key: "deployments" },
-  { label: "Team", href: "/app/team", key: "team" },
-  { label: "Billing", href: "/app/billing", key: "billing" },
-  { label: "Usage & AI", href: "/app/usage", key: "usage" },
-  { label: "Backups", href: "/app/backups", key: "backups" },
-  { label: "Automations", href: "/app/automations", key: "automations" },
-  { label: "API & webhooks", href: "/app/developer", key: "developer" },
-  { label: "Search", href: "/app/search", key: "search" },
-  { label: "Settings", href: "/app/settings", key: "settings" },
-  { label: "Account", href: "/app/account", key: "account" }
+  {
+    id: "workspace",
+    section: "Workspace",
+    icon: "workspace",
+    items: [
+      { label: "Overview", href: "/app/overview", key: "overview" },
+      { label: "Sites", href: "/app/sites", key: "sites" },
+      { label: "Content", href: "/app/content", key: "content" },
+      { label: "Search", href: "/app/search", key: "search" }
+    ]
+  },
+  {
+    id: "insights",
+    section: "Insights",
+    icon: "insights",
+    items: [
+      { label: "Analytics", href: "/app/analytics", key: "analytics" },
+      { label: "Reports", href: "/app/reports", key: "reports" },
+      { label: "Alerts", href: "/app/alerts", key: "alerts" },
+      { label: "Notifications", href: "/app/notifications", key: "notifications" }
+    ]
+  },
+  {
+    id: "monetization",
+    section: "Monetization",
+    icon: "money",
+    items: [
+      { label: "Campaigns", href: "/app/campaigns", key: "campaigns" }
+    ]
+  },
+  {
+    id: "hosting",
+    section: "Hosting",
+    icon: "tenants",
+    items: [
+      { label: "Domains", href: "/app/domains", key: "domains" },
+      { label: "Deployments", href: "/app/deployments", key: "deployments" },
+      { label: "Backups", href: "/app/backups", key: "backups" }
+    ]
+  },
+  {
+    id: "automation",
+    section: "Automation & API",
+    icon: "bolt",
+    items: [
+      { label: "Automations", href: "/app/automations", key: "automations" },
+      { label: "API & webhooks", href: "/app/developer", key: "developer" }
+    ]
+  },
+  {
+    id: "organization",
+    section: "Organization",
+    icon: "team",
+    items: [
+      { label: "Team", href: "/app/team", key: "team" },
+      { label: "Billing", href: "/app/billing", key: "billing" },
+      { label: "Usage & AI", href: "/app/usage", key: "usage" },
+      { label: "Settings", href: "/app/settings", key: "settings" },
+      { label: "Account", href: "/app/account", key: "account" }
+    ]
+  }
 ];
 
 const COMING_SOON = ["Integrations", "Support"];
 
+function badgeText(count) {
+  const n = Number(count) || 0;
+  return n > 99 ? "99+" : String(n);
+}
+
+/**
+ * Renders NAV as collapsible groups, exactly like the staff sidebar. Entries the plan does not include are
+ * left out, except the page the customer is on right now (reached by URL), which explains the limit itself.
+ * A group with nothing left to show disappears. The group holding the current page is open; so is the first
+ * group, so a new visitor sees where to start.
+ */
 function renderNav(activeKey, hiddenNavKeys = [], navBadges = {}) {
-  // Entries the plan doesn't include are hidden, except the page the user
-  // is currently on (reached by URL), which explains the limit itself.
   const hidden = new Set(hiddenNavKeys);
-  const links = NAV.filter((item) => !hidden.has(item.key) || item.key === activeKey).map(
-    (item) => `<a href="${item.href}" class="${item.key === activeKey ? "active" : ""}">${escapeHtml(item.label)}${navBadges[item.key] > 0 ? ` <span class="badge badge-past_due">${Number(navBadges[item.key])}</span>` : ""}</a>`
-  ).join("");
+  let firstRendered = true;
 
-  const disabled = COMING_SOON.map(
-    (label) => `<span class="nav-disabled">${escapeHtml(label)} <em>soon</em></span>`
-  ).join("");
+  const groups = NAV.map((section) => {
+    const visibleItems = section.items.filter((item) => !hidden.has(item.key) || item.key === activeKey);
+    if (visibleItems.length === 0) return null;
 
-  return `
-    <div class="nav-section">
-      <h4>Dashboard</h4>
-      ${links}
-    </div>
-    <div class="nav-section">
-      <h4>Coming soon</h4>
-      ${disabled}
-    </div>`;
+    const hasActive = visibleItems.some((item) => item.key === activeKey);
+    const open = hasActive || firstRendered;
+    firstRendered = false;
+
+    return `
+      <details class="nav-group" data-group="${escapeHtml(section.id)}"${hasActive ? " data-has-active" : ""}${open ? " open" : ""}>
+        <summary>
+          <span class="icon group-icon">${ICONS[section.icon] || ""}</span>
+          <span class="group-label">${escapeHtml(section.section)}</span>
+          <span class="group-count">${visibleItems.length}</span>
+          <span class="icon chevron">${ICONS.chevron}</span>
+        </summary>
+        <div class="nav-links">
+          ${visibleItems
+            .map((item) => {
+              const active = item.key === activeKey;
+              const count = Number(navBadges[item.key]) || 0;
+              const classes = [active ? "active" : "", count > 0 ? "has-badge" : ""].filter(Boolean).join(" ");
+              return `<a href="${item.href}"${classes ? ` class="${classes}"` : ""}${active ? ' aria-current="page"' : ""}>${escapeHtml(item.label)}${count > 0 ? `<span class="nav-badge" aria-label="${count} open">${badgeText(count)}</span>` : ""}</a>`;
+            })
+            .join("")}
+        </div>
+      </details>`;
+  }).filter(Boolean);
+
+  const soon = `
+      <details class="nav-group" data-group="coming-soon">
+        <summary>
+          <span class="icon group-icon">${ICONS.layout}</span>
+          <span class="group-label">Coming soon</span>
+          <span class="group-count">${COMING_SOON.length}</span>
+          <span class="icon chevron">${ICONS.chevron}</span>
+        </summary>
+        <div class="nav-links">
+          ${COMING_SOON.map((label) => `<span class="nav-disabled" aria-disabled="true">${escapeHtml(label)}<em>soon</em></span>`).join("")}
+        </div>
+      </details>`;
+
+  return groups.join("") + soon;
 }
 
 function renderOrgSwitcher(organizations, activeOrganizationId) {
@@ -83,72 +166,92 @@ function renderOrgSwitcher(organizations, activeOrganizationId) {
     </div>`;
 }
 
+function renderUserMenu(customer, role) {
+  const email = customer.email || "";
+  const initial = escapeHtml(email.trim().charAt(0) || "?");
+  return `
+    <details class="user-menu" id="user-menu">
+      <summary aria-label="Account menu">
+        <span class="avatar">${initial}</span>
+        <span class="who-name">${escapeHtml(email)}</span>
+      </summary>
+      <div class="menu-pop">
+        <div class="who-full">${escapeHtml(email)}${role ? `<br><span class="role-badge">${escapeHtml(role)}</span>` : ""}</div>
+        <a href="/app/account">Account</a>
+        <a href="/app/billing">Billing</a>
+        <button type="button"${onClick("lummetLogout", [])}>Log out</button>
+      </div>
+    </details>`;
+}
+
 /**
- * Full customer-portal page shell. `organizations` is the caller's
- * full list (for the switcher); `activeOrganizationId` picks which
- * one is highlighted — the actual "which org is this page showing"
- * decision is made by the route handler before calling this, same
- * as the staff shell's tenant switcher.
+ * Full customer-portal page shell: grouped sidebar + topbar (menu toggle, organization switcher, theme,
+ * account) + content. `organizations` is the caller's full list; `activeOrganizationId` picks the highlighted
+ * one. Which organization a page shows is decided by the route handler before this is called, the same way
+ * the staff shell's tenant switcher works.
  */
-export function renderCustomerShell({ title, activeKey, customer, organizations, activeOrganizationId, bodyHtml, hiddenNavKeys = [], navBadges = {} }) {
+export function renderCustomerShell({ title, activeKey, customer, organizations = [], activeOrganizationId, bodyHtml, hiddenNavKeys = [], navBadges = {} }) {
+  const activeOrg = organizations.find((org) => org.id === activeOrganizationId) || null;
+  const role = activeOrg && activeOrg.my_role ? String(activeOrg.my_role) : "";
+  const scope = activeOrg && activeOrg.name ? activeOrg.name : "Lummet";
+
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
   <title>${escapeHtml(title)} · Lummet</title>
-  <style>
-    ${STYLES}
-    .switcher { display: flex; align-items: center; gap: 8px; }
-    .switcher label { margin: 0; white-space: nowrap; }
-    .switcher select { width: auto; min-width: 180px; margin: 0; }
-    .topbar-right { display: flex; align-items: center; gap: 18px; }
-    .nav-disabled { display: block; padding: 7px 20px; color: #4a4f60; font-size: 14px; }
-    .nav-disabled em { font-style: normal; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 4px; }
-    .stat { text-align: center; padding: 14px 0; }
-    .stat .value { font-size: 26px; font-weight: 700; }
-    .stat .label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
-    .badge-trialing, .badge-active { background: rgba(62, 207, 142, 0.14); color: var(--ok); }
-    .badge-past_due, .badge-suspended { background: rgba(245, 166, 35, 0.14); color: var(--warn); }
-    .badge-canceled, .badge-failed, .badge-expired { background: rgba(240, 82, 107, 0.14); color: var(--danger); }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th { text-align: left; color: var(--text-dim); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; padding: 8px 10px; border-bottom: 1px solid var(--panel-border); }
-    td { padding: 10px; border-bottom: 1px solid var(--panel-border); }
-    tr:last-child td { border-bottom: none; }
-  </style>
+  <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
+  <style>${STYLES}${CUSTOMER_STYLES}</style>
 </head>
 <body>
-  <nav class="sidebar">
-    <div class="brand"><span class="dot">●</span> Lummet</div>
-    ${renderNav(activeKey, hiddenNavKeys, navBadges)}
-  </nav>
-  <div class="main">
-    <div class="topbar">
-      ${organizations.length ? renderOrgSwitcher(organizations, activeOrganizationId) : "<div></div>"}
-      <div class="topbar-right">
-        <div class="who">${customer ? escapeHtml(customer.email) : ""}</div>
-        <a class="logout" href="#"${onClick("lummetLogout", [], { prevent: true })}>Log out</a>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+      <div class="sidebar-head">
+        <a class="brand" href="/app/overview"><span class="dot"></span> Lummet</a>
+        <button type="button" class="icon-btn nav-close" id="nav-close" aria-label="Close menu">${ICONS.close}</button>
       </div>
-    </div>
-    <div class="content">
-      ${bodyHtml}
+      <div class="nav-filter-wrap">
+        <input type="search" id="nav-filter" placeholder="Find a page…" aria-label="Find a page" autocomplete="off" />
+      </div>
+      <nav class="nav-scroll" aria-label="Sections">
+        ${renderNav(activeKey, hiddenNavKeys, navBadges)}
+        <div class="nav-empty" id="nav-empty" hidden>No matching pages.</div>
+      </nav>
+    </aside>
+    <div class="nav-backdrop" id="nav-backdrop"></div>
+    <div class="main">
+      <header class="topbar">
+        <button type="button" class="icon-btn" id="nav-toggle" aria-controls="sidebar" aria-expanded="true" aria-label="Toggle menu">${ICONS.menu}</button>
+        <div class="page-crumb">${escapeHtml(scope)} <span aria-hidden="true">/</span> <strong>${escapeHtml(title)}</strong></div>
+        <div class="topbar-right">
+          <button type="button" class="icon-btn theme-toggle" id="theme-toggle" aria-label="Switch color theme"><span class="icon sun">${ICONS.sun}</span><span class="icon moon">${ICONS.moon}</span></button>
+          ${customer ? renderUserMenu(customer, role) : ""}
+        </div>
+        ${organizations.length ? renderOrgSwitcher(organizations, activeOrganizationId) : ""}
+      </header>
+      <main class="content" id="main-content">
+        ${bodyHtml}
+      </main>
     </div>
   </div>
   <script nonce="${nonceToken()}">
-    function lummetLogout() { fetch('/api/customer/logout', { method: 'POST' }).then(() => { location.href = '/app/login'; }); }
+    function lummetLogout() { fetch('/api/customer/logout', { method: 'POST' }).then(function () { location.href = '/app/login'; }); }
     function lummetSwitchOrg(id) {
-      fetch('/api/organizations/' + id + '/switch', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
+      fetch('/api/organizations/' + encodeURIComponent(id) + '/switch', { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
           if (data.success) { location.reload(); }
           else { alert('Could not switch organization: ' + (data.error || 'unknown error')); }
         })
-        .catch(() => alert('Could not switch organization.'));
+        .catch(function () { alert('Could not switch organization.'); });
     }
   </script>
+  <script nonce="${nonceToken()}">${CLIENT_SCRIPT}</script>
 </body>
 </html>`;
 }
 
-export { escapeHtml };
+export { escapeHtml, NAV };

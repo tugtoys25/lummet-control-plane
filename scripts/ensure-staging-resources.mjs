@@ -13,4 +13,4 @@ function create(args, label) {
   }
 }
 for (const n of ['lummet-backups-staging', 'lummet-tenant-templates-staging']) create(['r2', 'bucket', 'create', n], `staging R2 bucket ${n}`);
-for (const n of ['lummet-jobs-staging-dlq', 'lummet-jobs-staging']) create(['queues', 'create', n], `staging Queue ${n}`);
+for (const n of ['lummet-jobs-staging-dlq', 'lummet-jobs-staging']) create(['queues', 'create', n, '--message-retention-period-secs', '86400'], `staging Queue ${n}`);

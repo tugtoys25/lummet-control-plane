@@ -31,7 +31,7 @@ jobs:
           name: control-plane-per-file-test-timings-node-${{ matrix.node-version }}
           path: test-timings.md
       - run: node scripts/migrate.mjs --db lummet-control-plane-db --dry-run
-      - run: node scripts/package-phase.mjs --phase 3 --version "$(node -p \"require('./package.json').version\")" --skip-tests
+      - run: node scripts/package-phase.mjs --phase 3 --version "$(node -p "require('./package.json').version")" --skip-tests --development-check
   deploy_staging:
     needs: test
     runs-on: ubuntu-24.04

@@ -7,7 +7,7 @@ function create(args, label) {
     console.log(`Created ${label}`);
   } catch (e) {
     const out = `${e.stdout || ''}${e.stderr || ''}`;
-    if (/already exists?/i.test(out)) { console.log(`Exists: ${label}`); return; }
+    if (/already (exists?|taken)|11009/i.test(out)) { console.log(`Exists: ${label}`); return; }
     console.error(`FAILED ${label}\n${out}`);
     process.exit(1);
   }

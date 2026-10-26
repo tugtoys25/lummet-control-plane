@@ -25,7 +25,7 @@ async function customer(e, email) {
   const s = await call(e, 'POST', '/api/customer/signup', { email, password: 'Correct-Horse-Battery-9', organizationName: 'Org ' + email });
   return { id: s.json.organizationId, cookie: s.cookie };
 }
-const SAAS_PAGES = ['/platform/saas', '/platform/saas/organizations', '/platform/saas/subscriptions', '/platform/saas/plans', '/platform/saas/jobs', '/platform/saas/email'];
+const SAAS_PAGES = ['/platform/saas', '/platform/saas/revenue-analytics', '/platform/saas/organizations', '/platform/saas/subscriptions', '/platform/saas/plans', '/platform/saas/jobs', '/platform/saas/email'];
 
 test('staff SaaS pages render for a super admin', async () => {
   const e = env(); const staff = await staffLogin(e); await customer(e, 'c@example.com');
@@ -92,17 +92,25 @@ test('staff can grant AI credits (reason required) and the ledger records it', a
   assert.equal(r.json.data.balance, 50);
 });
 
-test('plan editing validates input and is audited', async () => {
+test('plan editing: status and trial length only; every price attempt is refused and audited', async () => {
   const e = env(); const staff = await staffLogin(e);
-  const bad = await call(e, 'POST', '/api/platform/saas/plans/plan_casino_news_growth', { priceCents: -1 }, staff);
-  assert.equal(bad.status, 422);
-  assert.equal((await call(e, 'POST', '/api/platform/saas/plans/plan_casino_news_growth', { stripePriceId: 'not-a-price' }, staff)).status, 422);
-  assert.equal((await call(e, 'POST', '/api/platform/saas/plans/plan_casino_news_growth', { stripePriceId: 'price_1AbC' , priceCents: 900 }, staff)).status, 200);
+  const plan = '/api/platform/saas/plans/plan_casino_news_growth';
+  // Prices belong to the catalog (Sprint 3.1): a price or a Stripe price id can no longer be edited from the console.
+  for (const body of [{ priceCents: 900 }, { priceCents: -1 }, { stripePriceId: 'price_1AbC' }, { stripePriceId: 'not-a-price' }, { stripePriceId: null }, { priceCents: null }]) {
+    const r = await call(e, 'POST', plan, body, staff);
+    assert.equal(r.status, 422, JSON.stringify(body));
+    assert.equal(r.json.error, 'price_managed_by_catalog');
+  }
   const row = await e.LUMMET_DB.prepare('SELECT price_cents, stripe_price_id FROM plans WHERE id = ?').bind('plan_casino_news_growth').first();
-  assert.equal(row.price_cents, 900); assert.equal(row.stripe_price_id, 'price_1AbC');
-  assert.equal((await call(e, 'POST', '/api/platform/saas/plans/nope', { priceCents: 1 }, staff)).status, 404);
+  assert.equal(row.price_cents, 800); assert.equal(row.stripe_price_id, null);
+  assert.equal((await call(e, 'POST', plan, { trialDays: 91 }, staff)).status, 422);
+  assert.equal((await call(e, 'POST', plan, { status: 'weird' }, staff)).status, 422);
+  assert.equal((await call(e, 'POST', plan, { trialDays: 14, status: 'retired' }, staff)).status, 200);
+  const after = await e.LUMMET_DB.prepare('SELECT trial_days, status FROM plans WHERE id = ?').bind('plan_casino_news_growth').first();
+  assert.equal(after.trial_days, 14); assert.equal(after.status, 'retired');
+  assert.equal((await call(e, 'POST', '/api/platform/saas/plans/nope', { trialDays: 1 }, staff)).status, 404);
   const a = await e.LUMMET_DB.prepare(`SELECT COUNT(*) n FROM lummet_audit_logs WHERE resource = 'plan'`).first();
-  assert.equal(a.n, 4);
+  assert.equal(a.n, 10);
 });
 
 test('job detail page shows history; retry refuses non-failed jobs', async () => {

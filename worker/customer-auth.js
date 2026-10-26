@@ -8,10 +8,13 @@
 // — master prompt rule against duplicate auth systems).
 // =====================================================
 
+import { onEmailVerified } from "./billing-notifications.js";
 import { emailKey } from "./email-key.js";
 import { hashPassword, verifyPassword } from "./auth.js";
 import { createOrganization } from "./organizations.js";
 import { getTotpStatus, verifyFactorForLogin } from "./totp.js";
+import { evaluateSessionUse } from "./org-security-policy.js";
+import * as commercialRepo from "./repositories/commercial.js";
 
 const SESSION_COOKIE = "lummet_customer_session";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
@@ -109,9 +112,15 @@ export async function createSession(env, userId, activeOrganizationId) {
     .bind(sessionId, userId, activeOrganizationId || null, expiresAt)
     .run();
 
+  // Round 6.4A: every sign-in path (password, passkey, SSO, sign-up) issues its session here. If an organization this person belongs to
+  // requires 2FA and they have none, the session is restricted (see getCustomerSession) and the caller is told so it can say why.
+  // With ORG_SECURITY_POLICY=off this is a no-op and never queries.
+  const policy = await evaluateSessionUse(env, userId);
+
   return {
     sessionId,
-    cookie: `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DURATION_MS / 1000}`
+    cookie: `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DURATION_MS / 1000}`,
+    twoFactorEnrollmentRequired: policy.blocked
   };
 }
 
@@ -122,8 +131,31 @@ export async function createSession(env, userId, activeOrganizationId) {
 // separately — see organizations.js.
 // -----------------------------------------------------
 
+async function verifyCustomerTurnstile(request, env, token) {
+  if (String(env.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on") return { ok: true, skipped: true };
+  if (!env.TURNSTILE_SECRET_KEY || !env.TURNSTILE_SITE_KEY || !token) return { ok: false, status: 422, error: "turnstile_required" };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ secret: env.TURNSTILE_SECRET_KEY, response: String(token), remoteip: request.headers.get("CF-Connecting-IP") || "" }),
+      signal: controller.signal
+    });
+    if (!response.ok) return { ok: false, status: 503, error: "turnstile_verification_unavailable" };
+    const result = await response.json();
+    const host = new URL(request.url).hostname;
+    if (result.success !== true || (Array.isArray(result["error-codes"]) && result["error-codes"].includes("invalid-input-secret")) || result.hostname !== host) return { ok: false, status: 422, error: "turnstile_failed" };
+    return { ok: true };
+  } catch {
+    return { ok: false, status: 503, error: "turnstile_verification_unavailable" };
+  } finally { clearTimeout(timeout); }
+}
+
 export async function signUp(request, env) {
   const body = await request.json().catch(() => ({}));
+  const challenge = await verifyCustomerTurnstile(request, env, body.turnstileToken);
+  if (!challenge.ok) return challenge;
   const email = (body.email || "").trim().toLowerCase();
   const password = body.password || "";
   const organizationName = (body.organizationName || "").trim();
@@ -134,6 +166,15 @@ export async function signUp(request, env) {
   }
   if (!organizationName) {
     return { ok: false, status: 422, error: "organization_name_required" };
+  }
+  const requestedPlan = body.planId ? String(body.planId).trim() : null;
+  const requestedPeriod = body.billingPeriod ? String(body.billingPeriod).trim().toLowerCase() : null;
+  if (requestedPlan || requestedPeriod) {
+    if (!requestedPlan || !['monthly','annual'].includes(requestedPeriod)) return { ok:false,status:422,error:'invalid_signup_intent' };
+    const plan = await commercialRepo.signupPlan(env,requestedPlan,requestedPeriod);
+    if (!plan || plan.status !== 'active' || plan.billing_period !== requestedPeriod || plan.price_cents == null || String(plan.billing_period)==='custom') return {ok:false,status:422,error:'invalid_signup_intent'};
+    const price = await commercialRepo.activePlanPrice(env,plan.id,requestedPeriod==='annual'?'year':'month');
+    if (!price?.stripe_price_id) return {ok:false,status:409,error:'plan_not_billing_configured'};
   }
 
   const allowed = await checkRateLimit(env, ipHash, "customer_signup");
@@ -151,9 +192,9 @@ export async function signUp(request, env) {
   const passwordHash = await hashPassword(password);
 
   await env.LUMMET_DB.prepare(
-    `INSERT INTO customer_users (id, email, email_key, password_hash, full_name) VALUES (?, ?, ?, ?, ?)`
+    `INSERT INTO customer_users (id, email, email_key, password_hash, full_name, signup_plan_id, signup_billing_period) VALUES (?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(userId, email, emailKey(email), passwordHash, body.fullName || null)
+    .bind(userId, email, emailKey(email), passwordHash, body.fullName || null, requestedPlan, requestedPeriod)
     .run();
 
   const org = await createOrganization(env, { name: organizationName, ownerUserId: userId });
@@ -177,12 +218,15 @@ export async function signUp(request, env) {
     // prompt section 28); this is deliberately not faked as "email
     // sent". The caller (or a future notification job) delivers it.
     emailVerificationToken: verificationToken,
+    signupIntent: requestedPlan ? { planId: requestedPlan, period: requestedPeriod } : null,
     cookie: session.cookie
   };
 }
 
 export async function login(request, env) {
   const body = await request.json().catch(() => ({}));
+  const challenge = await verifyCustomerTurnstile(request, env, body.turnstileToken);
+  if (!challenge.ok) return challenge;
   const email = (body.email || "").trim().toLowerCase();
   const password = body.password || "";
   const ipHash = await hashIP(request.headers.get("CF-Connecting-IP"));
@@ -231,12 +275,18 @@ export async function login(request, env) {
     )
       .bind(challengeId, user.id, new Date(Date.now() + MFA_CHALLENGE_TTL_MS).toISOString())
       .run();
-    return { ok: true, mfaRequired: true, challengeId };
+    return { ok: true, mfaRequired: true, challengeId, signupIntent: user.signup_plan_id ? { planId:user.signup_plan_id, period:user.signup_billing_period } : null };
   }
 
   const session = await createSession(env, user.id, firstOrg?.organization_id || null);
 
-  return { ok: true, userId: user.id, email: user.email, cookie: session.cookie };
+  // Round 6.4A: password alone is not enough for a member of an organization that requires 2FA. The session exists so the person can
+  // reach the 2FA setup routes (the only way out), but getCustomerSession refuses it everywhere else.
+  if (session.twoFactorEnrollmentRequired) {
+    return { ok: true, userId: user.id, email: user.email, cookie: session.cookie, twoFactorEnrollmentRequired: true, reason: "org_2fa_required", signupIntent: null };
+  }
+
+  return { ok: true, userId: user.id, email: user.email, cookie: session.cookie, signupIntent: user.signup_plan_id ? { planId:user.signup_plan_id, period:user.signup_billing_period } : null };
 }
 
 /**
@@ -262,7 +312,7 @@ export async function completeMfaLogin(env, challengeId, { code, backupCode } = 
 
   await env.LUMMET_DB.prepare(`DELETE FROM customer_mfa_challenges WHERE id = ?`).bind(challengeId).run();
 
-  const user = await env.LUMMET_DB.prepare(`SELECT id, email FROM customer_users WHERE id = ?`).bind(challenge.user_id).first();
+  const user = await commercialRepo.customerLoginIdentity(env,challenge.user_id);
   const firstOrg = await env.LUMMET_DB.prepare(
     `SELECT organization_id FROM organization_users WHERE user_id = ? ORDER BY created_at LIMIT 1`
   )
@@ -270,7 +320,7 @@ export async function completeMfaLogin(env, challengeId, { code, backupCode } = 
     .first();
   const session = await createSession(env, challenge.user_id, firstOrg?.organization_id || null);
 
-  return { ok: true, userId: user.id, email: user.email, cookie: session.cookie };
+  return { ok: true, userId: user.id, email: user.email, cookie: session.cookie, signupIntent: user.signup_plan_id ? { planId:user.signup_plan_id, period:user.signup_billing_period } : null };
 }
 
 function getSessionIdFromRequest(request) {
@@ -292,19 +342,35 @@ export async function logout(request, env) {
  * null if there is no valid, unexpired session — callers must
  * treat that as unauthenticated. Never confused with
  * auth.getCurrentAdmin(), which reads a different cookie entirely.
+ *
+ * Round 6.4A: a session that an organization policy blocks (the person has no 2FA but belongs to an organization that requires it)
+ * is treated as NO session here, so every existing caller fails closed. Only the 2FA setup routes and the portal notice page use
+ * getCustomerSession, which says why.
  */
 export async function getCurrentCustomer(request, env) {
+  const { customer, policy } = await getCustomerSession(request, env);
+  return customer && !policy.blocked ? customer : null;
+}
+
+/**
+ * Like getCurrentCustomer, but also returns the organization-policy verdict: { customer, policy }.
+ * customer is null when there is no valid session. policy is { mode, blocked, wouldBlock, reason, organizationIds }; when blocked is true
+ * the caller must allow nothing except 2FA enrollment, the portal notice and logout. This is the single place sessions are checked
+ * against organization policy, on every use, so a session issued before the policy existed is covered at once.
+ */
+export async function getCustomerSession(request, env) {
+  const none = { customer: null, policy: { mode: "off", blocked: false, wouldBlock: false, reason: null, organizationIds: [] } };
   const sessionId = getSessionIdFromRequest(request);
-  if (!sessionId) return null;
+  if (!sessionId) return none;
 
   const session = await env.LUMMET_DB.prepare(`SELECT * FROM customer_sessions WHERE id = ?`)
     .bind(sessionId)
     .first();
-  if (!session) return null;
+  if (!session) return none;
 
   if (new Date(session.expires_at).getTime() < Date.now()) {
     await env.LUMMET_DB.prepare(`DELETE FROM customer_sessions WHERE id = ?`).bind(sessionId).run();
-    return null;
+    return none;
   }
 
   const user = await env.LUMMET_DB.prepare(
@@ -315,10 +381,11 @@ export async function getCurrentCustomer(request, env) {
 
   if (!user || user.status === "disabled") {
     await env.LUMMET_DB.prepare(`DELETE FROM customer_sessions WHERE id = ?`).bind(sessionId).run();
-    return null;
+    return none;
   }
 
-  return { ...user, sessionId, activeOrganizationId: session.active_organization_id || null };
+  const policy = await evaluateSessionUse(env, user.id);
+  return { customer: { ...user, sessionId, activeOrganizationId: session.active_organization_id || null }, policy };
 }
 
 export async function setActiveOrganization(env, sessionId, organizationId) {
@@ -349,7 +416,11 @@ export async function verifyEmail(env, userId, token) {
     .bind(new Date().toISOString(), userId)
     .run();
 
-  return { ok: true };
+  // Phase 2.1: the trial welcome waits for a verified address. Logged, never fatal: verification itself succeeded.
+  try { await onEmailVerified(env, userId); } catch (e) { console.error(JSON.stringify({ msg: "billing_welcome_failed", error: e?.message || String(e) })); }
+
+  const intent = await commercialRepo.customerSignupIntent(env,userId);
+  return { ok: true, signupIntent: intent?.signup_plan_id ? { planId:intent.signup_plan_id, period:intent.signup_billing_period } : null };
 }
 
 // -----------------------------------------------------

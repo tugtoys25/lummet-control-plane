@@ -6,12 +6,15 @@
 // secrets or credential material.
 // =====================================================
 
+import { streamAudit } from "./audit-stream.js";
+
 export async function logAudit(env, entry) {
+  streamAudit(env, entry);   // AUDIT_LOG_STREAM=on only; independent of the D1 insert below
   try {
     await env.LUMMET_DB.prepare(
       `INSERT INTO lummet_audit_logs
-        (admin_id, tenant_id, endpoint, method, resource, resource_id, action, success, status_code, error_message, request_id, ip_hash, initiated_by, ai_conversation_id, actor_type, customer_user_id, organization_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (admin_id, tenant_id, endpoint, method, resource, resource_id, action, success, status_code, error_message, request_id, ip_hash, initiated_by, ai_conversation_id, actor_type, customer_user_id, organization_id, reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         entry.adminId || null,
@@ -40,7 +43,8 @@ export async function logAudit(env, entry) {
         // they keep defaulting to 'lummet_admin' — unchanged behavior.
         entry.actorType || "lummet_admin",
         entry.customerUserId || null,
-        entry.organizationId || null
+        entry.organizationId || null,
+        entry.reason || null
       )
       .run();
   } catch (_) {

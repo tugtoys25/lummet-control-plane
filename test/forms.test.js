@@ -107,6 +107,25 @@ test('/contact and /demo render from the database through the shared layout', as
   }
 });
 
+test('public contact/demo Turnstile is off by default and CSP is narrowed to the required origin when enabled', async () => {
+  const env = createPublicEnv();
+  const off = await get(handlePublicRoute, env, '/contact');
+  assert.doesNotMatch(await text(off), /cf-turnstile|challenges\.cloudflare\.com/);
+  env.PUBLIC_FORMS_TURNSTILE_REQUIRED = 'on';
+  env.TURNSTILE_SITE_KEY = 'site-key-public';
+  env.TURNSTILE_SECRET_KEY = 'server-secret-test-only';
+  const on = await get(handlePublicRoute, env, '/contact');
+  const html = await text(on);
+  assert.match(html, /class="cf-turnstile" data-sitekey="site-key-public"/);
+  assert.match(html, /https:\/\/challenges\.cloudflare\.com/);
+  const csp = on.headers.get('content-security-policy');
+  assert.match(csp, /script-src 'self' https:\/\/challenges\.cloudflare\.com/);
+  assert.match(csp, /connect-src 'self' https:\/\/challenges\.cloudflare\.com/);
+  assert.match(csp, /frame-src https:\/\/challenges\.cloudflare\.com/);
+  const custom = await get(handlePublicRoute, env, '/forms/press');
+  assert.equal(custom.status, 404);
+});
+
 test('changing a form field in the database changes the page (label, required, select options)', async () => {
   const env = createPublicEnv();
   await env.db.prepare(`UPDATE lummet_form_fields SET label = 'Full name', required = 0 WHERE form_key='contact' AND field_key='name'`).run();
@@ -166,6 +185,46 @@ test('a valid submission is stored, redirected (PRG) and the success text comes 
   assert.doesNotMatch(html, /<form /);
   assert.equal(sent.headers.get('cache-control'), 'no-store');
   assert.match(html, /noindex/);
+});
+
+test('public contact/demo Turnstile fails closed when enabled but missing keys/token, without storing PII', async () => {
+  const env = createPublicEnv();
+  env.PUBLIC_FORMS_TURNSTILE_REQUIRED = 'on';
+  env.TURNSTILE_SITE_KEY = 'public-site-key';
+  const brokenGet = await get(handlePublicRoute, env, '/contact');
+  const brokenHtml = await text(brokenGet);
+  assert.match(brokenHtml, /bot protection is not configured/i);
+  assert.doesNotMatch(brokenHtml, /class="cf-turnstile"/);
+  const missingKeys = await post(handlePublicRoute, env, '/contact', valid);
+  assert.equal(missingKeys.status, 503);
+  assert.match(await text(missingKeys), /bot protection is not configured/i);
+  env.TURNSTILE_SITE_KEY = 'site-key'; env.TURNSTILE_SECRET_KEY = 'secret';
+  const missingToken = await post(handlePublicRoute, env, '/contact', valid);
+  assert.equal(missingToken.status, 503);
+  assert.equal((await inquiries(env)).length, 0);
+});
+
+test('public Turnstile validates the provider result hostname and never stores its token', async () => {
+  const env = createPublicEnv();
+  env.PUBLIC_FORMS_TURNSTILE_REQUIRED = 'on'; env.TURNSTILE_SITE_KEY = 'site-key'; env.TURNSTILE_SECRET_KEY = 'secret';
+  const realFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ success: true, hostname: 'lummet.test' }), { status: 200 });
+    const ok = await post(handlePublicRoute, env, '/contact', { ...valid, 'cf-turnstile-response': 'turnstile-token' });
+    assert.equal(ok.status, 303);
+    const rows = await inquiries(env); assert.equal(rows.length, 1);
+    assert.doesNotMatch(JSON.stringify(rows[0]), /turnstile-token|secret/);
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ success: true, hostname: 'attacker.test' }), { status: 200 });
+    const wrongHost = await post(handlePublicRoute, env, '/contact', { ...valid, 'cf-turnstile-response': 'bad-token' });
+    assert.equal(wrongHost.status, 422);
+    assert.equal((await inquiries(env)).length, 1);
+
+    globalThis.fetch = async () => new Response('unavailable', { status: 503 });
+    const unavailable = await post(handlePublicRoute, env, '/demo', { f_name: 'Ada', f_email: 'ada@example.test', f_message: 'Demo please', 'cf-turnstile-response': 'token' });
+    assert.equal(unavailable.status, 503);
+    assert.equal((await inquiries(env)).length, 1);
+  } finally { globalThis.fetch = realFetch; }
 });
 
 test('invalid submissions re-render the form with field errors and keep what was typed; nothing is stored', async () => {

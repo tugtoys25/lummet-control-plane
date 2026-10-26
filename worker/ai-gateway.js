@@ -10,6 +10,7 @@
 import * as entitlementsService from "./entitlements.js";
 import { reserveCredits, settleCredits, refundCredits, grantMonthlyAllocation } from "./ai-credits.js";
 import { recordUsage } from "./usage.js";
+import { evaluateWriteGate, refusalFor } from "./access.js";
 
 const MAX_INPUT_CHARS = 8000;
 const RATE_LIMIT_PER_MINUTE = 20;
@@ -43,6 +44,8 @@ export function workersAiProvider(env, model = "@cf/meta/llama-3.1-8b-instruct")
 }
 
 export async function runAiTask(env, { organizationId, siteId = null, userId = null, task, input = {}, provider }) {
+  const accessGate = await evaluateWriteGate(env, { organizationId, method: "POST", subPath: "/ai/gateway" });
+  if (accessGate.blocked) return { ok: false, status: 402, ...refusalFor(accessGate.access) };
   const def = TASKS[task];
   if (!def) return { ok: false, status: 400, error: "unknown_task" };
   for (const f of def.required) {

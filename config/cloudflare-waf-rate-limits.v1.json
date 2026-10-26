@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "description": "Versioned Cloudflare WAF rate-limiting rules (phase http_ratelimit) for Lummet. Every threshold below is an editable placeholder [OPEN] until the owner confirms it against real traffic and the zone's plan limits. Apply with scripts/cloudflare-waf-rate-limit-config.mjs (dry-run by default).",
+  "phase": "http_ratelimit",
+  "refPrefix": "lummet-v1-",
+  "thresholdStatus": "[OPEN] owner has not confirmed these thresholds",
+  "neverRateLimit": [
+    "/api/billing/webhook/stripe",
+    "/api/csp-report"
+  ],
+  "rules": [
+    {
+      "key": "auth-staff",
+      "description": "Staff sign-in and second factor",
+      "match": { "methods": ["POST"], "paths": [ { "exact": "/api/auth/login" }, { "exact": "/api/auth/login/mfa" } ] },
+      "requests": 10, "period": 60, "timeout": 600
+    },
+    {
+      "key": "auth-customer",
+      "description": "Customer sign-in, sign-up, password reset, MFA, passkey and email verification",
+      "match": { "methods": ["POST"], "paths": [
+        { "exact": "/api/customer/login" }, { "exact": "/api/customer/signup" },
+        { "exact": "/api/customer/password/forgot" }, { "exact": "/api/customer/password/reset" },
+        { "exact": "/api/customer/mfa/complete" }, { "exact": "/api/customer/email/verify" },
+        { "exact": "/api/customer/webauthn/login/options" }, { "exact": "/api/customer/webauthn/login/verify" }
+      ] },
+      "requests": 10, "period": 60, "timeout": 600
+    },
+    {
+      "key": "invitations",
+      "description": "Accepting an invitation and sending organization invitations",
+      "match": { "methods": ["POST"], "paths": [
+        { "prefix": "/api/invitations/", "suffix": "/accept" },
+        { "prefix": "/api/organizations/", "suffix": "/invitations" }
+      ] },
+      "requests": 20, "period": 60, "timeout": 600
+    },
+    {
+      "key": "billing",
+      "description": "Customer billing actions (checkout, portal, plan change, cancel, pause, coupon). Not the Stripe webhook.",
+      "match": { "methods": ["POST", "PUT"], "paths": [
+        { "prefix": "/api/organizations/", "contains": "/billing/" }
+      ] },
+      "requests": 30, "period": 60, "timeout": 300
+    },
+    {
+      "key": "contact",
+      "description": "Public contact and form submissions",
+      "match": { "methods": ["POST"], "paths": [
+        { "exact": "/contact" }, { "exact": "/contact-sales" }, { "prefix": "/forms/" }
+      ] },
+      "requests": 5, "period": 60, "timeout": 600
+    }
+  ]
+}

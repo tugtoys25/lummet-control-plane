@@ -14,8 +14,10 @@
         <a class="chip{{#if annual}} is-active{{/if}}" href="/pricing?billing=annual">{{ui.pricing_annual}}</a>
       </div>
       {{/if}}
+      <div class="field pricing-family-filter"><label for="pricing-family">{{ui.pricing_family_label}}</label><select id="pricing-family"><option value="all">{{ui.pricing_family_all}}</option>{{#each families}}<option value="{{id}}">{{name}}</option>{{/each}}</select></div>
       {{#each groups}}
-      <h2 class="pricing-product">{{name}}</h2>
+      <section class="pricing-family" data-pricing-family="{{id}}" aria-labelledby="pricing-family-title-{{id}}">
+      <h2 class="pricing-product" id="pricing-family-title-{{id}}">{{name}}</h2>
       <div class="grid grid-3">
         {{#each plans}}
         <article class="card pricing-plan">
@@ -24,12 +26,29 @@
           {{#if saving}}<p class="pricing-saving">{{saving}}</p>{{/if}}
           {{#if trial}}<p>{{trial}}</p>{{/if}}
           <ul>{{#each features}}<li>{{this}}</li>{{/each}}</ul>
-          <a class="btn btn-primary" href="/app/login">{{ui.pricing_cta}}</a>
+          <a class="btn btn-primary" href="/app/signup?plan={{planId}}&amp;period={{signupPeriod}}">{{ui.pricing_cta}}</a>
         </article>
         {{/each}}
       </div>
+      </section>
       {{/each}}
+      <section class="pricing-comparison" aria-labelledby="pricing-comparison-title">
+        <h2 id="pricing-comparison-title">{{ui.pricing_comparison_title}}</h2>
+        <div class="table-scroll" role="region" aria-label="{{ui.pricing_comparison_aria}}" tabindex="0">
+          <table><caption>{{ui.pricing_comparison_caption}}</caption><thead><tr><th scope="col">{{ui.pricing_family_label}}</th><th scope="col">{{ui.pricing_comparison_plan}}</th><th scope="col">{{ui.pricing_comparison_price}}</th><th scope="col">{{ui.pricing_comparison_features}}</th><th scope="col">{{ui.pricing_comparison_action}}</th></tr></thead><tbody>
+          {{#each comparisonPlans}}<tr data-comparison-family="{{productId}}"><td>{{family}}</td><th scope="row">{{name}}</th><td><strong>{{price}}</strong> {{period}}</td><td>{{featuresText}}</td><td><a href="/app/signup?plan={{planId}}&amp;period={{signupPeriod}}">{{ui.pricing_cta}}</a></td></tr>{{/each}}
+          </tbody></table>
+        </div>
+      </section>
       <p class="pricing-note">{{ui.pricing_note}}</p>
+      <aside class="pricing-trust" aria-label="{{ui.pricing_trust_aria}}"><p><strong>{{ui.pricing_trust_title}}</strong> {{ui.pricing_trust_body}}</p></aside>
+      <section class="pricing-faq" aria-labelledby="pricing-faq-title"><h2 id="pricing-faq-title">{{ui.pricing_faq_title}}</h2>
+        <details><summary>{{ui.pricing_faq_charge_q}}</summary><p>{{ui.pricing_faq_charge_a}}</p></details>
+        <details><summary>{{ui.pricing_faq_cancel_q}}</summary><p>{{ui.pricing_faq_cancel_a}}</p></details>
+        <details><summary>{{ui.pricing_faq_tax_q}}</summary><p>{{ui.pricing_faq_tax_a}}</p></details>
+        <details><summary>{{ui.pricing_faq_business_q}}</summary><p>{{ui.pricing_faq_business_a}}</p></details>
+      </section>
+      <script src="/static/js/pricing.js" defer></script>
     {{else}}
       <div class="empty-state"><p>{{ui.pricing_empty}} <a href="/contact">{{ui.pricing_contact}}</a></p></div>
     {{/if}}

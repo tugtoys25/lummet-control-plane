@@ -1,0 +1,14 @@
+<article>
+  <header class="page-hero">
+    <div class="container narrow">
+      <h1>{{trust.title}}</h1>
+      <p class="lede">{{trust.description}}</p>
+    </div>
+  </header>
+  <section class="section section-tight">
+    <div class="container narrow prose">
+      {{#if trust.preview}}<p class="notice notice-warning" role="status">{{trust.preview_text}}</p>{{/if}}
+      {{{trust.content_html}}}
+    </div>
+  </section>
+</article>

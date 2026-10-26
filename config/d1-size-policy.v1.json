@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "confirmed": false,
+  "status": "[OPEN] Every value below is an editable placeholder. None is owner-approved and none is a Cloudflare limit. null means unknown (the check reports unknown, never ok).",
+  "note": "limitBytes is the maximum size of ONE D1 database on the owner's Cloudflare plan. It is an owner fact (Cloudflare's published D1 limits page for the plan in use); this repository does not assume it. warnPercent and criticalPercent are shares of limitBytes. Per-table row limits are null until the owner sets them from a measured staging database.",
+  "warnPercent": 70,
+  "criticalPercent": 85,
+  "limitBytes": null,
+  "highVolume": {
+    "request_errors": { "group": "request_errors", "warnRows": null, "criticalRows": null },
+    "lummet_audit_logs": { "group": "audit", "warnRows": null, "criticalRows": null },
+    "email_outbox": { "group": "email_history", "warnRows": null, "criticalRows": null },
+    "email_webhook_events": { "group": "email_history", "warnRows": null, "criticalRows": null }
+  }
+}

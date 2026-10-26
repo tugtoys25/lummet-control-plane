@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+import { readFile, readdir } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const read = (f) => readFile(path.join(root, f), "utf8");
+const checks = [];
+async function check(name, fn) { try { await fn(); checks.push([name, true, ""]); } catch (e) { checks.push([name, false, e.message]); } }
+const has = (s, x) => { if (!s.includes(x)) throw new Error(`missing ${x}`); };
+await check("consecutive additive migrations 0059-0070", async () => { const names=(await readdir(path.join(root,"migrations"))).filter(x=>/^00(5[9]|6[0-9]|70)_.*\.sql$/.test(x)).sort(); if(names.length!==12) throw new Error(`expected 12 migrations, got ${names.length}`); if(!names[0].startsWith("0059_")||!names[11].startsWith("0070_")) throw new Error(names.join(",")); });
+await check("cancellation feedback schema", async()=>has(await read("migrations/0059_cancellation_feedback.sql"),"cancellation_feedback"));
+await check("usage snapshots are idempotent", async()=>has(await read("migrations/0060_usage_snapshots.sql"),"PRIMARY KEY (organization_id, day, metric)"));
+await check("credit grants have unique payment id", async()=>{const s=await read("migrations/0061_addons.sql");has(s,"provider_payment_id TEXT NOT NULL UNIQUE");has(s,"provider_payment_id TEXT NOT NULL UNIQUE");});
+await check("billing role is non-hierarchical", async()=>{const s=await read("worker/customer-rbac.js");has(s,'required === "billing"');has(s,'if (role === "billing") return false');});
+await check("credit pack webhook path is idempotent", async()=>{const s=await read("worker/billing.js");has(s,"grantCreditPackFromCheckout");const c=await read("worker/commercial.js");has(c,"grantCreditPackFromCheckout");const r=await read("worker/repositories/commercial.js");has(r,"ON CONFLICT(provider_payment_id) DO NOTHING");});
+await check("signup intent and pricing CTAs", async()=>{has(await read("public/templates/pages/pricing.html"),"/app/signup?plan={{planId}}");has(await read("worker/views/customer-pages/login.js"),"lummetSignupIntent");});
+await check("tenant storage quota guards both upload paths", async()=>{const a=await read("../lummet-tenant/en/worker/media-upload/upload.js");const b=await read("../lummet-tenant/en/worker/super/handlers/media.js");has(a,"reserveStorage");has(b,"reserveStorage");has(a,"releaseStorageReservation");has(b,"releaseStorageReservation");has(await read("../lummet-tenant/en/worker/storage-quota.js"),"INSERT INTO platform_storage_reservations");});
+await check("Turnstile is opt-in and verified server-side", async()=>{has(await read("worker/customer-auth.js"),"/turnstile/v0/siteverify");has(await read("worker/config-check.js"),"CUSTOMER_TURNSTILE_REQUIRED");has(await read("worker/public-site/forms.js"),"PUBLIC_FORMS_TURNSTILE_REQUIRED");has(await read("worker/public-site/forms.js"),"result.hostname !== url.hostname");});
+await check("pause/save route remains disabled by default", async()=>{has(await read("worker/billing.js"),"BILLING_SAVE_FLOW || \"off\"");has(await read("worker/index.js"),"/billing/pause");has(await read("test/billing.test.js"),"temporary pause is off by default");});
+await check("accessible pricing comparison and family selector", async()=>{has(await read("public/templates/pages/pricing.html"),"pricing-comparison-title");has(await read("public/static/js/pricing.js"),"addEventListener(\"change\"");has(await read("migrations/0064_phase5_ui_strings.sql"),"pricing_comparison_caption");});
+await check("staff quote routes require reason and audit mutations", async()=>{const s=await read("worker/index.js");has(s,"staffQuoteMatch");has(s,"reason_required");has(s,'resource: "quote"');});
+await check("quote sending queues durable deduplicated email", async()=>{const s=await read("worker/commercial.js");has(s,"quote:${quoteId}:send");has(s,"quote_email_queue_failed");has(s,"Acceptance does not create an invoice");});
+await check("quote line replacement uses atomic D1 batch", async()=>{has(await read("worker/repositories/commercial.js"),"return env.LUMMET_DB.batch(statements)");});
+await check("Customer 360 route and paginated quote queue exist", async()=>{const s=await read("worker/index.js");has(s,"customer-360");has(s,"listQuoteQueue(env, { limit, offset })");});
+await check("billing.js imports commercial (credit-pack grant and refund reversal run in the webhook)", async()=>{has(await read("worker/billing.js"),'import * as commercial from "./commercial.js"');has(await read("worker/billing.js"),"reverseCreditPackForRefund");});
+await check("credit-pack reversals are monotone and balance is net of reversals", async()=>{has(await read("worker/repositories/commercial.js"),"MAX(credits_reversed, excluded.credits_reversed)");has(await read("migrations/0065_phase5_followups.sql"),"credit_pack_reversals");});
+await check("four-eyes approvals: DB refuses self-decision and threshold fails closed", async()=>{has(await read("migrations/0065_phase5_followups.sql"),"decided_by <> requested_by");has(await read("worker/repositories/commercial.js"),"requested_by<>?");has(await read("worker/commercial.js"),"FOUR_EYES_THRESHOLD_CENTS");});
+await check("dunning and approval staff routes require a reason and audit", async()=>{const s=await read("worker/index.js");has(s,"dunning_extend_grace");has(s,'resource: "approval_request"');has(s,"/api/platform/saas/approvals");});
+await check("quote fulfillment makes a draft invoice, idempotently, with creator/fulfiller separation", async()=>{const c=await read("worker/commercial.js");has(c,"quote-invoice:${quoteId}");has(c,'pending_invoice_items_behavior: "exclude"');has(c,"creator_cannot_fulfill");has(await read("worker/index.js"),"(edit|send|fulfill|invoice)");});
+
+await check("storage limit sync is signed, monotone and durable; tenant exposes limit and usage", async()=>{has(await read("worker/storage-sync.js"),"pushTenantStorageLimit");has(await read("worker/client.js"),"pushTenantStorageLimit");has(await read("migrations/0067_storage_limit_sync.sql"),"site_storage_limit_sync");has(await read("../lummet-tenant/en/worker/super/handlers/storage-limit.js"),"handleSetStorageLimit");has(await read("../lummet-tenant/en/worker/super/handlers/storage-limit.js"),"handleStorageUsage");});
+await check("Usage page renders real storage bytes", async()=>{has(await read("worker/usage.js"),"organizationStorageUsage");has(await read("worker/views/customer-pages/usage.js"),"storage");});
+await check("add-on intent, webhook confirmation and downgrade guard", async()=>{has(await read("migrations/0070_phase5_completion.sql"),"addon_change_intents");has(await read("worker/commercial.js"),"confirmAddonIntentsFromSubscription");has(await read("worker/plan-change-guard.js"),"Reduce or remove the add-on");});
+await check("credit-pack reconciliation exists", async()=>{has(await read("worker/commercial.js"),"reconcileCreditPacks");has(await read("migrations/0070_phase5_completion.sql"),"credit_pack_reconciliation_findings");});
+await check("quote invoice send and post-payment entitlements", async()=>{has(await read("worker/commercial.js"),"sendQuoteInvoice");has(await read("worker/commercial.js"),"grantQuoteEntitlementsAfterPayment");has(await read("worker/billing.js"),"lummet_quote_id");});
+await check("Founder License is disabled by default and granted only on paid invoice", async()=>{has(await read("worker/commercial.js"),"FOUNDER_LICENSE_ENABLED");has(await read("worker/commercial.js"),"grantFounderLicenseFromPaidInvoice");has(await read("migrations/0070_phase5_completion.sql"),"founder_license_grants");});
+await check("staff comp (four-eyes), webhook replay, tax checklist and immediate cancel are audited", async()=>{const s=await read("worker/index.js");has(s,"dunning_comp_requested");has(s,"webhook_replay");has(s,"tax_registration");has(s,"immediate_cancel");});
+await check("approval emails are queued for second approvers", async()=>{has(await read("worker/commercial.js"),"Approval request");has(await read("worker/commercial.js"),"listActiveStaffEmails");});
+await check("production hostnames are explicit", async()=>{has(await read("worker/config-check.js"),"PORTAL_BASE_URL/PLATFORM_DOMAIN_SUFFIX");});
+await check("owner decisions and placeholder status documented", async()=>{has(await read("docs/CONFIGURATION.md"),"trusted control-plane-to-tenant sync");});
+for(const [n,ok,msg] of checks) console.log(`${ok?"PASS":"FAIL"} ${n}${msg?": "+msg:""}`);
+console.log(`\n${checks.filter(x=>x[1]).length}/${checks.length} Phase 5 static checks passed.`);
+if(checks.some(x=>!x[1])) process.exit(1);

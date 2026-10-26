@@ -213,9 +213,11 @@ export async function sweepExpiredFinancialRecords(env, { now = Date.now(), year
   const cutoff = new Date(now - years * 365.25 * 86400000).toISOString().replace("T", " ").slice(0, 19);
   const orgs = (await env.LUMMET_DB.prepare(`SELECT id FROM organizations WHERE erased_at IS NOT NULL AND erased_at < ?`).bind(cutoff).all()).results;
   for (const o of orgs) {
-    await deleteWhere(env, "subscription_status_events", "subscription_id IN (SELECT id FROM subscriptions WHERE organization_id = ?)", o.id);
+    for (const table of policy.SUBSCRIPTION_SCOPED) {
+      await deleteWhere(env, table, "subscription_id IN (SELECT id FROM subscriptions WHERE organization_id = ?)", o.id);
+    }
     for (const table of policy.FINANCIAL_RETAINED) {
-      if (table !== "subscription_status_events") await deleteWhere(env, table, "organization_id = ?", o.id);
+      if (!policy.SUBSCRIPTION_SCOPED.includes(table)) await deleteWhere(env, table, "organization_id = ?", o.id);
     }
     await deleteWhere(env, "sites", "organization_id = ?", o.id);
     await deleteWhere(env, "organizations", "id = ?", o.id);

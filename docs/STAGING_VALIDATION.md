@@ -18,7 +18,7 @@ Rules for the whole exercise
 | Step | How | Pass |
 |---|---|---|
 | Staging environment | `GO_LIVE_CHECKLIST.md` section 1 | separate D1 / R2 / KV / zone |
-| Apply every migration | `node scripts/migrate.mjs` against staging D1 | ends "up to date", last file `0046_subdomain_domains.sql` |
+| Apply every migration | `node scripts/migrate.mjs` against staging D1 | ends "up to date", last file `0053_plan_change_intents.sql` |
 | Settings | section 2 table; set **`ENVIRONMENT=production`** on staging too so the configuration check is exercised | Staff > SaaS overview shows **no red banner** except `CSP_MODE` (phase 8) |
 | Tenant release | build and publish per `DEPLOYMENT.md` (`scripts/build-tenant-worker.mjs`, `scripts/publish-tenant-release.mjs`) | Staff > Tenant releases shows an active release |
 | Test Turnstile | create a Turnstile widget with the Cloudflare test keys (`1x00000000000000000000AA` / `1x0000000000000000000000000000000AA`) for later; leave `TENANT_TURNSTILE_*` **unset** for phases 1-3 | |

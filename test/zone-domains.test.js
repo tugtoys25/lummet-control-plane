@@ -452,7 +452,7 @@ import { renderDomainsPage } from '../worker/views/customer-pages/domains.js';
 import { execFileSync } from 'node:child_process';
 
 test('failed_domains alert fires for a failed zone, not for a customer who has simply not changed nameservers', async () => {
-  const { infra, svc, env } = services({ ALERT_WEBHOOK_URL: 'https://hooks.example.test/x', STRIPE_SECRET_KEY: 's', STRIPE_WEBHOOK_SECRET: 's', CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', CF_ZONE_ID: 'z', EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'r', EMAIL_FROM: 'a <a@b.test>', ALERT_CHECK_TOKEN: 'x', CSP_MODE: 'enforce', WEBAUTHN_RP_ID: 'a.test', WEBAUTHN_ORIGIN: 'https://a.test' });
+  const { infra, svc, env } = services({ ALERT_WEBHOOK_URL: 'https://hooks.example.test/x', STRIPE_SECRET_KEY: 's', STRIPE_WEBHOOK_SECRET: 's', CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', CF_ZONE_ID: 'z', EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'r', EMAIL_FROM: 'a <a@b.test>', ALERT_CHECK_TOKEN: 'x', CSP_MODE: 'enforce', WEBAUTHN_RP_ID: 'a.test', WEBAUTHN_ORIGIN: 'https://a.test', BILLING_ENFORCE: 'off', BILLING_EMAILS: 'off', STRIPE_API_VERSION: '2024-06-20', BILLING_TRIAL_DAYS_DEFAULT: '7', BILLING_GRACE_DAYS: '14', BILLING_RESTRICTED_DAYS: '7', BILLING_SUSPENDED_DAYS: '30', BILLING_REMINDER_DAYS: '3,1' });
   const ctx = makeCtx(); const a = await setup(env, ctx, infra, 'alert@example.com');
   const sent = []; const fetchImpl = async (u, i) => { sent.push(i?.body); return new Response('', { status: 200 }); };
   const { zoneId } = await svc.addZone(env, { siteId: a.siteId, domain: 'alert.com' });

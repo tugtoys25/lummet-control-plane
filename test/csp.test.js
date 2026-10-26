@@ -32,7 +32,7 @@ test('finalizeResponse (enforce): the secret token becomes this response\'s nonc
   assert.match(body, new RegExp(`<script nonce="${n.replace(/[+/=]/g, '\\$&')}">var a=1</script>`));
   assert.equal(body.includes(token), false, 'the secret never reaches the browser');
   const header = r.headers.get('Content-Security-Policy');
-  assert.match(header, /script-src 'nonce-[^']+'; script-src-attr 'none'/);
+  assert.match(header, /script-src 'nonce-[^']+'(?: https:\/\/challenges\.cloudflare\.com)?; script-src-attr 'none'/);
   assert.match(header, /frame-ancestors 'none'/); assert.match(header, /connect-src 'self'/);
   assert.equal(r.headers.get('Content-Security-Policy-Report-Only'), null);
   // A different response gets a different nonce.
@@ -55,7 +55,7 @@ test('report-only (the default) keeps the baseline enforced and reports the scri
   const r = await csp.finalizeResponse(html('<p>x</p>'), {});
   assert.equal(csp.cspMode({}), 'report-only');
   assert.doesNotMatch(r.headers.get('Content-Security-Policy'), /script-src/);
-  assert.match(r.headers.get('Content-Security-Policy-Report-Only'), /script-src 'nonce-[^']+'; script-src-attr 'none'; report-uri \/api\/csp-report/);
+  assert.match(r.headers.get('Content-Security-Policy-Report-Only'), /script-src 'nonce-[^']+'(?: https:\/\/challenges\.cloudflare\.com)?; script-src-attr 'none'; report-uri \/api\/csp-report/);
   assert.equal(csp.cspMode({ CSP_MODE: 'ENFORCE' }), 'enforce');
   assert.equal(csp.cspMode({ CSP_MODE: 'yes' }), 'report-only');
 });
@@ -169,7 +169,7 @@ test('source scan: every <script> is nonce-bearing, an external src, or a non-ex
   for (const f of SRC) {
     for (const m of readFileSync(f, 'utf8').matchAll(/<script\b[^>]*>/g)) {
       const tag = m[0];
-      if (/nonce="\$\{nonceToken\(\)\}"/.test(tag) || /type="application\/(ld\+)?json"/.test(tag)) continue;
+      if (/nonce="\$\{nonceToken\(\)\}"/.test(tag) || /type="application\/(ld\+)?json"/.test(tag) || /src="https:\/\/challenges\.cloudflare\.com\/turnstile\/v0\/api\.js"/.test(tag)) continue;
       if (/\/\/.*<script/.test(readFileSync(f, 'utf8').split('\n').find((l) => l.includes(tag)) || '')) continue;   // a comment
       bad.push(f + ' ' + tag);
     }
@@ -216,7 +216,7 @@ function checkPage(label, { res, text }) {
     return 0;
   }
   assert.ok(n, `${label}: has a nonce`);
-  assert.match(res.headers.get('Content-Security-Policy'), /script-src 'nonce-[^']+'; script-src-attr 'none'/, label);
+  assert.match(res.headers.get('Content-Security-Policy'), /script-src 'nonce-[^']+'(?: https:\/\/challenges\.cloudflare\.com)?; script-src-attr 'none'/, label);
   assert.equal(/lnt[0-9a-f]{32}/.test(text), false, `${label}: the secret token never leaves the Worker`);
   assert.equal(text.includes('nonceToken'), false, `${label}: no unrendered template call`);
   assert.equal(/<[^>]*(?<![\w.-])on(click|submit|change|input|load|error|keyup|keydown)=/.test(text), false, `${label}: no inline handler`);

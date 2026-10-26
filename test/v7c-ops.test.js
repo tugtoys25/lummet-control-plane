@@ -33,8 +33,8 @@ test('an incomplete production configuration raises an alert naming what is miss
   assert.match(text, /Production configuration is incomplete/);
   assert.match(text, /Missing: .*PORTAL_BASE_URL/);
   // Fix everything.
-  Object.assign(e, { PORTAL_BASE_URL: 'https://app.example.com', STRIPE_SECRET_KEY: 'x', STRIPE_WEBHOOK_SECRET: 'x', CF_API_TOKEN: 'x', CF_ACCOUNT_ID: 'x', CF_ZONE_ID: 'x',
-    EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'x', EMAIL_FROM: 'a@example.com', ALERT_CHECK_TOKEN: 'tick', WEBAUTHN_RP_ID: 'a', WEBAUTHN_ORIGIN: 'https://a', CSP_MODE: 'enforce' });
+  Object.assign(e, { PORTAL_BASE_URL: 'https://app.example.com', PLATFORM_DOMAIN_SUFFIX: 'sites.example.com', STRIPE_SECRET_KEY: 'x', STRIPE_WEBHOOK_SECRET: 'x', CF_API_TOKEN: 'x', CF_ACCOUNT_ID: 'x', CF_ZONE_ID: 'x',
+    EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'x', EMAIL_FROM: 'a@example.com', ALERT_CHECK_TOKEN: 'tick', WEBAUTHN_RP_ID: 'a', WEBAUTHN_ORIGIN: 'https://a', CSP_MODE: 'enforce', BILLING_ENFORCE: 'off', BILLING_EMAILS: 'off', STRIPE_API_VERSION: '2024-06-20', BILLING_TRIAL_DAYS_DEFAULT: '7', BILLING_GRACE_DAYS: '14', BILLING_RESTRICTED_DAYS: '7', BILLING_SUSPENDED_DAYS: '30', BILLING_REMINDER_DAYS: '3,1', RATE_LIMIT_RETRY_AFTER: 'off', PLATFORM_ACCESS_JWT_MODE: 'off', ERROR_TRACKING: 'off', LOG_REDACTION: 'off', AUDIT_LOG_STREAM: 'off', HSTS_PRELOAD: 'off', CSP_REPORT_MODE: 'basic', CF_WAF_ZONE_ID: 'a'.repeat(32), CF_WAF_MAX_RULES: '10', CF_WAF_ALLOWED_PERIODS: '10,60', CF_WAF_MAX_TIMEOUT: '3600', WAF_THRESHOLDS_CONFIRMED: 'yes', PUBLIC_TRUST_PAGES: 'off', PUBLIC_LEGAL_PAGES: 'off', STATUS_PROVIDER_URL: 'https://status.example.com', SECURITY_CONTACT: 'mailto:security@example.com', SECURITY_TXT_EXPIRES: '2030-01-01T00:00:00Z' });
   assert.equal((await runAlertCheck(e, { fetchImpl: f })).results.find((x) => x.key === 'config_incomplete').action, 'resolved');
 });
 

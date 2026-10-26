@@ -23,6 +23,7 @@
 
 import * as realClient from "./client.js";
 import * as entitlementsService from "./entitlements.js";
+import { evaluateWriteGate, evaluateServeGate, refusalFor } from "./access.js";
 
 function buildQuery(params) {
   const entries = Object.entries(params || {}).filter(([, v]) => v !== undefined && v !== null && v !== "");
@@ -146,18 +147,28 @@ export function createTenantPortalService(client) {
     return callTenant(env, site, `/en/api/super/alerts/${encodeURIComponent(alertId)}/acknowledge`, { method: "POST" });
   }
 
+  // Gate before entitlement checks so restricted organizations receive the stable billing reason code,
+  // rather than a misleading generic "not entitled" response. Every public proxy method passes here.
+  const guarded = (name, method, fn) => async (env, site, ...args) => {
+    const entryPoint = `tenant-portal:${name}`;
+    const gate = method === "GET"
+      ? await evaluateServeGate(env, { organizationId: site.organization_id, entryPoint })
+      : await evaluateWriteGate(env, { organizationId: site.organization_id, method, subPath: entryPoint });
+    if (gate.blocked) { const refusal = refusalFor(gate.access); return { ok:false, status:402, reasonCode:refusal.reasonCode, reason:refusal.reasonCode, message:refusal.message }; }
+    return fn(env, site, ...args);
+  };
   return {
-    getAnalyticsOverview,
-    getAnalyticsRevenue,
-    getTrackingHealth,
-    listReports,
-    getReport,
-    runReport,
-    listCampaigns,
-    getCampaign,
-    createCampaign,
-    listAlerts,
-    acknowledgeAlert
+    getAnalyticsOverview: guarded("analytics-overview", "GET", getAnalyticsOverview),
+    getAnalyticsRevenue: guarded("analytics-revenue", "GET", getAnalyticsRevenue),
+    getTrackingHealth: guarded("tracking-health", "GET", getTrackingHealth),
+    listReports: guarded("reports:list", "GET", listReports),
+    getReport: guarded("reports:get", "GET", getReport),
+    runReport: guarded("reports:run", "POST", runReport),
+    listCampaigns: guarded("campaigns:list", "GET", listCampaigns),
+    getCampaign: guarded("campaigns:get", "GET", getCampaign),
+    createCampaign: guarded("campaigns:create", "POST", createCampaign),
+    listAlerts: guarded("alerts:list", "GET", listAlerts),
+    acknowledgeAlert: guarded("alerts:acknowledge", "POST", acknowledgeAlert)
   };
 }
 

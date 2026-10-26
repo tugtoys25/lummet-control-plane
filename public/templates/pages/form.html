@@ -18,6 +18,9 @@
       </div>
       {{else}}{{#if has_fields}}
       {{#if banner}}<div class="form-alert" role="alert">{{banner}}</div>{{/if}}
+      {{#if turnstile.misconfigured}}
+      <div class="form-alert" role="alert">{{ui.form_turnstile_unavailable}}</div>
+      {{else}}
       <form method="post" action="{{form.action}}" data-form data-sending="{{ui.form_sending}}">
         <p class="form-note">{{ui.form_required_note}}</p>
         {{#each fields}}
@@ -38,8 +41,13 @@
         </div>
         {{/each}}
         <div class="hp" aria-hidden="true"><input type="text" name="{{honeypot}}" tabindex="-1" autocomplete="off" value=""></div>
+        {{#if turnstile.enabled}}
+        <div class="field"><div class="cf-turnstile" data-sitekey="{{turnstile.siteKey}}" data-theme="auto"></div><p class="help">{{ui.form_turnstile_help}}</p></div>
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+        {{/if}}
         <button class="btn btn-primary btn-lg" type="submit">{{form.submit_label}}</button>
       </form>
+      {{/if}}
       {{else}}
       <div class="empty-state"><p>{{ui.form_unavailable}}</p></div>
       {{/if}}{{/if}}

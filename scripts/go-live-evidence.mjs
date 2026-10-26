@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+/** Read-only go-live record evaluator. It never ticks boxes or authorizes live billing. */
+import { readFile, writeFile } from 'node:fs/promises'; import path from 'node:path';
+const root=process.cwd(), record=path.join(root,'docs/GO_LIVE_RECORD.md'); const args=process.argv.slice(2); const oi=args.indexOf('--out');
+const source=await readFile(record,'utf8'); const lines=source.split(/\r?\n/);
+const acceptanceNumbers = [...source.matchAll(/\bAT-(\d{1,2})\b/g)].map(m => Number(m[1]));
+const missingAcceptance = Array.from({ length: 15 }, (_, i) => i + 1).filter(n => !acceptanceNumbers.includes(n));
+const phase6SlotsValid = /AT-14[^\n]*Phase 6/i.test(source) && /AT-15[^\n]*Phase 6/i.test(source); const checks=lines.filter(l=>/^\s*- \[ \] /.test(l)||/^\s*- \[xX\] /.test(l)).map(line=>({item:line.replace(/^\s*- \[[ xX]\] /,''),checked:/^\s*- \[xX\] /.test(line),hasEvidence:/\bevidence:\s*\S+/i.test(line) && !/evidence:\s*(?:<[^>]*>|todo|tbd|n\/a|none|-+)\s*$/i.test(line)})); const open=checks.filter(x=>!x.checked||!x.hasEvidence); const result={generatedAt:new Date().toISOString(),record:'docs/GO_LIVE_RECORD.md',status:'NOT APPROVED',checked:checks.length,open:open.length,items:checks,acceptanceTests:{required:'AT-1..AT-15',present:[...new Set(acceptanceNumbers)].sort((a,b)=>a-b),missing:missingAcceptance,at14At15MarkedPhase6:phase6SlotsValid},liveVerification:'NOT VERIFIED by this local script',authorization:'This script never approves or authorizes live charges.'}; const out=JSON.stringify(result,null,2)+'\n'; if(oi>=0&&args[oi+1]) await writeFile(path.resolve(args[oi+1]),out,{mode:0o600}); console.log(out); if(open.length || missingAcceptance.length || !phase6SlotsValid) process.exitCode=1;

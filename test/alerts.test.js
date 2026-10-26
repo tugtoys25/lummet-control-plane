@@ -6,9 +6,9 @@ import worker from '../worker/index.js';
 import { runAlertCheck, tokenMatches, REMINDER_HOURS } from '../worker/alerts.js';
 
 // Every setting the production configuration check looks for, so a "healthy" production baseline stays healthy.
-const FULL_CONFIG = { ALERT_CHECK_TOKEN: 'tick-token-value', PORTAL_BASE_URL: 'https://app.example.com', STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET: 'whsec_x',
+const FULL_CONFIG = { RATE_LIMIT_RETRY_AFTER: 'off', PLATFORM_ACCESS_JWT_MODE: 'off', ERROR_TRACKING: 'off', LOG_REDACTION: 'off', AUDIT_LOG_STREAM: 'off', HSTS_PRELOAD: 'off', CSP_REPORT_MODE: 'basic', CF_WAF_ZONE_ID: 'a'.repeat(32), CF_WAF_MAX_RULES: '10', CF_WAF_ALLOWED_PERIODS: '10,60', CF_WAF_MAX_TIMEOUT: '3600', WAF_THRESHOLDS_CONFIRMED: 'yes', PUBLIC_TRUST_PAGES: 'off', PUBLIC_LEGAL_PAGES: 'off', STATUS_PROVIDER_URL: 'https://status.example.com', SECURITY_CONTACT: 'mailto:security@example.com', SECURITY_TXT_EXPIRES: '2030-01-01T00:00:00Z', ALERT_CHECK_TOKEN: 'tick-token-value', PORTAL_BASE_URL: 'https://app.example.com', PLATFORM_DOMAIN_SUFFIX: 'sites.example.com', STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET: 'whsec_x',
   CF_API_TOKEN: 't', CF_ACCOUNT_ID: 'a', CF_ZONE_ID: 'z', EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 're_x', EMAIL_FROM: 'a@example.com',
-  WEBAUTHN_RP_ID: 'app.example.com', WEBAUTHN_ORIGIN: 'https://app.example.com', CSP_MODE: 'enforce' };
+  WEBAUTHN_RP_ID: 'app.example.com', WEBAUTHN_ORIGIN: 'https://app.example.com', CSP_MODE: 'enforce', BILLING_ENFORCE: 'off', BILLING_EMAILS: 'off', STRIPE_API_VERSION: '2024-06-20', BILLING_TRIAL_DAYS_DEFAULT: '7', BILLING_GRACE_DAYS: '14', BILLING_RESTRICTED_DAYS: '7', BILLING_SUSPENDED_DAYS: '30', BILLING_REMINDER_DAYS: '3,1' };
 function env(extra = {}) { const db = createTestDb(); applyMigrations(db); return { LUMMET_DB: db, CREDENTIAL_KEK: btoa('k'.repeat(32)), ENVIRONMENT: 'production', ...FULL_CONFIG, ...extra }; }
 const ctx = { waitUntil(p) { Promise.resolve(p).catch(() => {}); } };
 const HOOK = 'https://hooks.example.com/services/T/B/x';
@@ -250,4 +250,69 @@ test('the new checks use the repository for their SQL and every check key has a 
   for (const key of ['stale_email_queue', 'unhealthy_tenants', 'incomplete_deletions', 'failed_billing_webhooks']) {
     assert.equal(await repo.countFor(e, key), 0, key);
   }
+});
+
+// ---- Round 6.2B: webhook_lag, trial_expired_still_live and the staff tiles
+async function seedWebhook(e) {
+  await e.LUMMET_DB.prepare(`INSERT INTO organizations (id, name, slug) VALUES ('o1','Org','org1')`).run();
+  await e.LUMMET_DB.prepare(`INSERT INTO webhooks (id, organization_id, url, encrypted_secret, secret_iv, event_types) VALUES ('w1','o1','https://x.example/h','e','i','[]')`).run();
+}
+const delivery = (e, id, status, attempt, lastAttemptSql, createdSql = "datetime('now','-1 hour')") =>
+  e.LUMMET_DB.prepare(`INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, status, attempt, last_attempt_at, created_at) VALUES (?, 'w1', 'site.created', '{}', ?, ?, ${lastAttemptSql}, ${createdSql})`).bind(id, status, attempt).run();
+const act = (r, key) => r.results.find((x) => x.key === key);
+
+test('webhook_lag: overdue deliveries fire once and resolve; backoff waits, fresh work and old expired work do not', async () => {
+  const e = env({ ALERT_WEBHOOK_URL: HOOK }); const f = recorder(); const t0 = Date.parse('2026-10-25T10:00:00Z');
+  await seedWebhook(e);
+  await delivery(e, 'fresh', 'pending', 0, "NULL", "datetime('now','-2 minutes')");
+  await delivery(e, 'waiting', 'failed', 3, "datetime('now','-10 minutes')");          // attempt 3 waits 30 min: not lag
+  await delivery(e, 'delivered', 'delivered', 1, "datetime('now','-3 hours')");
+  await delivery(e, 'old', 'pending', 0, "NULL", "datetime('now','-5 days')");         // outside the 3-day window
+  assert.equal(act(await runAlertCheck(e, { fetchImpl: f, now: t0 }), 'webhook_lag').action, 'ok');
+  await delivery(e, 'stuck', 'retrying', 2, "datetime('now','-20 minutes')");
+  const r1 = await runAlertCheck(e, { fetchImpl: f, now: t0 + 1000 });
+  assert.equal(act(r1, 'webhook_lag').action, 'notified'); assert.equal(act(r1, 'webhook_lag').count, 1);
+  assert.equal(act(await runAlertCheck(e, { fetchImpl: f, now: t0 + 2000 }), 'webhook_lag').action, 'still_firing_quiet');
+  await e.LUMMET_DB.prepare(`UPDATE webhook_deliveries SET status='delivered' WHERE id='stuck'`).run();
+  assert.equal(act(await runAlertCheck(e, { fetchImpl: f, now: t0 + 3000 }), 'webhook_lag').action, 'resolved');
+  await delivery(e, 'overdue-retry', 'failed', 1, "datetime('now','-30 minutes')");     // attempt 1 retries after 1 min, +10 grace
+  assert.equal(act(await runAlertCheck(e, { fetchImpl: f, now: t0 + 4000 }), 'webhook_lag').count, 1);
+  const body = JSON.stringify(f.calls); assert.doesNotMatch(body, /x\.example|secret/i, 'no customer data in the alert');
+});
+
+async function seedTrial(e, { orgId = 'o1', trialEndsSql, site = 'active', status = 'trialing', provider = null, extraSub = null }) {
+  await e.LUMMET_DB.prepare('PRAGMA foreign_keys = OFF').run();
+  await e.LUMMET_DB.prepare(`INSERT INTO organizations (id, name, slug) VALUES (?, 'Org', ?)`).bind(orgId, 'slug-' + orgId).run();
+  await e.LUMMET_DB.prepare(`INSERT INTO sites (id, organization_id, name, slug, product_id, status) VALUES (?, ?, 'S', ?, 'p', ?)`).bind('s-' + orgId, orgId, 'site-' + orgId, site).run();
+  await e.LUMMET_DB.prepare(`INSERT INTO subscriptions (id, organization_id, plan_id, status, trial_ends_at, provider_subscription_id) VALUES (?, ?, 'pl', ?, ${trialEndsSql}, ?)`).bind('sub-' + orgId, orgId, status, provider).run();
+  if (extraSub) await e.LUMMET_DB.prepare(`INSERT INTO subscriptions (id, organization_id, plan_id, status) VALUES (?, ?, 'pl', ?)`).bind('sub2-' + orgId, orgId, extraSub).run();
+}
+
+test('trial_expired_still_live: quiet unless suspension is shadow/enforce; fires only past the ladder; resolves when the site is suspended', async () => {
+  const t0 = Date.parse('2026-10-25T10:00:00Z');
+  // off: never alerts, even for a long-expired live trial
+  const off = env({ ALERT_WEBHOOK_URL: HOOK, BILLING_SUSPEND_SITES: 'off' }); await seedTrial(off, { trialEndsSql: "datetime('now','-400 days')" });
+  assert.equal(act(await runAlertCheck(off, { fetchImpl: recorder(), now: t0 }), 'trial_expired_still_live').action, 'ok');
+
+  const e = env({ ALERT_WEBHOOK_URL: HOOK, BILLING_SUSPEND_SITES: 'shadow', BILLING_RESTRICTED_DAYS: '14' }); const f = recorder();
+  await seedTrial(e, { orgId: 'young', trialEndsSql: "datetime('now','-5 days')" });                 // inside the read-only window
+  await seedTrial(e, { orgId: 'paid', trialEndsSql: "datetime('now','-90 days')", provider: 'sub_x' }); // provider-owned
+  await seedTrial(e, { orgId: 'sub', trialEndsSql: "datetime('now','-90 days')", extraSub: 'active' }); // has an active subscription
+  await seedTrial(e, { orgId: 'susp', trialEndsSql: "datetime('now','-90 days')", site: 'suspended' });
+  assert.equal(act(await runAlertCheck(e, { fetchImpl: f, now: t0 }), 'trial_expired_still_live').action, 'ok');
+  await seedTrial(e, { orgId: 'late', trialEndsSql: "datetime('now','-40 days')", status: 'expired' }); // > 2 x 14 days
+  const r = await runAlertCheck(e, { fetchImpl: f, now: t0 + 1000 });
+  assert.equal(act(r, 'trial_expired_still_live').action, 'notified'); assert.equal(act(r, 'trial_expired_still_live').count, 1);
+  assert.equal(act(await runAlertCheck(e, { fetchImpl: f, now: t0 + 2000 }), 'trial_expired_still_live').action, 'still_firing_quiet');
+  await e.LUMMET_DB.prepare(`UPDATE sites SET status='suspended' WHERE id='s-late'`).run();
+  assert.equal(act(await runAlertCheck(e, { fetchImpl: f, now: t0 + 3000 }), 'trial_expired_still_live').action, 'resolved');
+});
+
+test('staff alerts page shows reconcile-drift, webhook-lag and expired-trial tiles with live counts', async () => {
+  const mod = await import('../worker/views/pages/saas-admin.js');
+  const render = Object.values(mod).find((fn) => typeof fn === 'function' && /Alerts?/.test(fn.name));
+  assert.ok(render, 'alerts page renderer exists');
+  const e = env({ BILLING_SUSPEND_SITES: 'shadow' }); await seedWebhook(e); await delivery(e, 'stuck', 'pending', 0, 'NULL', "datetime('now','-30 minutes')");
+  const html = String(await render(e));
+  assert.match(html, /Reconciliation drift/); assert.match(html, /Webhook lag[\s\S]*?Overdue deliveries: <strong>1<\/strong>/); assert.match(html, /Expired trials still live/);
 });

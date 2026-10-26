@@ -185,7 +185,8 @@ const NAV = [
       { label: "Coupons", href: "/platform/saas/coupons", key: "saas-coupons" },
       { label: "Domains", href: "/platform/saas/domains", key: "saas-domains" },
       { label: "Deployments", href: "/platform/saas/deployments", key: "saas-deployments" },
-      { label: "Webhooks", href: "/platform/saas/webhooks", key: "saas-webhooks" }
+      { label: "Webhooks", href: "/platform/saas/webhooks", key: "saas-webhooks" },
+      { label: "Site access", href: "/platform/saas/site-access", key: "saas-site-access" }
     ]
   },
   {
@@ -202,6 +203,7 @@ const NAV = [
       { label: "Key rotation", href: "/platform/saas/key-rotation", key: "saas-keyrotation" },
       { label: "Jobs", href: "/platform/saas/jobs", key: "saas-jobs" },
       { label: "Email outbox", href: "/platform/saas/email", key: "saas-email" },
+      { label: "Billing notifications", href: "/platform/saas/notifications", key: "saas-notifications" },
       { label: "Tenant releases", href: "/platform/saas/releases", key: "saas-releases" }
     ]
   },

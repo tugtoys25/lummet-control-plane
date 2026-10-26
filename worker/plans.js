@@ -9,6 +9,10 @@
 // seeded example plan from migration 0006).
 // =====================================================
 
+import { notify } from "./billing-notifications.js";
+import * as repo from "./repositories/billing-lifecycle.js";
+import { checkTrialByDomain, recordTrialByDomain } from "./trial-abuse.js";
+
 export async function listProducts(env) {
   const result = await env.LUMMET_DB.prepare(
     `SELECT * FROM products WHERE status = 'active' ORDER BY category, name`
@@ -18,7 +22,11 @@ export async function listProducts(env) {
 
 export async function listPlans(env, productId) {
   const result = await env.LUMMET_DB.prepare(
-    `SELECT * FROM plans WHERE product_id = ? AND status = 'active' ORDER BY price_cents`
+    `SELECT p.*,
+       (SELECT pp.stripe_price_id FROM plan_prices pp WHERE pp.plan_id = p.id AND pp.active = 1
+          AND pp.currency = lower(p.currency) AND pp.interval = CASE p.billing_period WHEN 'annual' THEN 'year' ELSE 'month' END
+        ORDER BY pp.version DESC LIMIT 1) AS active_price_id
+     FROM plans p WHERE p.product_id = ? AND p.status = 'active' ORDER BY p.price_cents`
   )
     .bind(productId)
     .all();
@@ -51,39 +59,22 @@ export async function getActiveSubscription(env, organizationId) {
  * billing).
  */
 /**
- * Partial trial-abuse mitigation (master prompt section 13; roadmap
- * 1.6). Checked: has any email that is a member of THIS organization
- * already had a trial in a DIFFERENT organization? If so, refuse — this
- * catches the straightforward "cancel and sign up again under a new
- * org with the same email" pattern.
+ * Trial-abuse mitigation, part 1: the same PERSON coming back (master prompt section 13; roadmap 1.6).
  *
- * v7G: addresses are compared by email_key (lower case, "+tag" removed,
- * Gmail dots and googlemail.com unified), so a trivial variant of the
- * same address no longer gets a second trial.
+ * A trial belongs to the people who OWN the organization. The question is: does an owner of THIS organization
+ * (compared by email_key: lower case, "+tag" removed, Gmail dots unified) also own a DIFFERENT organization that
+ * already held a subscription? If so, refuse.
  *
- * NOT covered by this check, and explicitly flagged rather than
- * silently assumed solved: an operator using a genuinely different
- * email address each time. Closing that needs a payment-method fingerprint (e.g. a
- * Stripe SetupIntent collected before the trial, without charging it)
- * or an email-verification-provider risk signal — either requires a
- * live account this environment cannot exercise, so it isn't built
- * here. Do not treat this function's existence as though the deeper
- * problem is solved.
+ * Phase 1.5 fix (N3): this used to compare EVERY member of this organization with EVERY member of other
+ * organizations, so an agency's staff, invited into a client's organization, made the client's trial look
+ * "already used" because the staff already belonged to the agency's organization. Only owners count now: a staff
+ * member invited into a client organization is a member there, not an owner, and is never the reason for a refusal.
+ *
+ * The other signals (card fingerprint, business email domain) live in trial-abuse.js, because they need billing
+ * configuration; this function stays the always-on, no-configuration part.
  */
 async function hasPriorTrialElsewhere(env, organizationId) {
-  const row = await env.LUMMET_DB.prepare(
-    `SELECT COUNT(*) c
-     FROM subscriptions s
-     JOIN organization_users ou ON ou.organization_id = s.organization_id
-     JOIN customer_users u ON u.id = ou.user_id
-     WHERE s.organization_id != ?
-       AND u.email_key IN (
-         SELECT cu.email_key FROM organization_users mou
-         JOIN customer_users cu ON cu.id = mou.user_id
-         WHERE mou.organization_id = ?
-       )`
-  ).bind(organizationId, organizationId).first();
-  return (row?.c || 0) > 0;
+  return repo.otherOrgOwnedBySamePerson(env, organizationId);
 }
 
 export async function startTrialSubscription(env, organizationId, planId) {
@@ -101,6 +92,10 @@ export async function startTrialSubscription(env, organizationId, planId) {
   if (trialDays > 0 && (await hasPriorTrialElsewhere(env, organizationId))) {
     return { ok: false, status: 409, error: "trial_already_used" };
   }
+  if (trialDays > 0) {
+    const byDomain = await checkTrialByDomain(env, organizationId);
+    if (!byDomain.ok) return { ok: false, status: 409, error: byDomain.error, reason: byDomain.reason };
+  }
 
   const id = crypto.randomUUID();
   const trialEndsAt =
@@ -111,6 +106,12 @@ export async function startTrialSubscription(env, organizationId, planId) {
   )
     .bind(id, organizationId, planId, trialEndsAt)
     .run();
+  if (trialDays > 0) await recordTrialByDomain(env, organizationId);
+  // Phase 2.1: tell the owners the trial started (inert unless BILLING_EMAILS=on; waits for a verified address).
+  if (trialDays > 0) {
+    try { await notify.trialStarted(env, { organizationId, subscriptionId: id, trialEndsAt }); }
+    catch (e) { console.error(JSON.stringify({ msg: "billing_trial_welcome_failed", organizationId, error: e?.message || String(e) })); }
+  }
 
   return { ok: true, subscriptionId: id, trialEndsAt };
 }

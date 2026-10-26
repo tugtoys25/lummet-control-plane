@@ -44,7 +44,7 @@ export function textResponse(body, contentType, { status = 200, cacheControl = P
   });
 }
 
-export async function renderPage(ctx, { template, data = {}, head = "", status = 200, bodyClass = "" }) {
+export async function renderPage(ctx, { template, data = {}, head = "", status = 200, bodyClass = "", cacheControl = null }) {
   const { env, siteCtx, url } = ctx;
   const view = { ...data, site: siteCtx.site, icons: siteCtx.icons, ui: siteCtx.ui };
   const content = await renderTemplate(env, `pages/${template}`, view);
@@ -57,8 +57,18 @@ export async function renderPage(ctx, { template, data = {}, head = "", status =
     body_class: bodyClass,
     current_path: url.pathname
   });
-  return textResponse(html, "text/html; charset=utf-8", {
+  const response = textResponse(html, "text/html; charset=utf-8", {
     status,
-    cacheControl: status === 200 ? PAGE_CACHE_CONTROL : "public, max-age=30"
+    cacheControl: cacheControl || (status === 200 ? PAGE_CACHE_CONTROL : "public, max-age=30")
   });
+  const isPublicForm = ["/contact", "/demo", "/contact-sales"].includes(url.pathname.replace(/\/+$/, "") || "/");
+  const turnstileEnabled = isPublicForm && String(env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && Boolean(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY);
+  if (!turnstileEnabled) return response;
+  const headers = new Headers(response.headers);
+  const policy = headers.get("content-security-policy") || CSP;
+  headers.set("content-security-policy", policy
+    .replace("script-src 'self'", "script-src 'self' https://challenges.cloudflare.com")
+    .replace("connect-src 'self'", "connect-src 'self' https://challenges.cloudflare.com")
+    .replace("frame-src https:", "frame-src https://challenges.cloudflare.com"));
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }

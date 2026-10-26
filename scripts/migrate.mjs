@@ -15,13 +15,15 @@
 // directly, so it works the same locally and in CI with no extra
 // dependency beyond wrangler (which every deploy already requires).
 // =====================================================
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(__dirname, "..", "migrations");
+const LOCAL_WRANGLER = join(__dirname, "..", "node_modules", ".bin", process.platform === "win32" ? "wrangler.cmd" : "wrangler");
+const WRANGLER_BIN = existsSync(LOCAL_WRANGLER) ? LOCAL_WRANGLER : "wrangler";
 const TRACKING_TABLE_SQL = `CREATE TABLE IF NOT EXISTS schema_migrations (
   filename TEXT PRIMARY KEY,
   applied_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -46,7 +48,7 @@ function runD1(db, sql, remote) {
   const wranglerArgs = ["d1", "execute", db, "--command", sql, "--json"];
   if (remote) wranglerArgs.push("--remote");
   else wranglerArgs.push("--local");
-  const out = execFileSync("wrangler", wranglerArgs, { encoding: "utf8" });
+  const out = execFileSync(WRANGLER_BIN, wranglerArgs, { encoding: "utf8" });
   try {
     return JSON.parse(out);
   } catch {
@@ -58,7 +60,7 @@ function runD1File(db, filePath, remote) {
   const wranglerArgs = ["d1", "execute", db, "--file", filePath];
   if (remote) wranglerArgs.push("--remote");
   else wranglerArgs.push("--local");
-  execFileSync("wrangler", wranglerArgs, { stdio: "inherit" });
+  execFileSync(WRANGLER_BIN, wranglerArgs, { stdio: "inherit" });
 }
 
 function getAppliedMigrations(db, remote) {

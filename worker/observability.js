@@ -9,6 +9,7 @@
 // with ids and tokens replaced by placeholders, so it is safe to keep and to group by.
 // =====================================================
 import * as errorsRepo from "./repositories/request-errors.js";
+import { captureException, errorTrackingMode } from "./error-tracking.js";
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
@@ -55,6 +56,12 @@ export async function observe(env, ctx, { requestId, method, pathname, status, s
         message: error ? String(error.message || "").slice(0, 300) : null
       }).catch(() => {});
       if (ctx && ctx.waitUntil) ctx.waitUntil(save); else await save;
+      // Optional external error tracking (ERROR_TRACKING, default off). Only a real exception is reported, never a bare 5xx.
+      // It runs after the response is decided and never delays it: the tracker call is handed to waitUntil.
+      if (error && errorTrackingMode(env) !== "off") {
+        const report = captureException(env, ctx, error, { requestId, method, route, status });
+        if (ctx && ctx.waitUntil) ctx.waitUntil(report); else await report;
+      }
     } else if (slow) {
       console.warn(line("warn", { event: "slow_request", request_id: requestId, method, route, status, duration_ms: durationMs }));
     } else if (String(env?.LOG_REQUESTS || "").toLowerCase() === "all") {

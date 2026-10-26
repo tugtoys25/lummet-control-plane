@@ -5,8 +5,9 @@ import { createTestDb, applyMigrations } from './support/d1-shim.js';
 import worker from '../worker/index.js';
 import * as staff from '../worker/staff-saas.js';
 import { renderBillingPage } from '../worker/views/customer-pages/billing.js';
+import { setPlanPrice } from './support/plan-prices.js';
 
-const plan = (o = {}) => ({ id: 'p1', name: 'Starter', price_cents: 500, currency: 'USD', billing_period: 'monthly', trial_days: 7, stripe_price_id: 'price_1', ...o });
+const plan = (o = {}) => ({ id: 'p1', name: 'Starter', price_cents: 500, currency: 'USD', billing_period: 'monthly', trial_days: 7, active_price_id: 'price_1', ...o });
 const base = { plan: null, invoices: [], canManage: true };
 
 test('new customer: trial and subscribe buttons, coupon box, no cancel', () => {
@@ -17,7 +18,7 @@ test('new customer: trial and subscribe buttons, coupon box, no cancel', () => {
 });
 
 test('plans without a Stripe price cannot be bought online', () => {
-  const out = renderBillingPage({ ...base, subscription: null, availablePlans: [plan({ stripe_price_id: null })] });
+  const out = renderBillingPage({ ...base, subscription: null, availablePlans: [plan({ active_price_id: null })] });
   assert.match(out, /Not available online/); assert.doesNotMatch(out, /onclick="lummetCheckout/);
 });
 
@@ -57,7 +58,7 @@ async function call(e, method, path, { body, cookie } = {}) {
 
 test('route: checkout ignores client-supplied return URLs, uses the portal origin, and passes the coupon', async () => {
   const e = env({ PORTAL_BASE_URL: 'https://app.example.test' });
-  await e.LUMMET_DB.prepare(`UPDATE plans SET stripe_price_id = 'price_x' WHERE id = 'plan_casino_news_starter'`).run();
+  await setPlanPrice(e, 'plan_casino_news_starter', 'price_x');
   const s = await call(e, 'POST', '/api/customer/signup', { body: { email: 'co@example.com', password: 'Correct-Horse-Battery-9', organizationName: 'O' } });
   const org = s.json.organizationId;
   assert.equal((await staff.createCoupon(e, { code: 'SAVE10', providerCouponId: 'stripe_s10', percentOff: 10 })).ok, true);

@@ -155,10 +155,15 @@ the minimum. Do each once on staging, tick it off, and record the date.
 - [ ] Customer backup create, verify, download, restore (owner). **[verify]**
 - [ ] DB backup: "Back up now", then "Verify" (checks the table-ordering step
       against real D1). Do a **practice restore** into a scratch database.
+      Use the restore drill tooling and report (`runbooks/restore-drill.md`, AT-15; owner-run, NOT VERIFIED until executed with evidence).
+- [ ] Read the incident runbooks (`RUNBOOKS.md`: webhook backlog, Stripe outage, D1, Cloudflare, mass email failure, mistaken suspension) and fill the **[OPEN]** owner decisions in `PLACEHOLDERS.md` (Round 6.5B).
 - [ ] Rotate `CREDENTIAL_KEK` per `KEY_ROTATION.md`, end to end.
 - [ ] Staff 2FA with your own authenticator app; log out and in; use one backup
       code; have a second admin reset your 2FA.
 - [ ] Load test per `LOAD_TESTING.md`; write down the numbers and your budget.
+- [ ] Nightly load test thresholds approved by the owner (`confirmed: true` in `config/loadtest-thresholds.v1.json`) and one staging report attached.
+- [ ] `scripts/d1-size-check.mjs` run on staging and production with the plan's size limit set; output attached.
+- [ ] External penetration test scheduled with a vendor and date (owner task).
 - [ ] Security headers present (browser dev tools > Network) and a page cannot be framed.
 - [ ] Confirm D1 Time Travel is enabled for production and test a restore of it.
 

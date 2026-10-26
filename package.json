@@ -7,7 +7,24 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node scripts/test-by-file.mjs",
+    "package:phase": "node scripts/package-phase.mjs",
+    "check:config": "node scripts/check-config.mjs",
+    "check:phase2": "node scripts/phase-gate.mjs --phase 2",
+    "catalog:check": "node scripts/stripe-sync.mjs --offline",
+    "test:serial": "node scripts/test-by-file.mjs",
+    "stripe:webhook:plan": "node scripts/stripe-webhook-config.mjs",
+    "stripe:webhook:verify": "node scripts/stripe-config-verify.mjs",
+    "stripe:clock:dry-run": "node scripts/stripe-clock-suite.mjs",
+    "go-live:evidence": "node scripts/go-live-evidence.mjs",
+    "check:phase4": "node scripts/phase4-gate.mjs",
+    "check:phase5": "node scripts/phase5-gate.mjs",
+    "check:lockfiles": "node scripts/lockfile-check.mjs",
+    "regen:lockfiles": "node scripts/regenerate-lockfiles.mjs",
+    "check:release-owner": "node scripts/check-release-owner.mjs"
   },
-  "version": "1.1.0"
+  "version": "2.6.0",
+  "devDependencies": {
+    "wrangler": "4.46.0"
+  }
 }

@@ -8,7 +8,8 @@ import { handlePublicRoute } from '../worker/public-site/router.js';
 import { renderSource } from '../worker/public-site/template.js';
 import { sanitizeHtml } from '../worker/public-site/sanitize.js';
 import { splitSqlStatements, createTestDb, applyMigrations } from './support/d1-shim.js';
-import { createPublicEnv, get } from './support/public-env.js';
+import { createPublicEnv, get, post } from './support/public-env.js';
+import { isPublicPath } from '../worker/public-site/router.js';
 
 const text = (r) => r.text();
 
@@ -342,4 +343,138 @@ test('the AI panel, steps and capability cards are read from lummet_features', a
   assert.match(html, /Renamed capability/);
   assert.match(html, /Preview before anything is written/);
   assert.match(html, /class="step-no">01</);
+});
+
+
+// ---------------------------------------------------------------- Round 6.2A public trust pages acceptance tests
+
+test('Round 6.2A trust pages render with CSP and only safe configured links', async () => {
+  const env = createPublicEnv();
+  Object.assign(env, {
+    PUBLIC_TRUST_PAGES: 'on', STATUS_PROVIDER_URL: 'https://status.example.test/',
+    SECURITY_CONTACT: 'mailto:security@example.test',
+    SECURITY_TXT_EXPIRES: '2027-01-01T00:00:00Z',
+    PUBLIC_FORMS_TURNSTILE_REQUIRED: 'on', TURNSTILE_SITE_KEY: 'public-test-site-key', TURNSTILE_SECRET_KEY: 'test-secret'
+  });
+  for (const path of ['/status', '/security', '/changelog', '/contact-sales']) {
+    const res = await get(handlePublicRoute, env, path);
+    assert.equal(res.status, 200, path);
+    assert.match(res.headers.get('content-security-policy') || '', /default-src 'self'/, path);
+    assert.match(res.headers.get('content-type') || '', /text\/html/, path);
+    const html = await res.text();
+    assert.match(html, /<html/i, path);
+    assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)(?![^>]*application\/ld\+json)[^>]*>[\s\S]*?<\/script>/i, `${path} contains inline executable script content`);
+    assert.doesNotMatch(html, /\{\{[^}]+\}\}/, `${path} has unresolved template tags`);
+  }
+  const status = await (await get(handlePublicRoute, env, '/status')).text();
+  assert.match(status, /https:\/\/status\.example\.test\//);
+  const security = await (await get(handlePublicRoute, env, '/security')).text();
+  assert.match(security, /security@example\.test/);
+  const sales = await (await get(handlePublicRoute, env, '/contact-sales')).text();
+  assert.match(sales, /<form[^>]+action="\/contact-sales"/i);
+  assert.match(sales, /cf-turnstile/i);
+  const salesResponse = await get(handlePublicRoute, env, '/contact-sales');
+  assert.match(salesResponse.headers.get('content-security-policy') || '', /challenges\.cloudflare\.com/);
+  // live pages carry no [OPEN] markers and are indexable
+  for (const path of ['/status', '/security', '/changelog']) {
+    const live = await (await get(handlePublicRoute, env, path)).text();
+    assert.doesNotMatch(live, /\[OPEN\]/, `${path} must not show [OPEN] when on`);
+    assert.doesNotMatch(live, /noindex/, `${path} is indexable when on`);
+  }
+  // shadow: renders for review, noindex, preview notice, no outbound status link
+  const shadowEnv = createPublicEnv();
+  Object.assign(shadowEnv, { STATUS_PROVIDER_URL: 'https://status.example.test/', PUBLIC_TRUST_PAGES: 'shadow' });
+  const preview = await (await get(handlePublicRoute, shadowEnv, '/status')).text();
+  assert.match(preview, /rollout is not enabled/);
+  assert.match(preview, /\[OPEN\]/);
+  assert.match(preview, /noindex/);
+  assert.doesNotMatch(preview, /href="https:\/\/status\.example\.test\//);
+  const shadowSales = await (await get(handlePublicRoute, shadowEnv, '/contact-sales')).text();
+  assert.match(shadowSales, /noindex/);
+  const salesPostEnv = createPublicEnv();
+  salesPostEnv.PUBLIC_TRUST_PAGES = 'on';
+  const submitted = await post(handlePublicRoute, salesPostEnv, '/contact-sales', {
+    f_name: 'Sales Visitor', f_email: 'sales@example.test', f_message: 'Please contact me about sales.'
+  });
+  assert.equal(submitted.status, 303);
+  assert.equal(submitted.headers.get('location'), '/contact-sales?sent=1');
+});
+
+test('Round 6.2A security.txt uses valid contact and expiry fields with security headers', async () => {
+  const env = createPublicEnv();
+  Object.assign(env, {
+    PUBLIC_TRUST_PAGES: 'on',
+    SECURITY_CONTACT: 'mailto:security@example.test',
+    SECURITY_TXT_EXPIRES: '2027-01-01T00:00:00Z'
+  });
+  const res = await get(handlePublicRoute, env, '/.well-known/security.txt');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') || '', /text\/plain/);
+  assert.match(res.headers.get('content-security-policy') || '', /default-src 'self'/);
+  const body = await res.text();
+  assert.match(body, /^Contact: mailto:security@example\.test$/m);
+  assert.match(body, /^Expires: 2027-01-01T00:00:00Z$/m);
+  assert.match(body, /^Preferred-Languages: en$/m);
+});
+
+test('Round 6.2A trust settings are required in production config-check', async () => {
+  const { configIssues } = await import('../worker/config-check.js');
+  const env = { ENVIRONMENT: 'production' };
+  const issues = configIssues(env);
+  for (const key of ['STATUS_PROVIDER_URL', 'SECURITY_CONTACT', 'SECURITY_TXT_EXPIRES']) {
+    assert.ok(issues.some((issue) => issue.key === key), `${key} should be required`);
+  }
+  assert.deepEqual(configIssues({ ENVIRONMENT: 'staging' }), []);
+});
+
+test('Round 6.2A flag off keeps every trust route inert and legacy behaviour intact', async () => {
+  const env = createPublicEnv();
+  Object.assign(env, { PUBLIC_TRUST_PAGES: 'off', STATUS_PROVIDER_URL: 'https://status.example.test/', SECURITY_CONTACT: 'mailto:security@example.test', SECURITY_TXT_EXPIRES: '2030-01-01T00:00:00Z' });
+  for (const path of ['/status', '/changelog', '/contact-sales', '/.well-known/security.txt']) {
+    const res = await get(handlePublicRoute, env, path);
+    assert.equal(res.status, 404, `${path} must be 404 when off`);
+  }
+  const post404 = await post(handlePublicRoute, env, '/contact-sales', { f_name: 'A', f_email: 'a@example.test', f_message: 'hello there' });
+  assert.equal(post404.status, 404);
+  const unset = createPublicEnv();
+  assert.equal((await get(handlePublicRoute, unset, '/status')).status, 404, 'unset flag behaves as off');
+});
+
+test('Round 6.2A security.txt is served only when on, and fails closed on bad or expired config', async () => {
+  const base = { SECURITY_CONTACT: 'mailto:security@example.test', SECURITY_TXT_EXPIRES: '2030-01-01T00:00:00Z' };
+  const shadow = createPublicEnv(); Object.assign(shadow, base, { PUBLIC_TRUST_PAGES: 'shadow' });
+  assert.equal((await get(handlePublicRoute, shadow, '/.well-known/security.txt')).status, 404);
+  const expired = createPublicEnv(); Object.assign(expired, base, { PUBLIC_TRUST_PAGES: 'on', SECURITY_TXT_EXPIRES: '2020-01-01T00:00:00Z' });
+  assert.equal((await get(handlePublicRoute, expired, '/.well-known/security.txt')).status, 503);
+  const badContact = createPublicEnv(); Object.assign(badContact, base, { PUBLIC_TRUST_PAGES: 'on', SECURITY_CONTACT: 'javascript:alert(1)' });
+  assert.equal((await get(handlePublicRoute, badContact, '/.well-known/security.txt')).status, 503);
+  const ok = createPublicEnv(); Object.assign(ok, base, { PUBLIC_TRUST_PAGES: 'on' });
+  const res = await get(handlePublicRoute, ok, '/.well-known/security.txt');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+});
+
+test('Round 6.2A /status and /security never emit unsafe configured links', async () => {
+  const env = createPublicEnv();
+  Object.assign(env, { PUBLIC_TRUST_PAGES: 'on', STATUS_PROVIDER_URL: 'http://insecure.example.test/', SECURITY_CONTACT: 'javascript:alert(1)' });
+  const status = await (await get(handlePublicRoute, env, '/status')).text();
+  assert.doesNotMatch(status, /insecure\.example\.test/);
+  const sec = await (await get(handlePublicRoute, env, '/security')).text();
+  assert.doesNotMatch(sec, /javascript:/i);
+  const xss = createPublicEnv();
+  Object.assign(xss, { PUBLIC_TRUST_PAGES: 'on', SECURITY_CONTACT: 'https://x.example.test/a?b=1&c=\"><script>1</script>' });
+  const html = await (await get(handlePublicRoute, xss, '/security')).text();
+  assert.doesNotMatch(html, /<script>1<\/script>/);
+});
+
+test('Round 6.2A links on trust pages resolve to routes the site serves', async () => {
+  const env = createPublicEnv();
+  Object.assign(env, { PUBLIC_TRUST_PAGES: 'on', STATUS_PROVIDER_URL: 'https://status.example.test/', SECURITY_CONTACT: 'mailto:security@example.test', SECURITY_TXT_EXPIRES: '2030-01-01T00:00:00Z' });
+  const html = await (await get(handlePublicRoute, env, '/security')).text();
+  const internal = [...html.matchAll(/href="(\/[^"#?]*)"/g)].map((m) => m[1]).filter((h) => !h.startsWith('/static/') && isPublicPath(h));
+  assert.ok(internal.includes('/.well-known/security.txt'));
+  for (const href of new Set(internal)) {
+    const r = await get(handlePublicRoute, env, href);
+    assert.ok(r && r.status < 400, `${href} must resolve (got ${r && r.status})`);
+  }
 });

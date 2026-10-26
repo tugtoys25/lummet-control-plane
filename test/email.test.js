@@ -8,7 +8,7 @@ import worker from '../worker/index.js';
 
 function env(extra = {}) {
   const db = createTestDb(); applyMigrations(db);
-  return { LUMMET_DB: db, CREDENTIAL_KEK: btoa('k'.repeat(32)), ENVIRONMENT: 'production', ...extra };
+  return { LUMMET_DB: db, CREDENTIAL_KEK: btoa('k'.repeat(32)), ENVIRONMENT: 'production', EMAIL_FETCH: async () => new Response(JSON.stringify({ id: 'test-message' }), { status: 200 }), ...extra };
 }
 const cfg = { EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 're_test', EMAIL_FROM: 'Lummet <no-reply@example.test>', PORTAL_BASE_URL: 'https://app.example.test' };
 const ctx = { waitUntil(p) { Promise.resolve(p).catch(() => {}); } };

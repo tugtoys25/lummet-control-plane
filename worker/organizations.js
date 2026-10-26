@@ -8,6 +8,11 @@
 // =====================================================
 
 import { isValidRole } from "./customer-rbac.js";
+import { billingConfig } from "./billing-config.js";
+import { queueCancelPending } from "./billing-lifecycle.js";
+import { resolveForOrganization } from "./entitlements.js";
+import * as lifecycleRepo from "./repositories/billing-lifecycle.js";
+import * as repository from "./repositories/organizations.js";
 
 function slugify(name) {
   return (
@@ -159,10 +164,38 @@ function randomToken() {
 
 const INVITATION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
+/**
+ * Seats (Phase 1.4, closes F7): members PLUS pending, unexpired invitations must stay within `users.max`.
+ * BILLING_ENFORCE=off never blocks; shadow records nothing here (it only reports); enforce refuses with a message the
+ * UI can turn into an upgrade prompt. `ignoreInvitationId` lets an invitation being accepted not count against itself.
+ */
+export async function seatCheck(env, organizationId, { ignoreInvitationId = null } = {}) {
+  const limit = (await resolveForOrganization(env, organizationId))["users.max"]?.value;
+  const members = await lifecycleRepo.countMembers(env, organizationId);
+  const pending = await lifecycleRepo.countPendingInvitations(env, organizationId, { nowIso: new Date().toISOString(), ignoreInvitationId });
+  const used = members + pending;
+  return { limit: typeof limit === "number" ? limit : null, members, pending, used, wouldExceed: typeof limit === "number" && used + 1 > limit };
+}
+
 export async function createInvitation(env, { organizationId, email, role, invitedBy }) {
   if (!isValidRole(role)) return { ok: false, status: 422, error: "invalid_role" };
   const trimmedEmail = (email || "").trim().toLowerCase();
-  if (!trimmedEmail) return { ok: false, status: 422, error: "email_required" };
+  if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) return { ok: false, status: 422, error: "invalid_email" };
+  const existing = await repository.findPendingInvitationByEmail(env, organizationId, trimmedEmail);
+  if (existing) return { ok: false, status: 409, error: "invitation_already_pending" };
+
+  const mode = billingConfig(env).mode;
+  let seatLimitShadow = null;
+  if (mode !== "off") {
+    const seats = await seatCheck(env, organizationId);
+    if (seats.wouldExceed && mode === "enforce") {
+      return {
+        ok: false, status: 402, error: "seat_limit_reached", limit: seats.limit, used: seats.used,
+        message: `Your plan includes ${seats.limit} team member${seats.limit === 1 ? "" : "s"} (members plus pending invitations: ${seats.used}). Upgrade your plan or remove someone to invite more.`
+      };
+    }
+    if (seats.wouldExceed && mode === "shadow") seatLimitShadow = { reason: "seat_limit_reached", limit: seats.limit, used: seats.used };
+  }
 
   const id = crypto.randomUUID();
   const token = randomToken();
@@ -176,7 +209,7 @@ export async function createInvitation(env, { organizationId, email, role, invit
     .bind(id, organizationId, trimmedEmail, role, tokenHash, invitedBy || null, expiresAt)
     .run();
 
-  return { ok: true, invitationId: id, token, expiresAt };
+  return { ok: true, invitationId: id, token, expiresAt, ...(seatLimitShadow ? { seatLimitShadow } : {}) };
 }
 
 export async function acceptInvitation(env, token, userId) {
@@ -214,6 +247,15 @@ export async function acceptInvitation(env, token, userId) {
     return { ok: true, organizationId: invitation.organization_id, alreadyMember: true };
   }
 
+  const mode = billingConfig(env).mode;
+  let seatLimitShadow = null;
+  if (mode !== "off") {
+    // The accepting invitation is itself one of the pending seats, so it is excluded from the count.
+    const seats = await seatCheck(env, invitation.organization_id, { ignoreInvitationId: invitation.id });
+    if (seats.wouldExceed && mode === "enforce") return { ok: false, status: 402, error: "seat_limit_reached", limit: seats.limit, used: seats.used };
+    if (seats.wouldExceed && mode === "shadow") seatLimitShadow = { reason: "seat_limit_reached", limit: seats.limit, used: seats.used };
+  }
+
   await env.LUMMET_DB.prepare(
     `INSERT INTO organization_users (organization_id, user_id, role) VALUES (?, ?, ?)`
   )
@@ -226,7 +268,7 @@ export async function acceptInvitation(env, token, userId) {
     .bind(new Date().toISOString(), invitation.id)
     .run();
 
-  return { ok: true, organizationId: invitation.organization_id, alreadyMember: false };
+  return { ok: true, organizationId: invitation.organization_id, alreadyMember: false, ...(seatLimitShadow ? { seatLimitShadow } : {}) };
 }
 
 export async function listPendingInvitations(env, organizationId) {
@@ -313,30 +355,45 @@ export async function reactivateOrganization(env, organizationId, actorUserId) {
  * Cancels any active subscription so the customer is not charged
  * during or after the grace period.
  */
-export async function requestDeletion(env, organizationId, actorUserId, { billingService = null } = {}) {
+export async function requestDeletion(env, organizationId, actorUserId, { billingService = null, deleteNow = false } = {}) {
   const membership = await getMembership(env, organizationId, actorUserId);
   if (!membership || membership.role !== "owner") return { ok: false, status: 403, error: "only_an_owner_can_request_deletion" };
   const org = await getOrganization(env, organizationId);
   if (!org) return { ok: false, status: 404, error: "not_found" };
   if (org.scheduled_deletion_at) return { ok: true, alreadyScheduled: true, scheduledDeletionAt: org.scheduled_deletion_at };
 
+  let billingCancelQueued = false;
+  let billingEndsAt = null;
   if (billingService) {
-    // Best-effort: a billing provider outage must not block a customer
-    // from exercising their right to leave. The scheduled deletion
-    // still proceeds; a stray active subscription is exactly the kind
-    // of thing staff's existing /platform/saas/subscriptions view
-    // already surfaces for manual follow-up.
-    await billingService.cancelSubscription(env, organizationId, { atPeriodEnd: false, actorUserId }).catch(() => {});
+    // A Stripe failure must never be swallowed (it used to be, which left customers billed after deleting). The
+    // deletion still proceeds, because a billing outage must not stop someone leaving, but the failed cancellation
+    // is queued, retried by the sweep, and alerts staff (`cancel_pending_stuck`) if it is still failing after 24 hours.
+    // With the billing lifecycle on (BILLING_ENFORCE != off) cancellation is scheduled for the END of the paid period
+    // by default; the owner may explicitly choose to delete now and forfeit the rest (deleteNow).
+    const atPeriodEnd = billingConfig(env).mode !== "off" && !deleteNow;
+    try {
+      const r = await billingService.cancelSubscription(env, organizationId, { atPeriodEnd, actorUserId });
+      if (!r.ok && r.error !== "no_active_subscription") {
+        await queueCancelPending(env, { organizationId, atPeriodEnd, error: r.error });
+        billingCancelQueued = true;
+      }
+    } catch (e) {
+      await queueCancelPending(env, { organizationId, atPeriodEnd, error: e?.message || e });
+      billingCancelQueued = true;
+    }
+    if (atPeriodEnd) {
+      billingEndsAt = await lifecycleRepo.cancellingPeriodEnd(env, organizationId);
+    }
   }
 
   const scheduledFor = new Date(Date.now() + GRACE_PERIOD_DAYS * 86400000).toISOString();
   await env.LUMMET_DB.prepare(
     `UPDATE organizations SET status = 'closed', scheduled_deletion_at = ?, deletion_requested_by = ?, deletion_requested_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
   ).bind(scheduledFor, actorUserId, organizationId).run();
-  return { ok: true, scheduledDeletionAt: scheduledFor };
+  return { ok: true, scheduledDeletionAt: scheduledFor, billingCancelQueued, billingEndsAt };
 }
 
-export async function cancelScheduledDeletion(env, organizationId, actorUserId) {
+export async function cancelScheduledDeletion(env, organizationId, actorUserId, { billingService = null } = {}) {
   const membership = await getMembership(env, organizationId, actorUserId);
   if (!membership || membership.role !== "owner") return { ok: false, status: 403, error: "only_an_owner_can_cancel_deletion" };
   const org = await getOrganization(env, organizationId);
@@ -344,7 +401,15 @@ export async function cancelScheduledDeletion(env, organizationId, actorUserId) 
   await env.LUMMET_DB.prepare(
     `UPDATE organizations SET status = 'active', scheduled_deletion_at = NULL, deletion_requested_by = NULL, deletion_requested_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
   ).bind(organizationId).run();
-  return { ok: true };
+  // A queued cancellation that has not gone through yet is simply withdrawn.
+  await lifecycleRepo.deleteCancelPending(env, organizationId);
+  // Phase 1.5: if the subscription was only scheduled to end at period end and that has not happened, undo it.
+  let subscriptionResumed = false;
+  if (billingService && billingConfig(env).mode !== "off") {
+    const r = await billingService.resumeSubscription(env, organizationId).catch((e) => ({ ok: false, error: e?.message || String(e) }));
+    subscriptionResumed = !!r.ok;
+  }
+  return { ok: true, subscriptionResumed };
 }
 
 /** For staff visibility and, later, the actual deletion sweep (roadmap 1.3, not yet built). */

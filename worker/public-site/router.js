@@ -53,6 +53,14 @@ const ROUTES = [
   ["/insights/:slug", pages.insightPage],
   ["/partners", pages.partnersPage],
   ["/pricing", pages.pricingPage],
+  ["/status", pages.statusPage],
+  ["/legal", pages.legalIndexPage],
+  ["/legal/:slug", (ctx, params) => pages.legalPage(ctx, params)],
+  ["/docs", pages.docsPage],
+  ["/openapi.json", pages.openApiJsonPage],
+  ["/security", pages.securityPage],
+  ["/changelog", pages.changelogPage],
+  ["/contact-sales", (ctx) => (pages.trustMode(ctx.env) === "off" ? null : forms.formPage(ctx, { key: "contact", path: "/contact-sales" }))],
   ["/authors/:slug", pages.authorPage],
   ["/contact", (ctx) => forms.formPage(ctx, { key: "contact" })],
   ["/demo", (ctx) => forms.formPage(ctx, { key: "demo" })],
@@ -62,13 +70,14 @@ const ROUTES = [
 // The only public POST routes: form submissions. Same paths as the GET pages.
 const FORM_POST_ROUTES = [
   ["/contact", (ctx) => forms.submitForm(ctx, { key: "contact" })],
+  ["/contact-sales", (ctx) => (pages.trustMode(ctx.env) === "off" ? null : forms.submitForm(ctx, { key: "contact", path: "/contact-sales" }))],
   ["/demo", (ctx) => forms.submitForm(ctx, { key: "demo" })],
   ["/forms/:key", forms.submitForm]
 ];
 
 /** Paths this router owns. Anything else is left to the admin app. */
 export function isPublicPath(path) {
-  if (path === "/" || path === "/sitemap.xml" || path === "/robots.txt") return true;
+  if (path === "/" || path === "/sitemap.xml" || path === "/robots.txt" || path === "/.well-known/security.txt") return true;
   if (path.startsWith("/static/")) return true;
   if (path.startsWith("/p/")) return true;
   if (pages.PAGE_ALIASES.has(path.slice(1))) return true;
@@ -117,9 +126,27 @@ async function resolve(ctx) {
   const { url, env } = ctx;
   const path = url.pathname;
 
+  if (path === "/.well-known/security.txt") {
+    // Served only when the trust-page rollout is on; otherwise behaves as an unknown path.
+    if (pages.trustMode(env) !== "on") return pages.notFoundPage(ctx);
+    const contact = String(env.SECURITY_CONTACT || "").trim();
+    const expires = String(env.SECURITY_TXT_EXPIRES || "").trim();
+    const expiresOk = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(expires) && Number.isFinite(Date.parse(expires)) && Date.parse(expires) > Date.now();
+    if (!/^(mailto:[^\s]+|https:\/\/[^\s]+)$/i.test(contact) || !expiresOk) {
+      return textResponse("security.txt is not configured.\n", "text/plain; charset=utf-8", { status: 503, cacheControl: "no-store" });
+    }
+    return textResponse(`Contact: ${contact}\nExpires: ${expires}\nPreferred-Languages: en\n`, "text/plain; charset=utf-8", { cacheControl: "public, max-age=3600" });
+  }
   if (path === "/robots.txt") return robotsTxt(ctx);
   if (path === "/sitemap.xml") return sitemapXml(ctx);
   if (path === "/") return pages.homePage(ctx);
+  // With the rollout shadow/on, the explicit trust routes take precedence over legacy CMS aliases such as /security.
+  // With it off, nothing here changes: the alias and 404 behaviour of 2.6.0.3 is kept.
+  if (pages.trustMode(env) !== "off") {
+    for (const [trustPath, handler] of ROUTES.filter(([routePath]) => ["/status", "/security", "/changelog", "/contact-sales", "/docs"].includes(routePath))) {
+      if (path === trustPath) return (await handler(ctx)) || pages.notFoundPage(ctx);
+    }
+  }
 
   if (path.startsWith("/p/")) {
     const slug = path.slice(3).replace(/\/+$/, "");
@@ -174,7 +201,9 @@ export async function handlePublicRoute({ request, env, ctx: execCtx }) {
   // dashboard lives at /dashboard.
 
   // A page showing "sent" state, or anything carrying form state, is never shared.
-  const cache = typeof caches !== "undefined" && !url.searchParams.has("sent") ? caches.default : null;
+  // Legal pages and the OpenAPI document depend on rollout flags and recorded approvals, so they are never shared-cached.
+  const uncachedPath = path === "/legal" || path.startsWith("/legal/") || path === "/openapi.json";
+  const cache = typeof caches !== "undefined" && !url.searchParams.has("sent") && !uncachedPath ? caches.default : null;
   const key = cacheKeyFor(url);
   if (cache) {
     try {

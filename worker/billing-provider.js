@@ -37,6 +37,9 @@
  *   couponProviderId: ?string
  * }) => Promise<{checkoutUrl: string, providerSessionId: string}>} createCheckoutSession
  *
+ * @property {(env: Object, providerCustomerId: string, profile: Object, opts?: {idempotencyKey?: string}) => Promise<{ok: boolean}>} updateCustomer
+ *   Syncs the editable billing contact/address fields to the provider before persisting them locally.
+ *
  * @property {(env: Object, params: {providerCustomerId: string, returnUrl: string}) => Promise<{portalUrl: string}>} createPortalSession
  *   A short-lived, customer-specific URL where the customer updates
  *   their payment method and views invoices on the provider's own page.
@@ -45,7 +48,15 @@
  *
  * @property {(env: Object, providerSubscriptionId: string) => Promise<{ok: boolean}>} resumeSubscription
  *
- * @property {(env: Object, providerSubscriptionId: string, newPriceId: string) => Promise<{ok: boolean}>} changePlan
+ * @property {(env: Object, providerSubscriptionId: string, opts: {resumesAt: string, idempotencyKey: string}) => Promise<{ok: boolean, resumesAt: string}>} pauseSubscription
+ *   Optional commercial save-flow capability. Caller must gate it behind BILLING_SAVE_FLOW and supply an explicit resume timestamp.
+ *
+ * @property {(env: Object, providerSubscriptionId: string, opts?: {idempotencyKey?: string}) => Promise<{ok: boolean}>} resumePausedSubscription
+ *   Removes a scheduled pause; distinct from resuming cancel_at_period_end.
+ *
+ * @property {(env: Object, providerSubscriptionId: string, newPriceId: string, opts?: {idempotencyKey?: string}) => Promise<{ok: boolean}>} changePlan
+ *   opts.idempotencyKey (sprint 3.2) comes from the plan-change intent: sending the same key again must apply the
+ *   change once. A provider error carries `kind`: "rejected" (the provider said no; never retried) or "unreachable".
  *
  * @property {(providerStatus: string) => string} normalizeSubscriptionStatus
  *   Maps a provider-specific status string to one of this repo's

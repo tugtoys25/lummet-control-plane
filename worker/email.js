@@ -13,11 +13,18 @@
 // Host header (host-header poisoning of reset links).
 // =====================================================
 import { encryptSecret, decryptSecret } from "./crypto.js";
+import * as notificationRepo from "./repositories/billing-notifications.js";
 
 const MAX_ATTEMPTS = 5;
 
 export function emailConfigured(env) {
   return env.EMAIL_PROVIDER === "resend" && !!env.RESEND_API_KEY && !!env.EMAIL_FROM;
+}
+
+/** SHA-256 hex of the trimmed, lowercased address: the only form in which suppressed addresses are stored. */
+export async function emailHash(email) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(email || "").trim().toLowerCase()));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function esc(s) {
@@ -55,19 +62,26 @@ export const templates = {
 };
 
 /** Durably queue a message. Returns {ok, id} or {ok:false,error}. Never sends inline. */
-export async function queueEmail(env, { to, template, vars, organizationId = null, dedupeKey = null }) {
-  const build = templates[template];
-  if (!build) return { ok: false, error: "unknown_template" };
-  if ((vars.link === null || vars.link === undefined) && template !== "notification") return { ok: false, error: "portal_base_url_not_configured" };
-  const msg = build(vars);
-  if (vars.subject && template === "notification") msg.subject = String(vars.subject).slice(0, 120);
+export async function queueEmail(env, { to, template, vars = {}, organizationId = null, dedupeKey = null, message = null, from = null, replyTo = null, notificationId = null }) {
+  // `message` is a finished {subject, text, html} (billing notifications build theirs); otherwise a named template is used.
+  let msg = message;
+  if (!msg) {
+    const build = templates[template];
+    if (!build) return { ok: false, error: "unknown_template" };
+    if ((vars.link === null || vars.link === undefined) && template !== "notification") return { ok: false, error: "portal_base_url_not_configured" };
+    msg = build(vars);
+    if (vars.subject && template === "notification") msg.subject = String(vars.subject).slice(0, 120);
+  }
   const id = crypto.randomUUID();
-  const enc = await encryptSecret(env, JSON.stringify({ text: msg.text, html: msg.html }));
+  const payload = { text: msg.text, html: msg.html };
+  if (from) payload.from = from;
+  if (replyTo) payload.replyTo = replyTo;
+  const enc = await encryptSecret(env, JSON.stringify(payload));
   try {
     await env.LUMMET_DB.prepare(
-      `INSERT INTO email_outbox (id, organization_id, to_email, template, subject, body_encrypted, body_iv, dedupe_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(id, organizationId, to, template, msg.subject, enc.encryptedSecret, enc.secretIv, dedupeKey).run();
+      `INSERT INTO email_outbox (id, organization_id, to_email, template, subject, body_encrypted, body_iv, dedupe_key, notification_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, organizationId, to, template, msg.subject, enc.encryptedSecret, enc.secretIv, dedupeKey, notificationId).run();
   } catch (e) {
     if (/UNIQUE/i.test(String(e.message))) return { ok: true, id: null, duplicate: true };
     throw e;
@@ -79,7 +93,10 @@ async function sendViaResend(env, row, body, fetchImpl) {
   const res = await fetchImpl("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": row.id },
-    body: JSON.stringify({ from: env.EMAIL_FROM, to: [row.to_email], subject: row.subject, text: body.text, html: body.html })
+    body: JSON.stringify({
+      from: body.from || env.EMAIL_FROM, to: [row.to_email], subject: row.subject, text: body.text, html: body.html,
+      ...(body.replyTo ? { reply_to: body.replyTo } : {})
+    })
   });
   if (!res.ok) {
     // Never include the request (contains the link/token) in the error.
@@ -104,6 +121,11 @@ export async function flushOutbox(env, { limit = 20, fetchImpl = fetch, now = Da
       `UPDATE email_outbox SET attempts = attempts + 1 WHERE id = ? AND status = 'queued' AND attempts = ?`
     ).bind(row.id, row.attempts).run();
     if (!claim.meta.changes) continue;
+    // A billing notification queued before its recipient bounced or complained is not sent.
+    if (String(row.template).startsWith("billing_") && await notificationRepo.isSuppressed(env, await emailHash(row.to_email))) {
+      await notificationRepo.markOutboxSuppressed(env, row.id);
+      continue;
+    }
     let result;
     try {
       const body = JSON.parse(await decryptSecret(env, row.body_encrypted, row.body_iv));
@@ -117,8 +139,13 @@ export async function flushOutbox(env, { limit = 20, fetchImpl = fetch, now = Da
       ).bind(result.messageId, row.id).run();
       sent++;
     } else if (!result.retryable || row.attempts + 1 >= MAX_ATTEMPTS) {
+      // A failed billing notification keeps its body (still encrypted) so staff can resend that exact message from the
+      // notifications screen; the tick drops it after 14 days. Every other failed message is wiped as before.
+      const keepBody = String(row.template).startsWith("billing_") && row.notification_id;
       await env.LUMMET_DB.prepare(
-        `UPDATE email_outbox SET status='failed', last_error=?, body_encrypted=NULL, body_iv=NULL WHERE id=?`
+        keepBody
+          ? `UPDATE email_outbox SET status='failed', last_error=? WHERE id=?`
+          : `UPDATE email_outbox SET status='failed', last_error=?, body_encrypted=NULL, body_iv=NULL WHERE id=?`
       ).bind(result.error, row.id).run();
       failed++;
     } else {

@@ -1,0 +1,1515 @@
+{
+  "catalog_version": 1,
+  "description": "Lummet commercial catalog as code. Edit this file, run `npm run catalog:check`, then `node scripts/stripe-sync.mjs --mode test` (dry run first). Prices are immutable: to change a price, add a new entry with version + 1 and set the old one active:false. Never edit the amount of a version that has been synced.",
+  "decisions": {
+    "_note": "OWNER DECISIONS held as editable data (blueprint decisions 3 and 6). Generic defaults; change them here, not in code.",
+    "entry_price_floor_cents": null,
+    "entry_price_floor_note": "null = no floor. When set, `catalog:check` fails if any active recurring price is below it.",
+    "annual_default": false,
+    "annual_default_note": "Read by the pricing page in Phase 5.1 (annual shown first). No effect on checkout."
+  },
+  "tax": {
+    "_note": "Generic defaults, to be confirmed with an accountant in Sprint 3.3. tax_behavior 'unspecified' can still be set once later without a new price; 'exclusive'/'inclusive' cannot be changed afterwards.",
+    "default_tax_code": "txcd_10103001",
+    "default_tax_code_note": "Stripe product tax code 'SaaS - business use'. Change per product with products[].tax_code.",
+    "default_tax_behavior": "unspecified"
+  },
+  "products": [
+    {
+      "key": "casino_affiliate",
+      "name": "Casino Affiliate",
+      "category": "affiliate",
+      "status": "active",
+      "tax_code": null
+    },
+    {
+      "key": "combined_affiliate",
+      "name": "Combined Affiliate",
+      "category": "affiliate",
+      "status": "active",
+      "tax_code": null
+    },
+    {
+      "key": "other_affiliate",
+      "name": "Other iGaming Affiliate",
+      "category": "affiliate",
+      "status": "active",
+      "tax_code": null
+    },
+    {
+      "key": "sports_affiliate",
+      "name": "Sports Affiliate",
+      "category": "affiliate",
+      "status": "active",
+      "tax_code": null
+    },
+    {
+      "key": "agency",
+      "name": "Agency",
+      "category": "business",
+      "status": "active",
+      "tax_code": null
+    },
+    {
+      "key": "enterprise",
+      "name": "Enterprise",
+      "category": "business",
+      "status": "active",
+      "tax_code": null
+    },
+    {
+      "key": "founder_license",
+      "name": "Founder License",
+      "category": "license",
+      "status": "active",
+      "tax_code": null
+    },
+    {
+      "key": "casino_news",
+      "name": "Casino News",
+      "category": "news",
+      "status": "active",
+      "tax_code": null
+    },
+    {
+      "key": "igaming_news",
+      "name": "Full iGaming News",
+      "category": "news",
+      "status": "active",
+      "tax_code": null
+    },
+    {
+      "key": "sports_news",
+      "name": "Sports News",
+      "category": "news",
+      "status": "active",
+      "tax_code": null
+    }
+  ],
+  "plans": [
+    {
+      "key": "agency_30",
+      "product": "agency",
+      "name": "Agency 30",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 10000,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 30,
+        "reports.enabled": true,
+        "sites.max": 30,
+        "storage.max_mb": 50000,
+        "users.max": 25,
+        "white_label.enabled": true
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 19900,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "agency_100",
+      "product": "agency",
+      "name": "Agency 100",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 40000,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 100,
+        "reports.enabled": true,
+        "sites.max": 100,
+        "storage.max_mb": 200000,
+        "users.max": 50,
+        "white_label.enabled": true
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 49900,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "agency_30_annual",
+      "product": "agency",
+      "name": "Agency 30 (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "agency_30",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 199000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "agency_100_annual",
+      "product": "agency",
+      "name": "Agency 100 (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "agency_100",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 499000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_affiliate_starter",
+      "product": "casino_affiliate",
+      "name": "Starter",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 0,
+        "ai.enabled": false,
+        "alerts.enabled": false,
+        "analytics.level": "basic",
+        "api.enabled": false,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": false,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 1,
+        "reports.enabled": false,
+        "sites.max": 1,
+        "storage.max_mb": 500,
+        "users.max": 2,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 900,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_affiliate_growth",
+      "product": "casino_affiliate",
+      "name": "Growth",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "standard",
+        "api.enabled": true,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 2,
+        "reports.enabled": true,
+        "sites.max": 1,
+        "storage.max_mb": 2000,
+        "users.max": 5,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 1500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_affiliate_pro",
+      "product": "casino_affiliate",
+      "name": "Pro",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 2500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 5,
+        "reports.enabled": true,
+        "sites.max": 3,
+        "storage.max_mb": 10000,
+        "users.max": 10,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 2500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_affiliate_starter_annual",
+      "product": "casino_affiliate",
+      "name": "Starter (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "casino_affiliate_starter",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 9000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_affiliate_growth_annual",
+      "product": "casino_affiliate",
+      "name": "Growth (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "casino_affiliate_growth",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 15000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_affiliate_pro_annual",
+      "product": "casino_affiliate",
+      "name": "Pro (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "casino_affiliate_pro",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 25000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_news_starter",
+      "product": "casino_news",
+      "name": "Starter",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": false,
+        "ai.credits_monthly": 0,
+        "ai.enabled": false,
+        "alerts.enabled": false,
+        "analytics.level": "basic",
+        "api.enabled": false,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": false,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 1,
+        "reports.enabled": false,
+        "sites.max": 1,
+        "storage.max_mb": 500,
+        "users.max": 2,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_news_growth",
+      "product": "casino_news",
+      "name": "Growth",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": false,
+        "ai.credits_monthly": 500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "standard",
+        "api.enabled": true,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 2,
+        "reports.enabled": true,
+        "sites.max": 1,
+        "storage.max_mb": 2000,
+        "users.max": 5,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 800,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_news_pro",
+      "product": "casino_news",
+      "name": "Pro",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": false,
+        "ai.credits_monthly": 2500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 5,
+        "reports.enabled": true,
+        "sites.max": 3,
+        "storage.max_mb": 10000,
+        "users.max": 10,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 2000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_news_starter_annual",
+      "product": "casino_news",
+      "name": "Starter (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "casino_news_starter",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 5000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_news_growth_annual",
+      "product": "casino_news",
+      "name": "Growth (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "casino_news_growth",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 8000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "casino_news_pro_annual",
+      "product": "casino_news",
+      "name": "Pro (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "casino_news_pro",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 20000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "combined_affiliate_starter",
+      "product": "combined_affiliate",
+      "name": "Starter",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 0,
+        "ai.enabled": false,
+        "alerts.enabled": false,
+        "analytics.level": "basic",
+        "api.enabled": false,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": false,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 1,
+        "reports.enabled": false,
+        "sites.max": 1,
+        "storage.max_mb": 500,
+        "users.max": 2,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 2500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "combined_affiliate_growth",
+      "product": "combined_affiliate",
+      "name": "Growth",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "standard",
+        "api.enabled": true,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 2,
+        "reports.enabled": true,
+        "sites.max": 1,
+        "storage.max_mb": 2000,
+        "users.max": 5,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 3300,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "combined_affiliate_pro",
+      "product": "combined_affiliate",
+      "name": "Pro",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 2500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 5,
+        "reports.enabled": true,
+        "sites.max": 3,
+        "storage.max_mb": 10000,
+        "users.max": 10,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 5000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "combined_affiliate_starter_annual",
+      "product": "combined_affiliate",
+      "name": "Starter (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "combined_affiliate_starter",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 25000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "combined_affiliate_growth_annual",
+      "product": "combined_affiliate",
+      "name": "Growth (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "combined_affiliate_growth",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 33000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "combined_affiliate_pro_annual",
+      "product": "combined_affiliate",
+      "name": "Pro (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "combined_affiliate_pro",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 50000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "master",
+      "product": "enterprise",
+      "name": "Master",
+      "period": "custom",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 150000,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": true,
+        "domains.custom.max": 999999,
+        "reports.enabled": true,
+        "sites.max": 999999,
+        "storage.max_mb": 999999999,
+        "users.max": 999999,
+        "white_label.enabled": true
+      },
+      "prices": []
+    },
+    {
+      "key": "enterprise_300",
+      "product": "enterprise",
+      "name": "Enterprise 300",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 150000,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": true,
+        "domains.custom.max": 300,
+        "reports.enabled": true,
+        "sites.max": 300,
+        "storage.max_mb": 1000000,
+        "users.max": 200,
+        "white_label.enabled": true
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 149900,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "enterprise_300_annual",
+      "product": "enterprise",
+      "name": "Enterprise 300 (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "enterprise_300",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 1499000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "founder_license",
+      "product": "founder_license",
+      "name": "Founder License",
+      "period": "custom",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 150000,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": true,
+        "domains.custom.max": 999999,
+        "reports.enabled": true,
+        "sites.max": 999999,
+        "storage.max_mb": 999999999,
+        "users.max": 999999,
+        "white_label.enabled": true
+      },
+      "prices": []
+    },
+    {
+      "key": "igaming_news_starter",
+      "product": "igaming_news",
+      "name": "Starter",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": false,
+        "ai.credits_monthly": 0,
+        "ai.enabled": false,
+        "alerts.enabled": false,
+        "analytics.level": "basic",
+        "api.enabled": false,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": false,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 1,
+        "reports.enabled": false,
+        "sites.max": 1,
+        "storage.max_mb": 500,
+        "users.max": 2,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 900,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "igaming_news_growth",
+      "product": "igaming_news",
+      "name": "Growth",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": false,
+        "ai.credits_monthly": 500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "standard",
+        "api.enabled": true,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 2,
+        "reports.enabled": true,
+        "sites.max": 1,
+        "storage.max_mb": 2000,
+        "users.max": 5,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 1500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "igaming_news_pro",
+      "product": "igaming_news",
+      "name": "Pro",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": false,
+        "ai.credits_monthly": 2500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 5,
+        "reports.enabled": true,
+        "sites.max": 3,
+        "storage.max_mb": 10000,
+        "users.max": 10,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 2500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "igaming_news_starter_annual",
+      "product": "igaming_news",
+      "name": "Starter (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "igaming_news_starter",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 9000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "igaming_news_growth_annual",
+      "product": "igaming_news",
+      "name": "Growth (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "igaming_news_growth",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 15000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "igaming_news_pro_annual",
+      "product": "igaming_news",
+      "name": "Pro (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "igaming_news_pro",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 25000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "other_affiliate_starter",
+      "product": "other_affiliate",
+      "name": "Starter",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 0,
+        "ai.enabled": false,
+        "alerts.enabled": false,
+        "analytics.level": "basic",
+        "api.enabled": false,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": false,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 1,
+        "reports.enabled": false,
+        "sites.max": 1,
+        "storage.max_mb": 500,
+        "users.max": 2,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 900,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "other_affiliate_growth",
+      "product": "other_affiliate",
+      "name": "Growth",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "standard",
+        "api.enabled": true,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 2,
+        "reports.enabled": true,
+        "sites.max": 1,
+        "storage.max_mb": 2000,
+        "users.max": 5,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 1500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "other_affiliate_pro",
+      "product": "other_affiliate",
+      "name": "Pro",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 2500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 5,
+        "reports.enabled": true,
+        "sites.max": 3,
+        "storage.max_mb": 10000,
+        "users.max": 10,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 2500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "other_affiliate_starter_annual",
+      "product": "other_affiliate",
+      "name": "Starter (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "other_affiliate_starter",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 9000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "other_affiliate_growth_annual",
+      "product": "other_affiliate",
+      "name": "Growth (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "other_affiliate_growth",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 15000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "other_affiliate_pro_annual",
+      "product": "other_affiliate",
+      "name": "Pro (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "other_affiliate_pro",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 25000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_affiliate_starter",
+      "product": "sports_affiliate",
+      "name": "Starter",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 0,
+        "ai.enabled": false,
+        "alerts.enabled": false,
+        "analytics.level": "basic",
+        "api.enabled": false,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": false,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 1,
+        "reports.enabled": false,
+        "sites.max": 1,
+        "storage.max_mb": 500,
+        "users.max": 2,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 900,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_affiliate_growth",
+      "product": "sports_affiliate",
+      "name": "Growth",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "standard",
+        "api.enabled": true,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 2,
+        "reports.enabled": true,
+        "sites.max": 1,
+        "storage.max_mb": 2000,
+        "users.max": 5,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 1500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_affiliate_pro",
+      "product": "sports_affiliate",
+      "name": "Pro",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": true,
+        "ai.credits_monthly": 2500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 5,
+        "reports.enabled": true,
+        "sites.max": 3,
+        "storage.max_mb": 10000,
+        "users.max": 10,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 2500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_affiliate_starter_annual",
+      "product": "sports_affiliate",
+      "name": "Starter (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "sports_affiliate_starter",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 9000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_affiliate_growth_annual",
+      "product": "sports_affiliate",
+      "name": "Growth (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "sports_affiliate_growth",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 15000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_affiliate_pro_annual",
+      "product": "sports_affiliate",
+      "name": "Pro (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "sports_affiliate_pro",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 25000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_news_starter",
+      "product": "sports_news",
+      "name": "Starter",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": false,
+        "ai.credits_monthly": 0,
+        "ai.enabled": false,
+        "alerts.enabled": false,
+        "analytics.level": "basic",
+        "api.enabled": false,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": false,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 1,
+        "reports.enabled": false,
+        "sites.max": 1,
+        "storage.max_mb": 500,
+        "users.max": 2,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 500,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_news_growth",
+      "product": "sports_news",
+      "name": "Growth",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": false,
+        "ai.credits_monthly": 500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "standard",
+        "api.enabled": true,
+        "approval_workflows.enabled": false,
+        "automations.enabled": false,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 2,
+        "reports.enabled": true,
+        "sites.max": 1,
+        "storage.max_mb": 2000,
+        "users.max": 5,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 800,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_news_pro",
+      "product": "sports_news",
+      "name": "Pro",
+      "period": "monthly",
+      "currency": "usd",
+      "trial_days": 7,
+      "status": "active",
+      "limits": {
+        "affiliate.enabled": false,
+        "ai.credits_monthly": 2500,
+        "ai.enabled": true,
+        "alerts.enabled": true,
+        "analytics.level": "advanced",
+        "api.enabled": true,
+        "approval_workflows.enabled": true,
+        "automations.enabled": true,
+        "backups.enabled": true,
+        "dedicated_infrastructure.enabled": false,
+        "domains.custom.max": 5,
+        "reports.enabled": true,
+        "sites.max": 3,
+        "storage.max_mb": 10000,
+        "users.max": 10,
+        "white_label.enabled": false
+      },
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "month",
+          "unit_amount_cents": 2000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_news_starter_annual",
+      "product": "sports_news",
+      "name": "Starter (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "sports_news_starter",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 5000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_news_growth_annual",
+      "product": "sports_news",
+      "name": "Growth (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "sports_news_growth",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 8000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    },
+    {
+      "key": "sports_news_pro_annual",
+      "product": "sports_news",
+      "name": "Pro (annual)",
+      "period": "annual",
+      "currency": "usd",
+      "trial_days": 0,
+      "status": "retired",
+      "same_limits_as": "sports_news_pro",
+      "prices": [
+        {
+          "version": 1,
+          "currency": "usd",
+          "interval": "year",
+          "unit_amount_cents": 20000,
+          "tax_behavior": null,
+          "active": true
+        }
+      ]
+    }
+  ]
+}

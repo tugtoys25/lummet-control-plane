@@ -14,6 +14,7 @@ import { configIssues } from "../worker/config-check.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const online = process.argv.includes("--online");
+const staging = process.argv.includes("--staging");
 
 function parseJsonc(text) {
   // strip // comments that are not inside strings
@@ -36,14 +37,17 @@ const env = {};
 const configFlag = process.argv.indexOf("--config");
 const configFile = configFlag > -1 && process.argv[configFlag + 1] ? process.argv[configFlag + 1] : "wrangler.jsonc";
 const wrangler = parseJsonc(await readFile(path.join(root, configFile), "utf8"));
-Object.assign(env, wrangler.vars || {});
+Object.assign(env, staging ? (wrangler.env?.staging?.vars || {}) : (wrangler.vars || {}));
 const devVars = await readOptional(".dev.vars");
 if (devVars) for (const line of devVars.split("\n")) { const m = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/); if (m && m[2].trim()) env[m[1]] = m[2].trim(); }
 for (const k of Object.keys(process.env)) if (/^[A-Z][A-Z0-9_]+$/.test(k) && process.env[k]) env[k] ??= process.env[k];
 
 const problems = [];
 const warn = [];
-for (const i of configIssues({ ...env, ENVIRONMENT: "production" })) problems.push(`${i.key}: ${i.impact}`);
+if (!staging) for (const i of configIssues({ ...env, ENVIRONMENT: "production" })) problems.push(`${i.key}: ${i.impact}`);
+if (staging && wrangler.env?.staging?.d1_databases?.[0]?.database_id === "00000000-0000-0000-0000-000000000001") problems.push("STAGING_D1_DATABASE_ID is not configured; staging must use a separate D1 database");
+if (staging && !/^sk_test_/.test(String(process.env.STAGING_STRIPE_SECRET_KEY || ""))) problems.push("STAGING_STRIPE_SECRET_KEY must be provided as a Stripe test-mode secret to CI");
+if (staging && !/^whsec_/.test(String(process.env.STAGING_STRIPE_WEBHOOK_SECRET || ""))) problems.push("STAGING_STRIPE_WEBHOOK_SECRET must be provided as a Stripe test-mode webhook secret to CI");
 
 const dbId = wrangler.d1_databases?.[0]?.database_id;
 if (!dbId || /^0+(-0+)*$/.test(dbId) || /[<>]/.test(dbId)) problems.push("wrangler.jsonc d1_databases[0].database_id is still the placeholder: nothing can be stored");

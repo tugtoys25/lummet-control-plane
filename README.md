@@ -489,3 +489,8 @@ deliveries. Optional Cloudflare Queue support. See `docs/DURABLE_JOBS.md` and `d
 Customers connect their own domain by changing its nameservers; the dashboard tracks progress until the site is live with
 HTTPS. See `docs/CUSTOM_DOMAINS.md` (flow, API, limits, staging test), `docs/CONFIGURATION.md` (every setting) and
 `docs/CHANGES_V1.md`. Check a setup with `node scripts/check-config.mjs [--online]`.
+
+
+## v2.3.4 site access gate rollout
+
+`BILLING_SUSPEND_SITES=off|shadow|enforce` defaults to `off` (`on` remains a compatibility alias for `enforce`). Keep it off until the tenant Super API state push has passed staging tests. Site state push retries use the durable `site_access_push_jobs` table; repeated failures raise `site_access_push_failed`. The tenant serve gate fails open when its signed state is absent, stale (>10 minutes), invalid, or unavailable; a five-minute scheduler refreshes denied states. `ENVIRONMENT=staging` is required for `X-Test-Now`; production ignores that header.

@@ -14,11 +14,18 @@ function limitRow(label, used, limit) {
   return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(String(used))}</td><td>${limitLabel}</td><td>${over ? '<span class="badge badge-failed">at limit</span>' : ""}</td></tr>`;
 }
 
+// Storage is reported by each site's tenant; say so when only some sites have reported recently (Phase 5.4).
+function storageLabel(storageMb) {
+  if (storageMb?.partial && Number(storageMb.sitesTotal) > 0) return `Storage (MB, ${Number(storageMb.sitesReporting) || 0} of ${Number(storageMb.sitesTotal)} sites reporting)`;
+  return "Storage (MB)";
+}
+
 export function renderUsagePage({ snapshot, monthly, aiCredits, aiLimit, tasks, ledger, canManage }) {
   const usageRows = [
     limitRow("Sites", snapshot.sites.used, snapshot.sites.limit),
     limitRow("Team members", snapshot.users.used, snapshot.users.limit),
-    limitRow("Custom domains", snapshot.customDomains.used, snapshot.customDomains.limit)
+    limitRow("Custom domains", snapshot.customDomains.used, snapshot.customDomains.limit),
+    limitRow(storageLabel(snapshot.storageMb), snapshot.storageMb?.used == null ? "unknown" : snapshot.storageMb.used, snapshot.storageMb?.limit ?? null)
   ].join("");
 
   const meteredRows = Object.keys(monthly).length

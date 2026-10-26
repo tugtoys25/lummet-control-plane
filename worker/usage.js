@@ -15,6 +15,7 @@
 // =====================================================
 
 import * as entitlementsService from "./entitlements.js";
+import { organizationStorageUsage } from "./storage-sync.js";
 
 export async function getUsageSnapshot(env, organizationId) {
   const entitlements = await entitlementsService.resolveForOrganization(env, organizationId);
@@ -39,12 +40,17 @@ export async function getUsageSnapshot(env, organizationId) {
     .bind(organizationId)
     .first();
 
+  // Real storage as last reported by the tenants (Phase 5.4). A metering failure leaves storage "unknown" instead of failing the page.
+  let storage = { bytes: null, sitesReporting: 0, sitesTotal: 0, partial: false };
+  try { storage = await organizationStorageUsage(env, organizationId); } catch (error) { console.error(JSON.stringify({ msg: "storage_usage_unavailable", error: error?.message || String(error) })); }
+
   return {
     sites: { used: sitesRow?.c || 0, limit: entitlements["sites.max"]?.value ?? null },
     users: { used: membersRow?.c || 0, limit: entitlements["users.max"]?.value ?? null },
     customDomains: { used: domainsRow?.c || 0, limit: entitlements["domains.custom.max"]?.value ?? null },
-    // Not yet metered anywhere in this codebase — see header comment.
-    storageMb: { used: null, limit: entitlements["storage.max_mb"]?.value ?? null },
+    // Tenant-reported (Phase 5.4); null until a site reports. `partial` means some sites have not reported recently.
+    storageBytes: storage.bytes,
+    storageMb: { used: storage.bytes == null ? null : Math.ceil(storage.bytes / (1024 * 1024)), limit: entitlements["storage.max_mb"]?.value ?? null, sitesReporting: storage.sitesReporting, sitesTotal: storage.sitesTotal, partial: storage.partial },
     features: {
       aiEnabled: entitlements["ai.enabled"]?.value ?? false,
       affiliateEnabled: entitlements["affiliate.enabled"]?.value ?? false,

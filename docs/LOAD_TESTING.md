@@ -102,3 +102,15 @@ Write these down first, so the result is a decision rather than a debate. A
 reasonable starting set: `portal-read` p95 under 500 ms and under 1% errors at
 the concurrency you expect at your busiest minute, times three; `write-hot`
 no 5xx at 25 concurrent writers; `login` no failures at 10 per second.
+
+## 7. Nightly run with pass thresholds (Round 6.5C)
+
+`node scripts/loadtest.mjs --nightly --thresholds config/loadtest-thresholds.v1.json --base <staging-url> --allow-host <staging-host> [--scenarios a,b] [--report file]`
+runs each scenario in the thresholds file and checks it. STAGING ONLY, and seed staging first (section 1).
+
+- Checks per scenario: `minRequests`, `maxErrorRate`, `maxServerErrors`, `p95Ms`, `p99Ms`, `minRequestsPerSecond`, `maxRateLimitedRate`. A limit set to `null` is not evaluated. Zero is refused for latency and throughput limits.
+- Exit codes: 0 every scenario passed, 1 a threshold was missed or setup failed (for example the seed was not applied), 2 usage or a refused target, 3 a scenario had nothing to evaluate (unknown, never a pass).
+- A run that sent no requests fails whatever else is set. Requests answered 429 are not errors, but `maxRateLimitedRate` fails a run that mostly measured the rate limiter.
+- The numbers in `config/loadtest-thresholds.v1.json` are placeholders from section 6 (`confirmed: false`) until the owner approves them. The report says UNCONFIRMED while they are.
+- Schedule: `.github/workflows/nightly-loadtest.yml`. It does nothing unless the repository variable `LOADTEST_NIGHTLY` is `on`. Secrets it reads: `LOADTEST_BASE_URL`, `LOADTEST_ALLOW_HOST`, `LOADTEST_PASSWORD`, and optionally `LOADTEST_ALERT_CHECK_TOKEN` for the `ops-ping` scenario. Point them at staging only. A failed night shows as a failed workflow run; it does not page anyone (the monitors in `docs/SYNTHETIC_MONITORS.md` are separate).
+- Evidence: results are NOT VERIFIED against real Cloudflare D1 until the owner runs it on staging and attaches a report. Database size changes the answer, so check size first with `scripts/d1-size-check.mjs` (`docs/D1_SIZE_AND_TABLE_MOVE_PLAN.md`).

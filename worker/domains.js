@@ -33,6 +33,9 @@ function verificationHostFor(hostname) {
   return `_lummet-verify.${hostname}`;
 }
 
+import { evaluateWriteGate, refusalFor } from "./access.js";
+import * as siteAccessRepo from "./repositories/site-access.js";
+
 export function createDomainService({ dns, infra }) {
   async function recordDomainEvent(env, { domainId, fromStatus, toStatus, reason, actorType, actorId }) {
     await env.LUMMET_DB.prepare(
@@ -64,6 +67,11 @@ export function createDomainService({ dns, infra }) {
    * produces a clean error instead of a raw constraint violation.
    */
   async function addDomain(env, { siteId, hostname, actorUserId }) {
+    const site = await siteAccessRepo.siteAccessMetadata(env, siteId);
+    if (!site) return { ok:false,status:404,error:"site_not_found",reasonCode:"site_not_found" };
+    if (site.status === "suspended") return { ok:false,status:409,error:"site_suspended",reasonCode:"site_suspended" };
+    const gate = await evaluateWriteGate(env, { organizationId: site.organization_id, method:"POST", subPath:"/domains/attach" });
+    if (gate.blocked) return { ok:false,status:402,...refusalFor(gate.access) };
     const trimmedHostname = (hostname || "").trim().toLowerCase();
     if (!HOSTNAME_PATTERN.test(trimmedHostname)) {
       return { ok: false, status: 422, error: "invalid_hostname" };

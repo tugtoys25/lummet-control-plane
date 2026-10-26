@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "description": "Versioned Cloudflare Access configuration for the Lummet control plane (Round 6.3B). This is a reviewed template, NOT an applied Cloudflare payload: every value marked with an open-marker is an owner decision, and the application and policy stay unapplied until all of them are closed. Check it with scripts/cloudflare-access-config.mjs (offline, never calls Cloudflare). Live Cloudflare changes are owner-run; see docs/CLOUDFLARE_ACCESS.md.",
+  "status": "[OPEN] owner has not approved this Access policy",
+  "application": {
+    "name": "Lummet platform control plane",
+    "type": "self_hosted",
+    "hostname": "[OPEN: control-plane hostname behind Cloudflare, for example the portal host]",
+    "sessionDuration": "[OPEN: owner-approved Access session duration]",
+    "teamDomain": "[OPEN: https://<team>.cloudflareaccess.com, goes into CF_ACCESS_ISSUER]",
+    "audienceTag": "[OPEN: the application's AUD tag, goes into CF_ACCESS_AUD]"
+  },
+  "protectedPaths": ["/platform/*", "/api/platform/*"],
+  "neverProtect": [
+    "/api/health",
+    "/api/csp-report",
+    "/api/billing/webhook/stripe",
+    "/api/ci/",
+    "/api/ops/",
+    "/api/v1/",
+    "/api/auth/"
+  ],
+  "identityProvider": "[OPEN: approved identity provider and its connection id]",
+  "allowPolicies": [
+    {
+      "name": "Lummet staff",
+      "decision": "allow",
+      "include": "[OPEN: approved staff group or email selector]",
+      "requireMfaAtIdp": true
+    }
+  ],
+  "denyByDefault": true,
+  "notes": [
+    "Cloudflare Access is additional to Worker staff sessions, staff 2FA and RBAC; it replaces none of them.",
+    "neverProtect lists machine and public callers that cannot complete an Access login (Stripe webhook, CI release publishing with a staff token, uptime pinger, API keys, CSP reports, staff sign-in). The validator refuses any protected path that overlaps them.",
+    "The workers.dev hostname must not serve production traffic, because Access only protects the routes bound to the Access application (see the runbook)."
+  ]
+}

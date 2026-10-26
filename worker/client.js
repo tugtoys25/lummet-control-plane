@@ -231,3 +231,29 @@ export function putToTenant(env, tenant, path, body) {
 export function deleteFromTenant(env, tenant, path, body) {
   return requestTenant(env, tenant, { method: "DELETE", path, body });
 }
+
+// Push a signed serve-gate state using the tenant's existing encrypted HMAC credential.
+export async function pushTenantSiteAccess(env, tenantOrId, { state, generation, siteId }) {
+  const tenant = typeof tenantOrId === "string" ? await getTenant(env, tenantOrId) : tenantOrId;
+  if (!tenant) return fail(404, "tenant_not_found", "Tenant is not registered.");
+  const credential = await getActiveCredential(env, tenant.id);
+  if (!credential) return fail(422, "no_active_credential", "No active Super API credential is configured for this tenant.");
+  let secret; try { secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv); } catch { return fail(500, "credential_decrypt_failed", "Could not decrypt this tenant's credential."); }
+  const payload = { state, generation, siteId: String(siteId), issuedAt: Date.now() };
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
+  const signature = [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(JSON.stringify(payload))))].map(b=>b.toString(16).padStart(2,"0")).join("");
+  return requestTenant(env, tenant, { method:"PUT", path:"/en/api/super/site-access-state", body:{payload,signature}, timeoutMs:8000 });
+}
+
+// Phase 5.4: push the plan's storage cap (bytes, or null for none) with a monotone generation.
+export async function pushTenantStorageLimit(env, tenantOrId, { maxBytes, generation, siteId }) {
+  const tenant = typeof tenantOrId === "string" ? await getTenant(env, tenantOrId) : tenantOrId;
+  if (!tenant) return fail(404, "tenant_not_found", "Tenant is not registered.");
+  const credential = await getActiveCredential(env, tenant.id);
+  if (!credential) return fail(422, "no_active_credential", "No active Super API credential is configured for this tenant.");
+  let secret; try { secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv); } catch { return fail(500, "credential_decrypt_failed", "Could not decrypt this tenant's credential."); }
+  const payload = { purpose: "storage_limit", maxBytes, generation, siteId: String(siteId), issuedAt: Date.now() };
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(JSON.stringify(payload))))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return requestTenant(env, tenant, { method: "PUT", path: "/en/api/super/storage-limit", body: { payload, signature }, timeoutMs: 8000 });
+}

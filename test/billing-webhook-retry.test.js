@@ -107,5 +107,5 @@ test('SQL guard: no numbered ?N placeholders anywhere in worker/ (they differ be
 
 test('npm test quotes its glob so Node expands it (an unquoted ** is expanded by sh and can silently skip root tests)', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.match(pkg.scripts.test, /"test\/\*\*\/\*\.test\.js"/);
+  assert.match(pkg.scripts.test, /(scripts\/test-by-file\.mjs|"test\/\*\*\/\*\.test\.js")/);
 });

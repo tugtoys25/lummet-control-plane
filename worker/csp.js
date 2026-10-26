@@ -18,6 +18,8 @@
 // token is stripped from every non-HTML text response too). Scripts without the token get no nonce and do not run.
 // =====================================================
 
+import { cspReportMode, REPORT_PATH, REPORT_ENDPOINT_NAME } from "./csp-report.js";
+
 let TOKEN = null;
 
 /** Secret placeholder for the response nonce. Lazy: Workers forbid random values at global scope. */
@@ -109,8 +111,13 @@ export function cspMode(env) {
 export const BASE_CSP = "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; connect-src 'self'; frame-src 'none'; worker-src 'none'; manifest-src 'none'; img-src 'self' data: https:";
 
 /** The directives v7E adds for HTML pages. */
-export function scriptDirectives(nonce) {
-  return `script-src 'nonce-${nonce}'; script-src-attr 'none'`;
+export function scriptDirectives(nonce, allowTurnstile = false) {
+  return `script-src 'nonce-${nonce}'${allowTurnstile ? " https://challenges.cloudflare.com" : ""}; script-src-attr 'none'`;
+}
+
+function baseCspFor(env) {
+  if (String(env?.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on" || !env?.TURNSTILE_SITE_KEY || !env?.TURNSTILE_SECRET_KEY) return BASE_CSP;
+  return BASE_CSP.replace("connect-src 'self'; frame-src 'none';", "connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com;");
 }
 
 const isHtml = (ct) => /text\/html/i.test(ct);
@@ -148,18 +155,23 @@ export async function finalizeResponse(response, env) {
       const i = html.lastIndexOf("</body>");
       html = i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag;
     }
-    const scripts = scriptDirectives(nonce);
+    const baseCsp = baseCspFor(env);
+    const scripts = scriptDirectives(nonce, baseCsp !== BASE_CSP);
+    // CSP_REPORT_MODE=full (Round 6.3C) also names a Reporting API endpoint and keeps reporting on the enforced policy,
+    // so a regression after CSP_MODE is flipped to enforce is still visible. basic (default) is the 2.6.0.7 behaviour.
+    const reporting = cspReportMode(env) === "full";
+    if (reporting) headers.set("Reporting-Endpoints", `${REPORT_ENDPOINT_NAME}="${REPORT_PATH}"`);
     if (mode === "enforce") {
-      headers.set("Content-Security-Policy", `${BASE_CSP}; ${scripts}`);
+      headers.set("Content-Security-Policy", `${baseCsp}; ${scripts}${reporting ? `; report-uri ${REPORT_PATH}; report-to ${REPORT_ENDPOINT_NAME}` : ""}`);
     } else {
-      headers.set("Content-Security-Policy", BASE_CSP);
-      headers.set("Content-Security-Policy-Report-Only", `${scripts}; report-uri /api/csp-report`);
+      headers.set("Content-Security-Policy", baseCsp);
+      headers.set("Content-Security-Policy-Report-Only", `${scripts}; report-uri ${REPORT_PATH}${reporting ? `; report-to ${REPORT_ENDPOINT_NAME}` : ""}`);
     }
     headers.delete("Content-Length");
     return new Response(html, { status: response.status, statusText: response.statusText, headers });
   }
 
-  if (!headers.has("Content-Security-Policy")) headers.set("Content-Security-Policy", BASE_CSP);
+  if (!headers.has("Content-Security-Policy")) headers.set("Content-Security-Policy", baseCspFor(env));
 
   if (response.body && isTextual(ct)) {
     const text = await response.text();
@@ -172,20 +184,5 @@ export async function finalizeResponse(response, env) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-/** Handles POST /api/csp-report: logs a trimmed record, stores nothing, always 204. */
-export async function handleCspReport(request) {
-  let text = "";
-  try { text = (await request.text()).slice(0, 8000); } catch (_) { /* ignore */ }
-  try {
-    const body = JSON.parse(text);
-    const r = body["csp-report"] || (Array.isArray(body) ? (body[0] && body[0].body) : body) || {};
-    const doc = String(r["document-uri"] || r.documentURL || "").split("?")[0].slice(0, 200);
-    console.warn(JSON.stringify({
-      csp_violation: true,
-      directive: String(r["violated-directive"] || r.effectiveDirective || "").slice(0, 80),
-      blocked: String(r["blocked-uri"] || r.blockedURL || "").split("?")[0].slice(0, 200),
-      document: doc
-    }));
-  } catch (_) { /* a malformed report is not worth anything */ }
-  return new Response(null, { status: 204 });
-}
+// Report collection lives in csp-report.js (Round 6.3C); re-exported so existing imports keep working.
+export { handleCspReport } from "./csp-report.js";

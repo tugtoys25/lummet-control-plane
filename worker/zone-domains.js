@@ -1,3 +1,4 @@
+import { evaluateWriteGate, refusalFor } from "./access.js";
 // =====================================================
 // CUSTOM DOMAINS BY NAMESERVER DELEGATION (v1)
 //
@@ -369,6 +370,10 @@ export function createZoneDomainService({ dns, infra }) {
   // ---------------------------------------------------- check / advance
 
   async function attachHostnames(env, zone, site, { redeploy, now }) {
+    if (!site) return { ok:false, reasonCode:"site_not_found" };
+    if (site.status === "suspended") { console.warn(JSON.stringify({msg:"access_gate_refusal",entryPoint:"zone-domains.attachHostnames",reasonCode:"site_suspended"})); return { ok:false, reasonCode:"site_suspended" }; }
+    const gate = await evaluateWriteGate(env, { organizationId: site.organization_id, method:"POST", subPath:"/zone-domains/attach" });
+    if (gate.blocked) { const reasonCode=refusalFor(gate.access).reasonCode; console.warn(JSON.stringify({msg:"access_gate_refusal",entryPoint:"zone-domains.attachHostnames",reasonCode})); return { ok:false, reasonCode }; }
     const names = computeResourceNames(site, env);
     let attachedAny = false;
     for (const h of await repo.listHostnames(env, zone.id)) {
@@ -395,7 +400,7 @@ export function createZoneDomainService({ dns, infra }) {
         }
       }
     }
-    return attachedAny;
+    return { ok:true, attached:attachedAny };
   }
 
   async function verifyLive(env, zone, site, { redeploy, now }) {
@@ -963,7 +968,7 @@ export function createZoneDomainService({ dns, infra }) {
   }
 
   return {
-    addZone, checkZone, sweep, view, listForSite, listRecords, importScanned, addRecord, deleteRecord, removeHostname, removeZone, cleanupForSite,
+    addZone, checkZone, sweep, view, listForSite, listRecords, importScanned, addRecord, deleteRecord, removeHostname, removeZone, cleanupForSite, attachHostnames,
     addSubdomain, checkSubdomain, subdomainView, listSubdomainsForSite, removeSubdomain, removeAnyHostname
   };
 }

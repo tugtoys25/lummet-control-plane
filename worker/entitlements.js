@@ -14,6 +14,9 @@
 // =====================================================
 
 import { getActiveSubscription, getPlan } from "./plans.js";
+import { billingConfig } from "./billing-config.js";
+import { resolveAccess } from "./access.js";
+import * as commercialRepo from "./repositories/commercial.js";
 
 // The floor for an organization with no usable subscription at all
 // — never subscribed, or its subscription expired/was canceled
@@ -36,7 +39,10 @@ const ZERO_ACCESS_ENTITLEMENTS = {
   "alerts.enabled": { type: "boolean", value: false },
   // Phase 7 additions — see migration 0014's header comment.
   "approval_workflows.enabled": { type: "boolean", value: false },
-  "dedicated_infrastructure.enabled": { type: "boolean", value: false }
+  "dedicated_infrastructure.enabled": { type: "boolean", value: false },
+  // Round 6.4C: organization IP allowlist. Off for every plan until the owner grants it to the plans he calls "business" (a plan_entitlements
+  // row, or a staff override on one subscription). No plan name appears in code.
+  "security.ip_allowlist.enabled": { type: "boolean", value: false }
 };
 
 function castValue(type, raw) {
@@ -94,11 +100,18 @@ function isEffectivelyExpiredTrial(subscription) {
 // resolving to full access.
 const USABLE_STATUSES = new Set(["trialing", "active", "past_due"]);
 
-export async function resolveForOrganization(env, organizationId) {
+export async function resolveForOrganization(env, organizationId, { now } = {}) {
   const subscription = await getActiveSubscription(env, organizationId);
 
   if (!subscription || !USABLE_STATUSES.has(subscription.status) || isEffectivelyExpiredTrial(subscription)) {
     return { ...ZERO_ACCESS_ENTITLEMENTS };
+  }
+
+  // With BILLING_ENFORCE=enforce the access state machine (access.js) decides, so a past_due subscription whose grace
+  // period has ended no longer keeps full entitlements forever. Off and shadow leave the legacy logic above untouched.
+  if (billingConfig(env).mode === "enforce") {
+    const access = await resolveAccess(env, organizationId, now ?? Date.now());
+    if (!access.canMutate) return { ...ZERO_ACCESS_ENTITLEMENTS };
   }
 
   const plan = await getPlan(env, subscription.plan_id);
@@ -106,8 +119,22 @@ export async function resolveForOrganization(env, organizationId) {
 
   const planEntitlements = await loadPlanEntitlements(env, plan.id);
   const overrides = await loadOverrides(env, subscription.id);
-
-  return { ...ZERO_ACCESS_ENTITLEMENTS, ...planEntitlements, ...overrides };
+  const resolved = { ...ZERO_ACCESS_ENTITLEMENTS, ...planEntitlements, ...overrides };
+  const founder = await commercialRepo.findFounderLicense?.(env, organizationId);
+  if (founder?.entitlement_json) { try { Object.assign(resolved, JSON.parse(founder.entitlement_json)); } catch (error) { console.error(JSON.stringify({ msg: "founder_entitlement_json_invalid", organizationId, error: error?.message || String(error) })); } }
+  const quoteGrants = await commercialRepo.listQuoteEntitlementGrants?.(env, organizationId);
+  for (const grant of quoteGrants || []) { try { Object.assign(resolved, JSON.parse(grant.entitlement_json)); } catch (error) { console.error(JSON.stringify({ msg: "quote_entitlement_json_invalid", organizationId, error: error?.message || String(error) })); } }
+  // Active catalog add-ons are additive overrides, applied after the base plan and explicit
+  // subscription overrides. Only numeric entitlements can be increased; no add-on can enable
+  // a boolean capability or lower an existing limit.
+  const addonRows = await commercialRepo.selectSubscriptionAddons(env, subscription.id);
+  for (const row of addonRows) {
+    const current = resolved[row.entitlement_key];
+    if (current && current.type === "number" && Number.isFinite(Number(row.delta_per_unit)) && Number(row.delta_per_unit) >= 0) {
+      current.value += Number(row.delta_per_unit) * Number(row.quantity);
+    }
+  }
+  return resolved;
 }
 
 /** Returns the raw resolved value for one entitlement key, or undefined. */

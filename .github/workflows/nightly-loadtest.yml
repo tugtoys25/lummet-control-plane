@@ -1,0 +1,36 @@
+name: Nightly load test (staging only)
+# Off unless the repository variable LOADTEST_NIGHTLY is set to "on". It reads the staging address and the seeded test
+# password from repository secrets. It changes nothing in the repository and publishes nothing; it only measures the
+# staging Worker and writes a report. Never point the secrets at production: the run creates and deletes data.
+# Pass thresholds live in config/loadtest-thresholds.v1.json (placeholders until the owner confirms them).
+# Exit codes: 0 every scenario met its thresholds, 1 a threshold was missed or setup failed, 3 nothing to evaluate.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nightly-loadtest
+  cancel-in-progress: false
+jobs:
+  loadtest:
+    if: ${{ vars.LOADTEST_NIGHTLY == 'on' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Run the nightly load test against staging
+        env:
+          LOADTEST_PASSWORD: ${{ secrets.LOADTEST_PASSWORD }}
+          ALERT_CHECK_TOKEN: ${{ secrets.LOADTEST_ALERT_CHECK_TOKEN }}
+        run: node scripts/loadtest.mjs --nightly --thresholds config/loadtest-thresholds.v1.json --base "${{ secrets.LOADTEST_BASE_URL }}" --allow-host "${{ secrets.LOADTEST_ALLOW_HOST }}" --report loadtest-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-loadtest-report
+          path: loadtest-report.json
+          if-no-files-found: ignore

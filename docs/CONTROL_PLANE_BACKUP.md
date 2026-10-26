@@ -51,3 +51,10 @@ backup is under 20 hours old, so frequent pings are harmless.
 
 Restoring replaces seeded catalog rows with the backed-up versions. Practice
 this once on a scratch database before you ever need it.
+
+## Restore drill
+
+The practice restore has tooling and a report: [restore drill runbook](runbooks/restore-drill.md) (AT-15) and
+`scripts/restore-drill.mjs`. It is owner-run and NOT VERIFIED until executed in staging with evidence. For a real data-loss
+incident start from the [D1 incident runbook](runbooks/d1-incident.md); the restore-time and recovery-point objectives are
+**[OPEN]** owner decisions.

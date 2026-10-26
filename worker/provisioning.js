@@ -30,6 +30,7 @@ import * as entitlementsService from "./entitlements.js";
 import * as webhooks from "./webhooks.js";
 import { deployments as realDeployments } from "./deployments.js";
 import * as tenantTemplate from "./tenant-template.js";
+import { evaluateWriteGate, refusalFor } from "./access.js";
 
 export const PROVISIONING_STEPS = [
   "validate_entitlement",
@@ -90,6 +91,8 @@ export function createProvisioningService(infra, { deploymentService = realDeplo
   async function startProvisioning(env, siteId, { actorUserId, actorType = "customer_user" } = {}) {
     const site = await sites.getSite(env, siteId);
     if (!site) return { ok: false, status: 404, error: "site_not_found" };
+    const accessGate = await evaluateWriteGate(env, { organizationId: site.organization_id, method: "POST", subPath: `/sites/${siteId}/provision` });
+    if (accessGate.blocked) return { ok: false, status: 402, ...refusalFor(accessGate.access) };
     if (site.status !== "pending") {
       return { ok: false, status: 409, error: "site_not_provisionable", currentStatus: site.status };
     }

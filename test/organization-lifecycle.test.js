@@ -130,3 +130,58 @@ test('every organization lifecycle action is audited', async () => {
   const rows = await e.LUMMET_DB.prepare(`SELECT action FROM lummet_audit_logs WHERE resource = 'organization' AND action IN ('deactivate','reactivate') ORDER BY id`).all();
   assert.deepEqual(rows.results.map((r) => r.action), ['deactivate', 'reactivate']);
 });
+
+
+
+test('invitation route enforces authorization, CSRF, role validation, and writes auditable outcomes', async () => {
+  const e = env();
+  const owner = await signup(e, 'invite-owner@example.com');
+  const other = await signup(e, 'invite-other@example.com');
+
+  const unauthorized = await call(e, 'POST', `/api/organizations/${owner.org}/invitations`, { email: 'unauthorized@example.com', role: 'viewer' }, null);
+  assert.equal(unauthorized.status, 401);
+
+  const crossOrg = await call(e, 'POST', `/api/organizations/${owner.org}/invitations`, { email: 'cross@example.com', role: 'viewer' }, other.cookie);
+  assert.equal(crossOrg.status, 403);
+
+  const invalidRole = await call(e, 'POST', `/api/organizations/${owner.org}/invitations`, { email: 'bad-role@example.com', role: 'owner-ish' }, owner.cookie);
+  assert.equal(invalidRole.status, 422);
+  assert.equal(invalidRole.json.error, 'invalid_role');
+
+  const csrfHeaders = new Headers({ 'CF-Connecting-IP': '198.51.100.240', Cookie: owner.cookie, Origin: 'https://evil.example' });
+  csrfHeaders.set('Content-Type', 'application/json');
+  const csrfResponse = await worker.fetch(new Request(`https://cp.test/api/organizations/${owner.org}/invitations`, {
+    method: 'POST', headers: csrfHeaders, body: JSON.stringify({ email: 'csrf@example.com', role: 'viewer' })
+  }), e, ctx);
+  assert.equal(csrfResponse.status, 403);
+
+  const valid = await call(e, 'POST', `/api/organizations/${owner.org}/invitations`, { email: 'valid-invite@example.com', role: 'viewer' }, owner.cookie);
+  assert.equal(valid.status, 200, valid.text);
+  assert.ok(valid.json.invitationId);
+  assert.ok(valid.json.token);
+
+  const rows = await e.LUMMET_DB.prepare(`SELECT action, success, status_code FROM lummet_audit_logs WHERE resource = 'organization_invitation' ORDER BY rowid`).all();
+  assert.deepEqual(rows.results.map((row) => [row.action, row.success, row.status_code]), [
+    ['create', 0, 422], ['create', 1, 200]
+  ]);
+  assert.equal((await e.LUMMET_DB.prepare(`SELECT COUNT(*) n FROM organization_invitations`).first()).n, 1,
+    'unauthorized, cross-org, invalid-role, and CSRF-blocked attempts must not create invitations');
+});
+
+test('invitation acceptance is bound to the invited email and cannot be replayed', async () => {
+  const e = env();
+  const owner = await signup(e, 'invite-email-owner@example.com');
+  const token = await invite(e, owner.org, owner.cookie, 'intended@example.com', 'viewer');
+  const wrong = await call(e, 'POST', '/api/customer/signup', { email: 'wrong-person@example.com', password: 'Correct-Horse-Battery-9', organizationName: 'Wrong' });
+  const denied = await call(e, 'POST', `/api/invitations/${token}/accept`, null, wrong.cookie);
+  assert.equal(denied.status, 403);
+  assert.equal(denied.json.error, 'invitation_email_mismatch');
+  assert.equal((await organizations.getMembership(e, owner.org, wrong.json.userId)), null);
+
+  const intended = await call(e, 'POST', '/api/customer/signup', { email: 'intended@example.com', password: 'Correct-Horse-Battery-9', organizationName: 'Intended' });
+  const accepted = await call(e, 'POST', `/api/invitations/${token}/accept`, null, intended.cookie);
+  assert.equal(accepted.status, 200, accepted.text);
+  const replay = await call(e, 'POST', `/api/invitations/${token}/accept`, null, intended.cookie);
+  assert.equal(replay.status, 404);
+  assert.equal(replay.json.error, 'invalid_or_used_invitation');
+});

@@ -1,0 +1,43 @@
+name: CI
+# Runs on pull requests (the deploy workflow runs the same suite on pushes to main). Nothing here deploys.
+on:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Reject incomplete or inconsistent lockfile
+        run: node scripts/lockfile-check.mjs
+      - name: Install exact dependency graph
+        run: npm ci --no-audit --no-fund
+      - name: Run tests with per-file isolation and timing
+        env:
+          TEST_FILE_TIMEOUT_MS: 120000
+        run: npm test
+        timeout-minutes: 60
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: per-file-test-timings-node-${{ matrix.node-version }}
+          path: test-timings.md
+      - name: Package gate (migrations immutable, no secrets, version matches)
+        run: node scripts/package-phase.mjs --phase 3 --version "$(node -p "require('./package.json').version")" --skip-tests --development-check
+      - name: Phase 2 code checks (the staging record is checked by a person with "npm run check:phase2")
+        run: node scripts/phase-gate.mjs --phase 2 --static-only
+      - name: Phase 4 static safety and evidence-template checks (does not claim staging verification)
+        run: node scripts/phase4-gate.mjs
+      - name: Phase 5 static commercial-surface checks (does not claim Stripe/staging verification)
+        run: node scripts/phase5-gate.mjs
+      - name: Optional production hygiene check
+        if: ${{ vars.ENFORCE_PRODUCTION_HYGIENE == 'on' }}
+        env:
+          ENFORCE_PRODUCTION_HYGIENE: ${{ vars.ENFORCE_PRODUCTION_HYGIENE }}
+        run: node scripts/production-hygiene.mjs

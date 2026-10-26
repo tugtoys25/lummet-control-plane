@@ -158,9 +158,9 @@ async function notify(ctx, record, id) {
 
 // ---------------------------------------------------------------- GET
 
-async function renderForm(ctx, { key, form, fields, values = {}, errors = {}, sent = false, status = 200, banner = "" }) {
+async function renderForm(ctx, { key, path: pathOverride, form, fields, values = {}, errors = {}, sent = false, status = 200, banner = "" }) {
   const { site, ui } = ctx.siteCtx;
-  const path = formPath(key);
+  const path = pathOverride || formPath(key);
   const introHtml = sanitizeHtml(form.intro || "");
   const hasErrors = Object.keys(errors).length > 0;
   const trail = [
@@ -176,7 +176,7 @@ async function renderForm(ctx, { key, form, fields, values = {}, errors = {}, se
     description,
     path,
     image: safeUrl(form.og_image),
-    noindex: sent || status !== 200,
+    noindex: sent || status !== 200 || (Boolean(pathOverride) && String(ctx.env.PUBLIC_TRUST_PAGES || "off").trim().toLowerCase() !== "on"),
     jsonLd: [
       organizationLd(site),
       { "@type": "ContactPage", name: form.title, url: absoluteUrl(site, path), description },
@@ -206,6 +206,12 @@ async function renderForm(ctx, { key, form, fields, values = {}, errors = {}, se
       banner,
       has_errors: hasErrors,
       honeypot: HONEYPOT_FIELD,
+      turnstile: {
+        required: (key === "contact" || key === "demo") && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on",
+        enabled: (key === "contact" || key === "demo") && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && Boolean(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
+        misconfigured: (key === "contact" || key === "demo") && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && !(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
+        siteKey: String(ctx.env.TURNSTILE_SITE_KEY || "")
+      },
       crumbs: trail
     },
     head,
@@ -220,16 +226,16 @@ async function renderForm(ctx, { key, form, fields, values = {}, errors = {}, se
   return response;
 }
 
-export async function formPage(ctx, { key }) {
+export async function formPage(ctx, { key, path }) {
   const form = await data.getForm(ctx.env, key);
   if (!form) return null;
   const fields = await data.listFormFields(ctx.env, key);
-  return renderForm(ctx, { key, form, fields, sent: ctx.url.searchParams.get("sent") === "1" && fields.length > 0 });
+  return renderForm(ctx, { key, path, form, fields, sent: ctx.url.searchParams.get("sent") === "1" && fields.length > 0 });
 }
 
 // --------------------------------------------------------------- POST
 
-export async function submitForm(ctx, { key }) {
+export async function submitForm(ctx, { key, path }) {
   const { env, request, url } = ctx;
   const { ui, settings } = ctx.siteCtx;
   const form = await data.getForm(env, key);
@@ -238,7 +244,7 @@ export async function submitForm(ctx, { key }) {
   if (!fields.length) return null;
 
   const fail = (status, message, extra = {}) =>
-    renderForm(ctx, { key, form, fields, status, banner: message, ...extra });
+    renderForm(ctx, { key, path, form, fields, status, banner: message, ...extra });
 
   if (!sameOrigin(request, url)) return fail(403, ui.err_generic || "");
 
@@ -259,11 +265,34 @@ export async function submitForm(ctx, { key }) {
   const redirectToSent = () =>
     new Response(null, {
       status: 303,
-      headers: { location: `${formPath(key)}?sent=1`, "cache-control": "no-store" }
+      headers: { location: `${path || formPath(key)}?sent=1`, "cache-control": "no-store" }
     });
 
   // Honeypot: a human never sees this field. Pretend it worked, store nothing.
   if (String(formData.get(HONEYPOT_FIELD) || "").trim() !== "") return redirectToSent();
+
+  // Public contact/demo bot protection is opt-in and fail-closed. Generic custom forms
+  // are intentionally unaffected; no token is ever logged or persisted.
+  if ((key === "contact" || key === "demo") && String(env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on") {
+    const token = String(formData.get("cf-turnstile-response") || "").trim();
+    if (!env.TURNSTILE_SECRET_KEY || !env.TURNSTILE_SITE_KEY || !token) {
+      return fail(503, "This form is temporarily unavailable because bot protection is not configured. Please contact support directly.");
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const verify = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: request.headers.get("CF-Connecting-IP") || "" }),
+        signal: controller.signal
+      });
+      if (!verify.ok) return fail(503, "Bot protection could not be verified. Please try again or contact support directly.");
+      const result = await verify.json();
+      if (result.success !== true || result.hostname !== url.hostname) return fail(422, "Please complete the bot-protection check and submit again.");
+    } catch {
+      return fail(503, "Bot protection could not be verified. Please try again or contact support directly.");
+    } finally { clearTimeout(timeout); }
+  }
 
   const { values, errors, ok } = validateSubmission(fields, formData, ui);
   if (!ok) return fail(422, ui.form_errors_summary || "", { values, errors });

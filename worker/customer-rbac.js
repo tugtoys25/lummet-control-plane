@@ -13,7 +13,7 @@
 // guards.
 // =====================================================
 
-export const ORG_ROLES = ["viewer", "analyst", "editor", "admin", "owner"];
+export const ORG_ROLES = ["viewer", "analyst", "editor", "billing", "admin", "owner"];
 
 export function roleRank(role) {
   const i = ORG_ROLES.indexOf(role);
@@ -21,6 +21,10 @@ export function roleRank(role) {
 }
 
 export function roleAtLeast(role, required) {
+  // Billing is a capability role, not a rung in the editor/admin hierarchy.
+  // It may pass only a billing-specific guard and cannot inherit site/editor rights.
+  if (required === "billing") return ["billing", "admin", "owner"].includes(role);
+  if (role === "billing") return false;
   return roleRank(role) >= roleRank(required);
 }
 

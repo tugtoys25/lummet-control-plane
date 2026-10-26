@@ -10,7 +10,8 @@ import * as data from "./data.js";
 import { brandModel, updateModel, publicationModel, partnerModel, authorModel, typeLabel } from "./models.js";
 import { PAGE_ALIASES } from "./links.js";
 import { sanitizeHtml } from "./sanitize.js";
-import { renderPage } from "./render.js";
+import { renderPage, textResponse } from "./render.js";
+import { API_V1_SCOPES, WEBHOOK_EVENT_TYPES, buildOpenApiSpec } from "./openapi.js";
 import { buildHead, breadcrumbLd, organizationLd, websiteLd, absoluteUrl } from "./seo.js";
 import { buildHome } from "./home.js";
 import { stripTags, truncate, safeUrl, readingMinutes } from "./format.js";
@@ -388,14 +389,18 @@ export function pricingGroups(plans, period, ui = {}) {
     if (monthly && monthly.price_cents * 12 > p.price_cents) {
       saving = (ui.pricing_saving || "Save {pct}% compared with paying monthly").replace("{pct}", String(Math.round((1 - p.price_cents / (monthly.price_cents * 12)) * 100)));
     }
-    if (!groups.has(p.product_id)) groups.set(p.product_id, { name: p.product_name, category: p.category || "", plans: [] });
+    if (!groups.has(p.product_id)) groups.set(p.product_id, { id: String(p.product_id), name: p.product_name, category: p.category || "", plans: [] });
     groups.get(p.product_id).plans.push({
       name: base,
       price: MONEY(p.price_cents, p.currency),
       period: period === "annual" ? (ui.pricing_per_year || "per year") : (ui.pricing_per_month || "per month"),
       trial: p.trial_days > 0 ? (ui.pricing_trial || "{n}-day free trial").replace("{n}", String(p.trial_days)) : "",
       saving,
-      features: pricingFeatures(p.entitlements)
+      features: pricingFeatures(p.entitlements),
+      planId: p.id,
+      signupPeriod: period,
+      productId: String(p.product_id),
+      featuresText: pricingFeatures(p.entitlements).join(", ") || "Core platform"
     });
   }
   return [...groups.values()];
@@ -424,9 +429,226 @@ export async function pricingPage(ctx) {
     template: "pricing",
     data: {
       ...heading, intro: description, groups, has_groups: groups.length > 0, has_annual: hasAnnual, monthly: period === "monthly", annual: period === "annual",
+      families: groups.map((g) => ({ id: g.id, name: g.name })),
+      comparisonPlans: groups.flatMap((g) => g.plans.map((plan) => ({ ...plan, family: g.name }))),
       crumbs: crumbs([crumb(ui.crumb_home, "/"), crumb(heading.title, "/pricing")])
     },
     head,
     bodyClass: "page-pricing"
   });
+}
+
+
+// ---------------------------------------------------------- trust pages (6.2A)
+// PUBLIC_TRUST_PAGES: off (default) = routes are inert and behave exactly as before;
+// shadow = pages render for owner review (noindex, preview notice, [OPEN] markers, no outbound link);
+// on = live pages without [OPEN] markers. The pages avoid unverified operational, legal or compliance claims.
+export function trustMode(env) {
+  const v = String(env?.PUBLIC_TRUST_PAGES || "off").trim().toLowerCase();
+  return v === "on" || v === "shadow" ? v : "off";
+}
+
+const escAttr = (v) => String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escText = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+async function trustPage(ctx, { title, path, description, content }) {
+  const mode = trustMode(ctx.env);
+  if (mode === "off") return null;
+  const { site } = ctx.siteCtx;
+  const head = buildHead({ site, title: `${title} | ${site.name}`, description, path, noindex: mode !== "on" });
+  return renderPage(ctx, {
+    template: "trust",
+    data: { trust: { title, description, content_html: sanitizeHtml(content), preview: mode !== "on", preview_text: "Preview: public trust-page rollout is not enabled. Owner review is still required." } },
+    head,
+    bodyClass: "page-trust"
+  });
+}
+
+export async function statusPage(ctx) {
+  const mode = trustMode(ctx.env);
+  const configured = String(ctx.env.STATUS_PROVIDER_URL || "").trim();
+  const validUrl = /^https:\/\/[^\s]+$/i.test(configured) && safeUrl(configured) === configured;
+  let link;
+  if (mode === "on") {
+    link = validUrl
+      ? `<p><a href="${escAttr(configured)}" rel="noopener noreferrer" target="_blank">View the service status page</a></p>`
+      : `<p>Service status information is not available right now.</p>`;
+  } else {
+    link = validUrl
+      ? `<p><strong>[OPEN]</strong> The status-provider link is configured but stays unpublished until the owner sets the trust-page rollout to on.</p>`
+      : `<p><strong>[OPEN]</strong> Status-provider URL has not been configured. Service availability is not asserted on this page.</p>`;
+  }
+  return trustPage(ctx, {
+    title: "Service status", path: "/status",
+    description: "Link to the service-status provider.",
+    content: `<p>This page links to the external status provider.</p>${link}<p>Provider and incident data are maintained by that provider; this page does not independently verify service health.</p>`
+  });
+}
+
+export async function securityPage(ctx) {
+  const mode = trustMode(ctx.env);
+  const contact = String(ctx.env.SECURITY_CONTACT || "").trim();
+  const safeContact = /^(mailto:[^\s]+|https:\/\/[^\s]+)$/i.test(contact) ? contact : "";
+  const contactHtml = safeContact
+    ? `<p>Security contact: <a href="${escAttr(safeContact)}">${escText(safeContact)}</a></p>`
+    : mode === "on" ? "" : `<p>Security contact: <strong>[OPEN]</strong> owner must provide a monitored security contact.</p>`;
+  const openNote = mode === "on" ? "" : `<p><strong>[OPEN]</strong> Disclosure policy, response expectations and scope require owner review. No response-time commitment is made here.</p>`;
+  const txt = mode === "on" ? `<p>See also <a href="/.well-known/security.txt">security.txt</a>.</p>` : "";
+  return trustPage(ctx, {
+    title: "Security", path: "/security",
+    description: "Security reporting contact and general vulnerability disclosure information.",
+    content: `<p>We welcome responsible reports of potential security vulnerabilities. Please avoid accessing, modifying, or deleting data that does not belong to you, and do not disrupt service while investigating.</p>${contactHtml}${openNote}${txt}`
+  });
+}
+
+export async function changelogPage(ctx) {
+  const mode = trustMode(ctx.env);
+  const openNote = mode === "on" ? "" : `<p><strong>[OPEN]</strong> Additional customer-facing release history requires owner-approved entries.</p>`;
+  return trustPage(ctx, {
+    title: "Changelog", path: "/changelog",
+    description: "Release notes.",
+    content: `<h2>Release 2.6.0.5</h2><p>Added API documentation and an OpenAPI description of the public API.</p><h2>Release 2.6.0.4</h2><p>Added public trust pages and configurable security contact and status-provider information.</p>${openNote}`
+  });
+}
+
+
+// ---------------------------------------------------------- legal drafts and API docs (6.2B)
+// PUBLIC_LEGAL_PAGES: off (default) = /legal/* behaves as an unknown path;
+// draft = skeleton pages with a DRAFT FOR COUNSEL watermark, noindex, never cached, every clause an [OPEN] placeholder;
+// on = a page is published only for a market whose counsel approval is recorded for that exact page, and only with the
+// counsel-supplied text (a published CMS page `legal-<market>-<slug>`). Lummet never supplies legal wording itself.
+export const LEGAL_PAGE_META = {
+  terms: { title: "Terms of service", description: "Terms of service. Draft for counsel review." },
+  privacy: { title: "Privacy notice", description: "Privacy notice. Draft for counsel review." },
+  dpa: { title: "Data processing agreement", description: "Data processing agreement. Draft for counsel review." },
+  subprocessors: { title: "Subprocessors", description: "Subprocessor register. Draft for owner and counsel review." },
+  sla: { title: "Service level agreement", description: "Service level agreement. Draft for counsel review." },
+  refunds: { title: "Refund policy", description: "Refund policy. Draft for counsel review." },
+  "acceptable-use": { title: "Acceptable use", description: "Acceptable-use policy. Draft for counsel review." },
+  cookies: { title: "Cookies notice", description: "Cookies notice. Draft for counsel review." }
+};
+export const LEGAL_SLUGS = Object.keys(LEGAL_PAGE_META);
+
+// Headings only. Each is an owner/counsel question; no clause, number, time window or commitment is invented here.
+const LEGAL_DRAFT_SECTIONS = {
+  terms: ["Parties, service scope and definitions", "Account obligations", "Fees, taxes, billing and termination", "Liability, warranties and dispute process"],
+  privacy: ["Controller and contact details", "Personal data categories and purposes", "Legal basis, retention and rights by market", "International transfers and complaints"],
+  dpa: ["Processing instructions and subject matter", "Security measures", "Subprocessors", "Data-subject requests and incident handling", "Deletion, return and audit terms"],
+  subprocessors: ["Subprocessor register (names, purpose, data location)", "Notice and objection procedure"],
+  sla: ["Service scope and how it is measured", "Availability commitment and exclusions", "Support channels and response commitments", "Remedies and claim process"],
+  refunds: ["Eligibility by product and market", "Request process and deadlines", "Statutory rights", "Payment method handling"],
+  "acceptable-use": ["Age gating and eligibility by market", "Responsible-gambling disclosures where applicable", "Local advertising and promotion rules by market", "Prohibited conduct and enforcement"],
+  cookies: ["Cookie and similar-technology inventory", "Purpose, duration and providers", "Consent choices and withdrawal", "Market-specific disclosures"]
+};
+
+export function legalMode(env) {
+  const v = String(env?.PUBLIC_LEGAL_PAGES || "off").trim().toLowerCase();
+  return v === "draft" || v === "on" ? v : "off";
+}
+
+function jsonObjectSetting(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+const MARKET_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
+const ISO_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/** The market a request host belongs to (LEGAL_MARKET_BY_HOST = {"host":"market"}), or null. */
+export function legalMarketForHost(env, hostname) {
+  const map = jsonObjectSetting(env?.LEGAL_MARKET_BY_HOST);
+  const market = map ? map[String(hostname || "").toLowerCase()] : null;
+  return typeof market === "string" && MARKET_RE.test(market) ? market : null;
+}
+
+/** True only for a recorded approval: who, when (valid, not in the future) for exactly this market and page. */
+export function legalApprovalRecorded(env, market, slug) {
+  const approval = jsonObjectSetting(env?.LEGAL_COUNSEL_APPROVALS)?.[market]?.[slug];
+  if (!approval || typeof approval.approvedBy !== "string" || !approval.approvedBy.trim()) return false;
+  if (typeof approval.approvedAt !== "string" || !ISO_TS_RE.test(approval.approvedAt)) return false;
+  const at = Date.parse(approval.approvedAt);
+  return Number.isFinite(at) && at <= Date.now();
+}
+
+async function approvedLegalPage(ctx, slug) {
+  const market = legalMarketForHost(ctx.env, ctx.url.hostname);
+  if (!market || !legalApprovalRecorded(ctx.env, market, slug)) return null;
+  const row = await data.getPage(ctx.env, `legal-${market}-${slug}`);
+  const html = row ? sanitizeHtml(row.content || "") : "";
+  // Text that still carries a placeholder or the draft watermark is not counsel-approved text.
+  if (!html.trim() || /\[OPEN|DRAFT FOR COUNSEL/i.test(html)) return null;
+  return { market, html };
+}
+
+function legalResponse(ctx, { title, path, description, content, draft }) {
+  const { site } = ctx.siteCtx;
+  const shownTitle = draft ? `${title} (DRAFT FOR COUNSEL)` : title;
+  const head = buildHead({ site, title: `${shownTitle} | ${site.name}`, description, path, noindex: draft });
+  return renderPage(ctx, {
+    template: "trust",
+    data: { trust: { title: shownTitle, description, content_html: sanitizeHtml(content), preview: draft, preview_text: "DRAFT FOR COUNSEL: not approved for use or publication. Counsel approval and final text are required for each market." } },
+    head,
+    bodyClass: draft ? "page-trust page-legal-draft" : "page-trust page-legal",
+    cacheControl: "no-store"
+  });
+}
+
+export async function legalIndexPage(ctx) {
+  const mode = legalMode(ctx.env);
+  if (mode === "off") return null;
+  let slugs = LEGAL_SLUGS;
+  if (mode === "on") {
+    const approved = [];
+    for (const slug of LEGAL_SLUGS) if (await approvedLegalPage(ctx, slug)) approved.push(slug);
+    slugs = approved;
+    if (!slugs.length) return null;
+  }
+  const links = slugs.map((slug) => `<li><a href="/legal/${slug}">${escText(LEGAL_PAGE_META[slug].title)}</a></li>`).join("");
+  return legalResponse(ctx, {
+    title: "Legal", path: "/legal", description: "Legal documents by market.", draft: mode === "draft",
+    content: `<p>Documents are market-specific. Each one is published only with counsel-approved text for the relevant market.</p><ul>${links}</ul>`
+  });
+}
+
+export async function legalPage(ctx, { slug }) {
+  const meta = LEGAL_PAGE_META[slug];
+  const mode = legalMode(ctx.env);
+  if (!meta || mode === "off") return null;
+  const path = `/legal/${slug}`;
+  if (mode === "draft") {
+    const items = LEGAL_DRAFT_SECTIONS[slug].map((x) => `<li>${escText(x)}: <strong>[OPEN]</strong> counsel-supplied wording required</li>`).join("");
+    return legalResponse(ctx, {
+      title: meta.title, path, description: meta.description, draft: true,
+      content: `<p><strong>[OPEN]</strong> No approved ${escText(meta.title.toLowerCase())} text is present. This page is a placeholder outline, not legal advice, and not a contract, policy or commitment.</p><h2>Sections counsel must supply</h2><ul>${items}</ul>`
+    });
+  }
+  const approved = await approvedLegalPage(ctx, slug);
+  if (!approved) return null;
+  return legalResponse(ctx, { title: meta.title, path, description: meta.description, content: approved.html, draft: false });
+}
+
+export async function docsPage(ctx) {
+  const mode = trustMode(ctx.env);
+  if (mode === "off") return null;
+  const scopes = API_V1_SCOPES.map((s) => `<code>${escText(s)}</code>`).join(", ");
+  const events = WEBHOOK_EVENT_TYPES.map((s) => `<code>${escText(s)}</code>`).join(", ");
+  const content = `<p>The machine-readable description is at <a href="/openapi.json">/openapi.json</a> (OpenAPI 3.1). It covers the API-key endpoints under <code>/api/v1/</code> only. Routes that are not listed are not part of the public API and carry no stability promise.</p>
+<h2>Authentication</h2><p>Send a customer API key as <code>Authorization: Bearer &lt;key&gt;</code>. Keys are created by an organization owner and carry scopes (${scopes}); a key may also be limited to one site. Repeated invalid keys from one address are rate limited and answered with 429.</p>
+<h2>Webhook signing</h2><p>Each outgoing delivery is a JSON <code>POST</code> carrying <code>Lummet-Signature: t=&lt;unix seconds&gt;,v1=&lt;hex&gt;</code>, <code>Lummet-Delivery-Id</code> and <code>Lummet-Delivery-Attempt</code>. Compute HMAC-SHA256, keyed with the endpoint secret, over the exact string <code>{t}.{raw request body}</code>, hex-encode it and compare it with <code>v1</code> in constant time. Reject timestamps outside a replay window you choose. A retry is signed again with a new timestamp and carries the same delivery id, so use the delivery id to ignore duplicates. Event types: ${events}.</p>
+<p><strong>[OPEN]</strong> API support policy, versioning policy and a recommended replay window are owner decisions and are not stated here.</p>`;
+  return trustPage(ctx, { title: "API documentation", path: "/docs", description: "OpenAPI description of the public API and webhook signing.", content });
+}
+
+export async function openApiJsonPage(ctx) {
+  const mode = trustMode(ctx.env);
+  if (mode === "off") return null;
+  const body = JSON.stringify(buildOpenApiSpec());
+  const response = textResponse(body, "application/json; charset=utf-8", { cacheControl: mode === "on" ? "public, max-age=300" : "no-store" });
+  if (mode !== "on") response.headers.set("X-Robots-Tag", "noindex");
+  return response;
 }

@@ -351,3 +351,18 @@ test('script: publish only (no --rollout) changes no site; a failing site makes 
     assert.deepEqual(versions, ['1.0.0', '1.0.0', '1.0.0'], 'the first site failed, so the rollout stopped before changing any');
   });
 });
+
+test('CI rollout route refuses unknown releases and malformed site target lists without starting a rollout', async () => {
+  const env = makeEnv(); const ctx = makeCtx();
+  await template.publishRelease(env, { version: '1.0.0', scriptContent: 'export default {}', migrations: [] });
+  const token = await mk(env);
+  const unknown = await call(env, ctx, 'POST', '/api/ci/tenant-release/rollouts', { bearer: token.token, body: { version: '9.9.9' } });
+  assert.equal(unknown.status, 404, unknown.text);
+  assert.equal(unknown.json.error, 'release_not_found');
+  assert.equal((await env.LUMMET_DB.prepare(`SELECT COUNT(*) n FROM tenant_rollouts`).first()).n, 0, 'unknown release must not create a rollout');
+
+  const malformed = await call(env, ctx, 'POST', '/api/ci/tenant-release/rollouts', { bearer: token.token, body: { siteIds: ['site-1', 42] } });
+  assert.equal(malformed.status, 422, malformed.text);
+  assert.equal(malformed.json.error, 'invalid_site_ids');
+  assert.equal((await env.LUMMET_DB.prepare(`SELECT COUNT(*) n FROM tenant_rollouts`).first()).n, 0, 'malformed target list must not create a rollout');
+});

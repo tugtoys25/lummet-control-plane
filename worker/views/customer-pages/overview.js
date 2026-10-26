@@ -42,6 +42,7 @@ export function renderOverviewPage({ organization, subscription, plan, usage, si
     <p class="subtitle">${escapeHtml(organization.name)}</p>
 
     ${upgradeCta}
+    ${sites.length === 0 ? `<section class="card" aria-labelledby="first-site-checklist"><h2 id="first-site-checklist">First-site checklist</h2><ol><li>Choose a plan that includes a site.</li><li>Create your first site from Sites.</li><li>Review the generated preview before publishing.</li><li>Connect a domain when you are ready.</li><li>Invite teammates only when needed.</li></ol><p>Checklist guidance only; no site is created automatically.</p></section>` : ""}
 
     <div class="grid">
       <div class="card stat">

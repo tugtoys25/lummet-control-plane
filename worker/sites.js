@@ -9,6 +9,7 @@
 // =====================================================
 
 import * as webhooks from "./webhooks.js";
+import { evaluateWriteGate, refusalFor } from "./access.js";
 
 export const SITE_STATUSES = [
   "pending",
@@ -82,6 +83,8 @@ async function recordStatusEvent(env, { siteId, fromStatus, toStatus, reason, ac
  * happened.
  */
 export async function createSite(env, { organizationId, name, productId, actorUserId }) {
+  const gate = await evaluateWriteGate(env, { organizationId, method: "POST", subPath: "/sites" });
+  if (gate.blocked) return { ok: false, status: 402, ...refusalFor(gate.access) };
   const trimmedName = (name || "").trim();
   if (!trimmedName) return { ok: false, status: 422, error: "name_required" };
   if (!productId) return { ok: false, status: 422, error: "product_required" };

@@ -1,3 +1,5 @@
+import { suspendSite as suspendSiteWithPush, reactivateSite as reactivateSiteWithPush, enqueueSiteAccessPush } from "./site-access.js";
+import * as siteAccessRepo from "./repositories/site-access.js";
 // =====================================================
 // STAFF SAAS OPERATIONS (master prompt section 45)
 // Data + actions behind the /platform/saas/* super-admin screens.
@@ -12,6 +14,7 @@ import * as entitlementsService from "./entitlements.js";
 import { addCredits, getBalance } from "./ai-credits.js";
 import { getMonthlyUsage } from "./usage.js";
 import * as jobsModule from "./jobs.js";
+import { currentRevenueSummary } from "./revenue-job.js";
 import { outboxStats } from "./email.js";
 
 const like = (q) => `%${String(q || "").trim().replace(/[%_]/g, "")}%`;
@@ -57,6 +60,11 @@ export async function setOrganizationStatus(env, organizationId, status, reason)
     // Invalidate customer sessions' access indirectly: routes check org status on every request.
     await env.LUMMET_DB.prepare(`UPDATE sites SET updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?`).bind(organizationId).run();
   }
+  const orgSites = await siteAccessRepo.siteAccessSitesForOrganization(env, organizationId);
+  for (const site of orgSites) {
+    const desired = status === "closed" ? "closed" : status === "suspended" ? "suspended" : (site.status === "active" ? "serving" : "suspended");
+    await enqueueSiteAccessPush(env, site.id, desired, `organization:${status}:${String(reason||"").slice(0,160)}`);
+  }
   return { ok: true, from: org.status, to: status, reason: reason || null };
 }
 
@@ -71,8 +79,10 @@ export async function stopScheduledDeletion(env, organizationId) {
 }
 
 export async function setSiteStatus(env, siteId, toStatus, reason, staffId) {
-  if (!["suspended", "active"].includes(toStatus)) return { ok: false, status: 422, error: "invalid_status" };
-  return sites.transitionSiteStatus(env, siteId, toStatus, { reason, actorType: "lummet_admin", actorId: staffId });
+  if (!["suspended", "active"].includes(toStatus)) return { ok: false, status: 422, error: "invalid_status", reasonCode:"invalid_status" };
+  return toStatus === "suspended"
+    ? suspendSiteWithPush(env, siteId, { reason, actorId: staffId })
+    : reactivateSiteWithPush(env, siteId, { reason, actorId: staffId });
 }
 
 const OVERRIDE_TYPES = new Set(["boolean", "number", "text"]);
@@ -104,22 +114,32 @@ export async function grantAiCredits(env, organizationId, amount, reason, staffI
 }
 
 export async function listPlansCatalog(env) {
+  // The price columns come from plan_prices (migration 0052): what new customers are charged. Read-only by design.
   const r = await env.LUMMET_DB.prepare(
-    `SELECT p.id, p.key, p.name, p.billing_period, p.price_cents, p.currency, p.trial_days, p.status, p.stripe_price_id, pr.name AS product, pr.category,
-       (SELECT COUNT(*) FROM subscriptions s WHERE s.plan_id = p.id AND s.status IN ('trialing','active','past_due')) AS live_subscriptions
-     FROM plans p JOIN products pr ON pr.id = p.product_id ORDER BY pr.category, pr.name, p.price_cents`
+    `SELECT p.id, p.key, p.name, p.billing_period, p.price_cents, p.currency, p.trial_days, p.status, pr.name AS product, pr.category,
+       (SELECT COUNT(*) FROM subscriptions s WHERE s.plan_id = p.id AND s.status IN ('trialing','active','past_due')) AS live_subscriptions,
+       ap.stripe_price_id AS active_price_id, ap.lookup_key AS price_lookup_key, ap.version AS price_version,
+       ap.stripe_mode AS price_mode, ap.unit_amount_cents AS price_amount_cents
+     FROM plans p JOIN products pr ON pr.id = p.product_id
+     LEFT JOIN plan_prices ap ON ap.id = (
+       SELECT x.id FROM plan_prices x WHERE x.plan_id = p.id AND x.active = 1
+          AND x.currency = lower(p.currency) AND x.interval = CASE p.billing_period WHEN 'annual' THEN 'year' ELSE 'month' END
+        ORDER BY x.version DESC LIMIT 1)
+     ORDER BY pr.category, pr.name, p.price_cents`
   ).all();
   return r.results;
 }
 
+/**
+ * Staff may retire or reactivate a plan and set its trial length. They may NOT change a price: amounts and Stripe price
+ * ids come from catalog/plans.v1.json through scripts/stripe-sync.mjs (Sprint 3.1). A request that tries is refused
+ * with price_managed_by_catalog, so no staff screen, API call or script can quietly diverge from the catalog.
+ */
 export async function updatePlan(env, planId, { priceCents, status, trialDays, stripePriceId }) {
   const plan = await env.LUMMET_DB.prepare(`SELECT * FROM plans WHERE id = ?`).bind(planId).first();
   if (!plan) return { ok: false, status: 404, error: "not_found" };
+  if (priceCents !== undefined || stripePriceId !== undefined) return { ok: false, status: 422, error: "price_managed_by_catalog" };
   const sets = [], vals = [];
-  if (priceCents !== undefined) {
-    if (priceCents !== null && (!Number.isInteger(priceCents) || priceCents < 0)) return { ok: false, status: 422, error: "invalid_price" };
-    sets.push("price_cents = ?"); vals.push(priceCents);
-  }
   if (status !== undefined) {
     if (!["active", "retired"].includes(status)) return { ok: false, status: 422, error: "invalid_status" };
     sets.push("status = ?"); vals.push(status);
@@ -128,13 +148,9 @@ export async function updatePlan(env, planId, { priceCents, status, trialDays, s
     if (!Number.isInteger(trialDays) || trialDays < 0 || trialDays > 90) return { ok: false, status: 422, error: "invalid_trial_days" };
     sets.push("trial_days = ?"); vals.push(trialDays);
   }
-  if (stripePriceId !== undefined) {
-    if (stripePriceId !== null && !/^price_[A-Za-z0-9]+$/.test(stripePriceId)) return { ok: false, status: 422, error: "invalid_stripe_price_id" };
-    sets.push("stripe_price_id = ?"); vals.push(stripePriceId);
-  }
   if (!sets.length) return { ok: false, status: 422, error: "nothing_to_update" };
   await env.LUMMET_DB.prepare(`UPDATE plans SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, planId).run();
-  return { ok: true, before: { price_cents: plan.price_cents, status: plan.status, trial_days: plan.trial_days, stripe_price_id: plan.stripe_price_id } };
+  return { ok: true, before: { status: plan.status, trial_days: plan.trial_days } };
 }
 
 export async function listSubscriptions(env, { status = "", limit = 100, offset = 0 } = {}) {
@@ -163,7 +179,7 @@ export async function getJobDetail(env, jobId) {
 
 export async function opsSummary(env) {
   const one = (sql) => env.LUMMET_DB.prepare(sql).first();
-  const [orgs, subs, failedJobs, failedSites, failedEmails, queuedEmails, stuck, mrr] = await Promise.all([
+  const [orgs, subs, failedJobs, failedSites, failedEmails, queuedEmails, stuck, revenue] = await Promise.all([
     one(`SELECT COUNT(*) n FROM organizations`),
     one(`SELECT COUNT(*) n FROM subscriptions WHERE status IN ('trialing','active','past_due')`),
     one(`SELECT COUNT(*) n FROM jobs WHERE status = 'failed'`),
@@ -171,9 +187,9 @@ export async function opsSummary(env) {
     one(`SELECT COUNT(*) n FROM email_outbox WHERE status = 'failed'`),
     one(`SELECT COUNT(*) n FROM email_outbox WHERE status = 'queued'`),
     one(`SELECT COUNT(*) n FROM jobs WHERE status IN ('queued','running') AND created_at < datetime('now','-30 minutes')`),
-    one(`SELECT COALESCE(SUM(p.price_cents),0) n FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.status = 'active' AND p.billing_period = 'monthly'`)
+    currentRevenueSummary(env)   // Round 6.1B: MRR comes from the daily snapshots (blueprint section 13), never from a live sum of list prices
   ]);
-  return { organizations: orgs.n, liveSubscriptions: subs.n, failedJobs: failedJobs.n, failedSites: failedSites.n, failedEmails: failedEmails.n, queuedEmails: queuedEmails.n, stuckJobs: stuck.n, monthlyRecurringCents: mrr.n, email: await outboxStats(env) };
+  return { organizations: orgs.n, liveSubscriptions: subs.n, failedJobs: failedJobs.n, failedSites: failedSites.n, failedEmails: failedEmails.n, queuedEmails: queuedEmails.n, stuckJobs: stuck.n, monthlyRecurringCents: revenue.available ? revenue.mrrCents : null, monthlyRecurringCurrency: revenue.available ? revenue.currency : null, revenue, email: await outboxStats(env) };
 }
 
 export async function listFailedEmails(env, limit = 50) {

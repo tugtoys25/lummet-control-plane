@@ -43,3 +43,28 @@ export async function markFailed(env, provider, eventId, message) {
     `UPDATE billing_webhook_events SET status = 'failed', error_message = ? WHERE provider = ? AND provider_event_id = ?`
   ).bind(String(message).slice(0, 500), provider, eventId).run();
 }
+
+// ---- Phase 5.7: staff replay of failed events ----
+export async function listFailedEvents(env, { limit = 50, offset = 0 } = {}) {
+  return (await env.LUMMET_DB.prepare(
+    `SELECT provider, provider_event_id, event_type, status, attempts, error_message, received_at, last_attempt_at
+     FROM billing_webhook_events WHERE status = 'failed' OR (status = 'received' AND COALESCE(last_attempt_at, received_at) <= datetime('now', '-' || ? || ' minutes'))
+     ORDER BY received_at DESC LIMIT ? OFFSET ?`).bind(STALE_MINUTES, limit, offset).all()).results || [];
+}
+export async function findEvent(env, provider, eventId) {
+  return env.LUMMET_DB.prepare("SELECT provider, provider_event_id, event_type, status, attempts FROM billing_webhook_events WHERE provider=? AND provider_event_id=?").bind(provider, eventId).first();
+}
+// Staff replay ignores the automatic-retry attempt cap but still needs the event to be failed (or stuck): one UPDATE decides,
+// so two staff members replaying at once cannot both run it, and a processed event can never be replayed.
+export async function claimStaffReplay(env, provider, eventId, { staleMinutes = STALE_MINUTES } = {}) {
+  const r = await env.LUMMET_DB.prepare(
+    `UPDATE billing_webhook_events SET status = 'received', attempts = attempts + 1, last_attempt_at = CURRENT_TIMESTAMP
+      WHERE provider = ? AND provider_event_id = ?
+        AND (status = 'failed' OR (status = 'received' AND COALESCE(last_attempt_at, received_at) <= datetime('now', '-' || ? || ' minutes')))`
+  ).bind(provider, eventId, staleMinutes).run();
+  return (r?.meta?.changes || 0) > 0;
+}
+export async function insertReplayLog(env, { id, provider, eventId, staffId, reason, outcome, error }) {
+  return env.LUMMET_DB.prepare("INSERT INTO billing_webhook_replays (id, provider, provider_event_id, staff_id, reason, outcome, error_message) VALUES (?,?,?,?,?,?,?)")
+    .bind(id, provider, eventId, staffId, reason, outcome, error ? String(error).slice(0, 500) : null).run();
+}

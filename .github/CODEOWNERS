@@ -1,0 +1,11 @@
+# TEMPLATE ONLY: replace @OWNER with a real GitHub user/team before enabling required code-owner reviews.
+# Until replaced, these entries do not establish an effective reviewer.
+/worker/billing*.js               @OWNER
+/worker/entitlements.js           @OWNER
+/worker/access.js                 @OWNER
+/worker/plans.js                  @OWNER
+/worker/organizations.js          @OWNER
+/worker/repositories/billing*.js  @OWNER
+/migrations/                      @OWNER
+/.github/workflows/               @OWNER
+/wrangler.jsonc                   @OWNER

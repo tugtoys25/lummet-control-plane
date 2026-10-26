@@ -16,6 +16,7 @@
 // =====================================================
 
 import * as apiKeysRepo from "./repositories/api-keys.js";
+import { evaluateWriteGate, refusalFor } from "./access.js";
 
 const VALID_SCOPES = ["sites:read", "domains:read", "analytics:read", "usage:read"];
 
@@ -40,6 +41,8 @@ export function listValidScopes() {
  * without ever displaying the real secret again.
  */
 export async function createApiKey(env, { organizationId, siteId, name, scopes, actorUserId, expiresAt }) {
+  const gate = await evaluateWriteGate(env, { organizationId, method: "POST", subPath: "/api-keys" });
+  if (gate.blocked) return { ok: false, status: 402, ...refusalFor(gate.access) };
   const trimmedName = (name || "").trim();
   if (!trimmedName) return { ok: false, status: 422, error: "name_required" };
 
@@ -70,6 +73,8 @@ export async function listApiKeys(env, organizationId) {
 }
 
 export async function revokeApiKey(env, organizationId, keyId) {
+  const gate = await evaluateWriteGate(env, { organizationId, method: "DELETE", subPath: "/api-keys/:id" });
+  if (gate.blocked) return { ok: false, status: 402, ...refusalFor(gate.access) };
   if (!(await apiKeysRepo.existsInOrganization(env, keyId, organizationId))) return { ok: false, status: 404, error: "not_found" };
 
   await apiKeysRepo.markRevoked(env, keyId);

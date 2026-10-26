@@ -1,3 +1,7 @@
+import { withRetryAfter } from "./rate-limit-response.js";
+import * as siteAccess from "./site-access.js";
+import * as storageSync from "./storage-sync.js";
+import { platformAccessGate } from "./cloudflare-access-jwt.js";
 // =====================================================
 // LUMMET CONTROL PLANE — WORKER ENTRY POINT
 //
@@ -53,15 +57,20 @@
 import { observe } from "./observability.js";
 import * as healthRepo from "./repositories/health.js";
 import * as requestErrorsRepo from "./repositories/request-errors.js";
+import * as organizationsRepo from "./repositories/organizations.js";
 import * as tenantLinks from "./tenant-links.js";
 import * as automationSweep from "./automation-sweep.js";
 import * as tenantAdmin from "./tenant-admin.js";
 import * as notificationsRepo from "./repositories/notifications.js";
 import { renderInsightAnalytics, renderInsightReports, renderInsightCampaigns, renderInsightAlerts, renderInsightNotifications, renderInsightSearch, renderInsightContent } from "./views/customer-pages/insights.js";
 import { finalizeResponse, handleCspReport } from "./csp.js";
+import { hstsHeaderValue } from "./hsts.js";
+import { installConsoleRedaction } from "./redact.js";
+import { captureException } from "./error-tracking.js";
 import * as auth from "./auth.js";
 import * as registry from "./registry.js";
 import { logAudit } from "./audit.js";
+import * as billingLifecycleRepo from "./repositories/billing-lifecycle.js";
 import { getFromTenant } from "./client.js";
 import { isSuperAdmin, canAccessTenant, hasPermission, setPermission, setTenantAccess, listAccessibleTenants } from "./rbac.js";
 
@@ -69,6 +78,7 @@ import { isSuperAdmin, canAccessTenant, hasPermission, setPermission, setTenantA
 // sections 6-13). A completely separate identity system from
 // `auth.js`/`admin` above — see customer-auth.js's header comment.
 import * as customerAuth from "./customer-auth.js";
+import * as orgSecurityPolicy from "./org-security-policy.js";
 import * as organizations from "./organizations.js";
 import * as sites from "./sites.js";
 import * as plans from "./plans.js";
@@ -81,6 +91,12 @@ import { roleAtLeast } from "./customer-rbac.js";
 // docs/SAAS_MERGE_NOTES.md for what changed vs. the original phase
 // branches.
 import { billing } from "./billing.js";
+import * as billingLifecycle from "./billing-lifecycle.js";
+import { evaluateWriteGate, evaluateServeGate, refusalFor, resolveAccess } from "./access.js";
+import { effectiveNow } from "./billing-config.js";
+import * as scheduler from "./scheduler.js";
+import { reconcileSubscriptions, resolveDrift, listDrift } from "./phase3-source-of-truth.js";
+import { stripeRequest } from "./billing-stripe.js";
 import { provisioning } from "./provisioning.js";
 import * as jobsModule from "./jobs.js";
 import * as jobRunner from "./job-runner.js";
@@ -89,6 +105,7 @@ import { zoneDomains } from "./zone-domains.js";
 import { deployments } from "./deployments.js";
 import { tenantPortal } from "./tenant-portal.js";
 import { getUsageSnapshot } from "./usage.js";
+import * as commercial from "./commercial.js";
 import { renderCustomerShell } from "./views/customer-layout.js";
 import { renderCustomerLoginPage } from "./views/customer-pages/login.js";
 import { renderOverviewPage } from "./views/customer-pages/overview.js";
@@ -111,6 +128,8 @@ import * as totp from "./totp.js";
 import * as branding from "./branding.js";
 import * as changeRequests from "./change-requests.js";
 import { listOrganizationAuditLog } from "./audit-log.js";
+import * as customerSessions from "./customer-sessions.js";
+import * as customerAuditCsv from "./customer-audit-csv.js";
 import { getSiteHealthReport } from "./site-health.js";
 import * as webauthn from "./webauthn.js";
 import * as sso from "./sso.js";
@@ -120,9 +139,10 @@ import { getBalance as getAiBalance, listLedger as listAiLedger } from "./ai-cre
 import { runAiTask, workersAiProvider, TASKS as AI_TASKS } from "./ai-gateway.js";
 import { getMonthlyUsage, checkUsageLimit, recordUsage } from "./usage.js";
 import * as staffSaas from "./staff-saas.js";
+import * as revenueAnalytics from "./revenue-analytics.js";
 import {
-  renderSaasOverview, renderOrganizationsPage, renderOrganizationDetailPage, renderSubscriptionsPage,
-  renderPlansPage, renderJobsPage, renderJobDetailPage, renderEmailPage, renderTenantTemplatePage, renderCouponsPage, renderOpsAlertsPage, renderServerErrorsPage, renderCpBackupsPage, renderKeyRotationPage, renderDomainsAdminPage, renderDeploymentsAdminPage, renderWebhooksAdminPage, renderApiKeysAdminPage, renderBackupsAdminPage
+  renderSaasOverview, renderRevenueAnalyticsPage, renderOrganizationsPage, renderOrganizationDetailPage, renderSubscriptionsPage,
+  renderPlansPage, renderJobsPage, renderJobDetailPage, renderEmailPage, renderNotificationsPage, renderTenantTemplatePage, renderCouponsPage, renderOpsAlertsPage, renderServerErrorsPage, renderCpBackupsPage, renderKeyRotationPage, renderReconciliationPage, renderDomainsAdminPage, renderDeploymentsAdminPage, renderWebhooksAdminPage, renderApiKeysAdminPage, renderBackupsAdminPage
 } from "./views/pages/saas-admin.js";
 import { backups } from "./backups.js";
 import * as tenantTemplate from "./tenant-template.js";
@@ -130,12 +150,22 @@ import * as staffTokens from "./staff-tokens.js";
 import * as rollouts from "./rollouts.js";
 import * as automations from "./automations.js";
 import { queueEmail, flushOutbox, portalLink, emailConfigured } from "./email.js";
+import * as billingNotifications from "./billing-notifications.js";
+import { listPlanPrices as planPriceList } from "./plan-prices.js";
+import * as planChangeRepo from "./repositories/plan-change-intents.js";
+import { BILLING_KINDS } from "./billing-email-templates.js";
+import { listForStaff as notificationRepoList, NOTIFICATION_STATES as notificationRepoStates } from "./repositories/billing-notifications.js";
+import * as billingReminders from "./billing-reminders.js";
+import { handleResendWebhook } from "./resend-webhook.js";
 import * as alerts from "./alerts.js";
+import { runSyntheticMonitors } from "./synthetic-monitors.js";
 import * as cpBackup from "./cp-backup.js";
 import * as keyRotation from "./key-rotation.js";
 import * as erasure from "./erasure.js";
 import * as staff2fa from "./staff-2fa.js";
-import { renderVerifyEmailPage, renderResetPasswordPage, renderForgotPasswordPage, renderInvitationPage } from "./views/customer-pages/account-links.js";
+import { customer2faEnrollMode, ENROLL_PAGE_PATH } from "./customer-2fa-enroll.js";
+import { renderCustomer2faEnrollPage } from "./views/customer-pages/account-security.js";
+import { renderVerifyEmailPage, renderResetPasswordPage, renderForgotPasswordPage, renderInvitationPage, renderOrg2faRequiredPage, renderOrgIpDeniedPage } from "./views/customer-pages/account-links.js";
 
 import { renderLoginPage } from "./views/pages/login.js";
 import { renderDashboardHome } from "./views/pages/dashboard.js";
@@ -234,6 +264,8 @@ import {
   submitSetPermission as submitSetAdminPermission
 } from "./views/pages/admins.js";
 import { renderTwoFactorPage, renderChangePasswordPage, submitChangePassword } from "./views/pages/account.js";
+import { runBackfillTick as runRevenueBackfillTick } from "./revenue.js";
+import { runDailyRevenueJob } from "./revenue-job.js";
 import {
   renderCountryPagesList,
   renderCountryPageForm,
@@ -262,6 +294,24 @@ function json(data, status = 200, extraHeaders = {}) {
     status,
     headers: { "content-type": "application/json; charset=utf-8", ...extraHeaders }
   });
+}
+
+/**
+ * Round 6.4A: the answer for a customer session that an organization policy blocks (no 2FA, but a member of an organization that
+ * requires it). Null when the session is fine. 403 with a stable code, never 401, so a client does not loop back to the login page.
+ */
+function orgPolicyDenied(policy) {
+  return policy && policy.blocked ? json({ success: false, error: policy.reason || "org_2fa_required" }, 403) : null;
+}
+
+/**
+ * Round 6.4C: the answer when an organization's IP allowlist denies this request. Null when the request may proceed. 403 with a stable code.
+ * Shadow mode only logs (no address, no list) that it would have denied. Called after membership is proven, for exactly one organization.
+ */
+async function orgIpDenied(env, request, organizationId) {
+  const verdict = await orgSecurityPolicy.evaluateOrgIpAccess(env, request, organizationId);
+  if (verdict.wouldDeny && !verdict.denied) console.log(JSON.stringify({ msg: "org_ip_allowlist_would_deny", organizationId, mode: verdict.mode }));
+  return verdict.denied ? json({ success: false, error: verdict.reason || "ip_not_allowed" }, 403) : null;
 }
 
 function html(content, status = 200, extraHeaders = {}) {
@@ -316,13 +366,15 @@ const SECURITY_HEADERS = {
   // script-src, everything else the baseline. See docs/CSP.md.
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
-  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
 };
 
-function withSecurityHeaders(response) {
+function withSecurityHeaders(response, env) {
   const headers = new Headers(response.headers);
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!headers.has(k)) headers.set(k, v);
+  // Strict-Transport-Security (Round 6.3C): the default value is unchanged; HSTS_PRELOAD=on adds preload. Set by the
+  // Worker for every response type; a stronger value on a response (never weaker) is kept.
+  headers.set("Strict-Transport-Security", hstsHeaderValue(env, headers.get("Strict-Transport-Security")));
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -355,14 +407,31 @@ function makeDomainRedeploy(env, ctx) {
   };
 }
 
+
+async function renderPhase5StaffPage(env, admin, kind) {
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const title={quotes:'Quotes', 'customer-360':'Customer 360', dunning:'Dunning queue', approvals:'Refund / credit approvals', 'catalog-drift':'Catalog & drift', tax:'Tax registration checklist','webhook-replay':'Failed webhook replay'}[kind]||'Phase 5 operations';
+  let body=`<h1>${esc(title)}</h1><p>Phase 5 operations screen. Every mutation requires staff authentication, a reason and an audit entry.</p>`;
+  if(kind==='quotes') body+=`<p><a href="/platform/saas/organizations">Organizations</a> · <a href="/platform/saas/reconciliation">Drift</a></p><div id="quote-list">Loading…</div><script nonce="${nonceToken()}">fetch('/api/platform/saas/quotes?limit=50').then(r=>r.json()).then(j=>{document.getElementById('quote-list').innerHTML='<pre>'+JSON.stringify(j.data||j,null,2).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})+'</pre>'})</script>`;
+  if(kind==='customer-360') body+=`<p>Enter an organization id to inspect plan, state, invoices, timeline, overrides, credits and staff notes.</p><form method="get"><label>Organization ID <input name="organization" required value=""></label></form>`;
+  if(kind==='dunning') body+=`<p>Actions: extend grace, resend notice, and request a comp. Each requires a reason; a comp only voids one open invoice after a second staff member approves it.</p><div id="dunning">Loading…</div><script nonce="${nonceToken()}">function __esc(t){return String(t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}fetch('/api/platform/saas/dunning?limit=100').then(r=>r.json()).then(j=>document.getElementById('dunning').innerHTML='<pre>'+__esc(JSON.stringify(j.data||j,null,2))+'</pre>')</script>`;
+  if(kind==='approvals') body+=`<p>Pending refunds, credits and dunning comps require a second staff member. Self-approval is rejected by the database.</p><div id="approvals">Loading…</div><script nonce="${nonceToken()}">function __esc(t){return String(t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}fetch('/api/platform/saas/approvals?status=pending').then(r=>r.json()).then(j=>document.getElementById('approvals').innerHTML='<pre>'+__esc(JSON.stringify(j.data||j,null,2))+'</pre>')</script>`;
+  if(kind==='catalog-drift') body+=`<p><a href="/platform/saas/plans">Catalog</a> · <a href="/platform/saas/reconciliation">Reconciliation findings</a>. Provider price IDs remain owner-verified.</p>`;
+  if(kind==='tax') body+=`<div id="tax">Loading…</div><script nonce="${nonceToken()}">function __esc(t){return String(t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}fetch('/api/platform/saas/tax-checklist').then(r=>r.json()).then(j=>document.getElementById('tax').innerHTML='<pre>'+__esc(JSON.stringify(j.data||j,null,2))+'</pre>')</script>`;
+  if(kind==='webhook-replay') body+=`<div id="failed-webhooks">Loading…</div><script nonce="${nonceToken()}">function __esc(t){return String(t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}fetch('/api/platform/saas/webhooks/failed').then(r=>r.json()).then(j=>document.getElementById('failed-webhooks').innerHTML='<pre>'+__esc(JSON.stringify(j.data||j,null,2))+'</pre>')</script>`;
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><main style="max-width:1100px;margin:2rem auto;font:16px system-ui;padding:0 1rem">${body}</main></html>`;
+}
+
 export default {
   async fetch(request, env, ctx) {
+    installConsoleRedaction(env);     // LOG_REDACTION=on only; a no-op by default
     const requestId = crypto.randomUUID();
     const startedAt = Date.now();
     const holder = { error: null };
     let response = await handleRequest(request, env, ctx, requestId, holder);
+    response = withRetryAfter(response, request, env);
     const seen = await observe(env, ctx, { requestId, method: request.method.toUpperCase(), pathname: new URL(request.url).pathname, status: response.status, startedAt, error: holder.error });
-    response = withSecurityHeaders(await finalizeResponse(response, env));
+    response = withSecurityHeaders(await finalizeResponse(response, env), env);
     // Request id for support ("quote this"), and the time the Worker spent, for anyone watching the network tab.
     const headers = new Headers(response.headers);
     headers.set("X-Request-Id", requestId);
@@ -371,12 +440,21 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    return runScheduled(event, env, ctx);
+    installConsoleRedaction(env);
+    try {
+      return await runScheduled(event, env, ctx);
+    } catch (error) {
+      // Reported (scrubbed, ERROR_TRACKING only) and re-thrown, so Cloudflare keeps its own record of the failed run.
+      const report = captureException(env, ctx, error, { requestId: null, method: "", route: "scheduled", status: "", eventKind: "scheduled" });
+      if (ctx && ctx.waitUntil) ctx.waitUntil(report); else await report;
+      throw error;
+    }
   },
 
   // Cloudflare Queues consumer for background jobs. Only used when a JOB_QUEUE queue is bound
   // (see docs/DURABLE_JOBS.md); without it jobs run via ctx.waitUntil and the sweep.
   async queue(batch, env) {
+    installConsoleRedaction(env);
     return jobRunner.handleQueueBatch(batch, env);
   }
 };
@@ -399,7 +477,12 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
     }
 
     // CSP violation reports (browsers send these on their own, possibly with cookies): log and drop, no auth, no state.
-    if (method === "POST" && path === "/api/csp-report") return handleCspReport(request);
+    if (method === "POST" && path === "/api/csp-report") return handleCspReport(request, env);
+
+    // Round 6.3B: Cloudflare Access is an additional perimeter for /platform/* and /api/platform/*. Staff sessions, 2FA and
+    // RBAC still apply after it. PLATFORM_ACCESS_JWT_MODE=off (default) changes nothing; enforce fails closed.
+    const accessRefusal = await platformAccessGate(request, env, path);
+    if (accessRefusal) return json({ success: false, error: accessRefusal.error }, accessRefusal.status);
 
     try {
       // ---------------------------------------------
@@ -499,6 +582,13 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       // billing-stripe.js's verifyAndParseWebhook). Never
       // reads request.json() itself for this reason.
       // ---------------------------------------------
+
+      if (method === "POST" && path === "/api/email/webhook/resend") {
+        // Authenticated by the Svix signature over the raw body (resend-webhook.js), never by a session.
+        const result = await handleResendWebhook(request, env);
+        if (!result.ok) return json({ success: false, error: result.error }, result.status);
+        return json({ success: true });
+      }
 
       if (method === "POST" && path === "/api/billing/webhook/stripe") {
         const result = await billing.handleWebhook(request, env);
@@ -680,7 +770,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           to: result.email, template: "verify_email", organizationId: result.organizationId,
           vars: { link: portalLink(env, "/app/verify-email", { uid: result.userId, token: result.emailVerificationToken }) }
         });
-        if (verifyQueued.ok) ctx.waitUntil(flushOutbox(env).catch(() => {}));
+        if (verifyQueued.ok) ctx.waitUntil(flushOutbox(env, { fetchImpl: typeof env.EMAIL_FETCH === "function" ? env.EMAIL_FETCH : fetch }).catch(() => {}));
         return json({ success: true, organizationId: result.organizationId }, 200, { "Set-Cookie": result.cookie });
       }
 
@@ -688,13 +778,16 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         const result = await customerAuth.login(request, env);
         await logAudit(env, {
           actorType: "customer_user", customerUserId: result.userId || null,
-          endpoint: path, method, resource: "customer_user", action: result.mfaRequired ? "login_mfa_challenge" : "login",
+          endpoint: path, method, resource: "customer_user", action: result.mfaRequired ? "login_mfa_challenge" : (result.twoFactorEnrollmentRequired ? "login_org_2fa_enrollment_only" : "login"),
           success: result.ok, statusCode: result.ok ? 200 : result.status,
-          errorMessage: result.ok ? null : result.error,
+          errorMessage: result.ok ? (result.twoFactorEnrollmentRequired ? result.reason : null) : result.error,
           requestId, ipHash: await hashIP(request)
         });
         if (!result.ok) return json({ success: false, error: result.error }, result.status);
         if (result.mfaRequired) return json({ success: true, mfaRequired: true, challengeId: result.challengeId });
+        // Round 6.4A: password verified, but an organization requires 2FA and this person has none. The cookie is a restricted session:
+        // it reaches only the 2FA setup routes and logout until a factor is active.
+        if (result.twoFactorEnrollmentRequired) return json({ success: true, twoFactorEnrollmentRequired: true, reason: result.reason }, 200, { "Set-Cookie": result.cookie });
         return json({ success: true }, 200, { "Set-Cookie": result.cookie });
       }
 
@@ -797,7 +890,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             to: String(body.email).trim().toLowerCase(), template: "password_reset",
             vars: { link: portalLink(env, "/app/reset-password", { uid: reset.userId, token: reset.token }) }
           });
-          if (q.ok) ctx.waitUntil(flushOutbox(env).catch(() => {}));
+          if (q.ok) ctx.waitUntil(flushOutbox(env, { fetchImpl: typeof env.EMAIL_FETCH === "function" ? env.EMAIL_FETCH : fetch }).catch(() => {}));
         }
         return json({ success: true });
       }
@@ -819,16 +912,25 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       if (method === "POST") {
         const acceptParams = matchPath("/api/invitations/:token/accept", path);
         if (acceptParams) {
-          const invitedCustomer = await customerAuth.getCurrentCustomer(request, env);
+          const { customer: invitedCustomer, policy: invitedPolicy } = await customerAuth.getCustomerSession(request, env);
           if (!invitedCustomer) return json({ success: false, error: "unauthorized" }, 401);
+          const invitedDenied = orgPolicyDenied(invitedPolicy);
+          if (invitedDenied) return invitedDenied;
 
+          if (!(await customerAuth.throttle(env, request, "invitation_accept", 10))) return json({ success: false, error: "too_many_attempts" }, 429);
           const result = await organizations.acceptInvitation(env, acceptParams.token, invitedCustomer.id);
+          const inviteIpHash = await hashIP(request);
           await logAudit(env, {
             actorType: "customer_user", customerUserId: invitedCustomer.id,
             organizationId: result.ok ? result.organizationId : null,
             endpoint: path, method, resource: "organization_invitation", action: "accept",
             success: result.ok, statusCode: result.ok ? 200 : result.status,
-            errorMessage: result.ok ? null : result.error, requestId, ipHash: await hashIP(request)
+            errorMessage: result.ok ? null : result.error, requestId, ipHash: inviteIpHash
+          });
+          if (result.ok && result.seatLimitShadow) await logAudit(env, {
+            actorType: "customer_user", customerUserId: invitedCustomer.id, organizationId: result.organizationId,
+            endpoint: path, method, resource: "billing_gate", action: "seat_limit_shadow", success: true,
+            statusCode: 200, errorMessage: result.seatLimitShadow.reason, requestId, ipHash: inviteIpHash
           });
           if (!result.ok) return json({ success: false, error: result.error }, result.status);
           return json({ success: true, organizationId: result.organizationId });
@@ -839,8 +941,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       // Personal data rights (roadmap 1.3): export and erase my own account.
       // ---------------------------------------------
       if (path === "/api/customer/account/export" || path === "/api/customer/account/delete") {
-        const acctCustomer = await customerAuth.getCurrentCustomer(request, env);
+        const { customer: acctCustomer, policy: acctPolicy } = await customerAuth.getCustomerSession(request, env);
         if (!acctCustomer) return json({ success: false, error: "unauthorized" }, 401);
+        const acctDenied = orgPolicyDenied(acctPolicy);
+        if (acctDenied) return acctDenied;
         const acctIpHash = await hashIP(request);
 
         if (method === "GET" && path === "/api/customer/account/export") {
@@ -874,7 +978,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       // ---------------------------------------------
 
       if (path.startsWith("/api/customer/2fa/")) {
-        const mfaCustomer = await customerAuth.getCurrentCustomer(request, env);
+        // Round 6.4A: deliberately NOT refused for a session an organization policy restricts. These routes are the only way out of it.
+        const { customer: mfaCustomer } = await customerAuth.getCustomerSession(request, env);
         if (!mfaCustomer) return json({ success: false, error: "unauthorized" }, 401);
         const mfaIpHash = await hashIP(request);
 
@@ -927,8 +1032,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       // ---------------------------------------------
 
       if (path.startsWith("/api/customer/webauthn/")) {
-        const webauthnCustomer = await customerAuth.getCurrentCustomer(request, env);
+        const { customer: webauthnCustomer, policy: webauthnPolicy } = await customerAuth.getCustomerSession(request, env);
         if (!webauthnCustomer) return json({ success: false, error: "unauthorized" }, 401);
+        const webauthnDenied = orgPolicyDenied(webauthnPolicy);
+        if (webauthnDenied) return webauthnDenied;
         const webauthnIpHash = await hashIP(request);
 
         if (method === "GET" && path === "/api/customer/webauthn/credentials") {
@@ -976,8 +1083,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       // session — never a Lummet admin session (rule: never mix
       // staff and customer identity, master prompt section 6).
       if (path.startsWith("/api/organizations") || path.startsWith("/api/sites") || path === "/api/products") {
-        const customer = await customerAuth.getCurrentCustomer(request, env);
+        const { customer, policy: customerPolicy } = await customerAuth.getCustomerSession(request, env);
         if (!customer) return json({ success: false, error: "unauthorized" }, 401);
+        const customerDenied = orgPolicyDenied(customerPolicy);
+        if (customerDenied) return customerDenied;
         const customerIpHash = await hashIP(request);
 
         /** Loads this customer's membership on organizationId and enforces a minimum role. */
@@ -1030,6 +1139,30 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           const membership = await organizations.getMembership(env, organizationId, customer.id);
           if (!membership) return json({ success: false, error: "forbidden" }, 403);
 
+          // Round 6.4C: this organization's IP allowlist, for EVERY route below (including sessions, which stay available to people on an allowed
+          // address only). Dark while ORG_IP_ALLOWLIST=off. Account-level routes (sign-in, 2FA setup, logout) are not organization routes and are unaffected.
+          const ipDenied = await orgIpDenied(env, request, organizationId);
+          if (ipDenied) return ipDenied;
+
+          // Round 6.4B: organization sessions (list, revoke). Dark (404) while CUSTOMER_SESSION_ADMIN=off. Placed BEFORE the suspension and billing
+          // write gates on purpose: ending someone's access is a containment action that must keep working when an organization is suspended
+          // or past due. The service does its own role gate (admin or owner), org scoping, reason check and audit.
+          if (subPath === "/sessions" && method === "GET") {
+            const q = new URL(request.url).searchParams;
+            const listed = await customerSessions.listSessions(env, { organizationId, actorUserId: customer.id, actorSessionId: customer.sessionId, limit: q.get("limit"), cursor: q.get("cursor") });
+            if (!listed.ok) return json({ success: false, error: listed.error }, listed.status);
+            return json({ success: true, data: listed.data, nextCursor: listed.nextCursor });
+          }
+          if (subPath === "/sessions/revoke" && method === "POST") {
+            const body = await request.json().catch(() => ({}));
+            const revoked = await customerSessions.revokeSessions(env, {
+              organizationId, actorUserId: customer.id, actorSessionId: customer.sessionId, handle: body.handle, userId: body.userId, reason: body.reason,
+              requestId, ipHash: customerIpHash, endpoint: path, method
+            });
+            if (!revoked.ok) return json({ success: false, error: revoked.error }, revoked.status);
+            return json({ success: true, revoked: revoked.revoked, ...(revoked.shadow ? { shadow: true, wouldRevoke: revoked.wouldRevoke } : {}) });
+          }
+
           // Staff-suspended or closed organizations become read-only: every
           // mutation is refused (a suspended org can still log in, look at
           // its data, and switch org, so support can talk to the customer) —
@@ -1041,6 +1174,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             if (!orgRow || orgRow.status !== "active") {
               return json({ success: false, error: "organization_suspended" }, 403);
             }
+            // Billing write gate (Phase 1.4): off = inert, shadow = log what would be refused, enforce = refuse.
+            const gate = await evaluateWriteGate(env, { organizationId, method, subPath, now: effectiveNow(env, request) });
+            if (gate.blocked) return json({ success: false, ...refusalFor(gate.access) }, 402);
           }
 
           if (method === "POST" && subPath === "/switch") {
@@ -1050,6 +1186,48 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
           if (method === "GET" && subPath === "/members") {
             return json({ success: true, data: await organizations.listMembers(env, organizationId) });
+          }
+
+          // Round 6.4C: IP allowlist and SSO requirement stub. Owner only for changes; the service audits every change and refusal.
+          if (subPath === "/ip-allowlist" && (method === "GET" || method === "PUT")) {
+            if (method === "GET") {
+              const read = await orgSecurityPolicy.readIpAllowlist(env, { organizationId, actorUserId: customer.id });
+              if (!read.ok) return json({ success: false, error: read.error }, read.status);
+              return json({ success: true, data: read.data, enforcement: read.enforcement });
+            }
+            const body = await request.json().catch(() => ({}));
+            const changed = await orgSecurityPolicy.setIpAllowlist(env, {
+              organizationId, actorUserId: customer.id, ipAllowlist: body.ipAllowlist, reason: body.reason,
+              request, requestId, ipHash: customerIpHash, endpoint: path, method
+            });
+            if (!changed.ok) return json({ success: false, error: changed.error }, changed.status);
+            return json({ success: true, changed: changed.changed, data: changed.data, enforcement: changed.enforcement });
+          }
+          if (subPath === "/sso-requirement" && method === "PUT") {
+            const body = await request.json().catch(() => ({}));
+            const changed = await orgSecurityPolicy.setRequireSso(env, {
+              organizationId, actorUserId: customer.id, requireSso: body.requireSso, reason: body.reason,
+              requestId, ipHash: customerIpHash, endpoint: path, method
+            });
+            if (!changed.ok) return json({ success: false, error: changed.error }, changed.status);
+            return json({ success: true, changed: changed.changed, data: changed.policy, enforced: changed.enforced, status: changed.status });
+          }
+
+          // Round 6.4A: organization security policy (org-wide 2FA). Dark (404) while ORG_SECURITY_POLICY=off. Reading needs membership;
+          // changing it is owner only, needs a written reason, and is audited by the service whether it succeeds or is refused.
+          if (subPath === "/security-policy" && (method === "GET" || method === "PUT")) {
+            if (method === "GET") {
+              const read = await orgSecurityPolicy.readPolicy(env, { organizationId, actorUserId: customer.id });
+              if (!read.ok) return json({ success: false, error: read.error }, read.status);
+              return json({ success: true, data: read.policy, enforcement: read.enforcement });
+            }
+            const body = await request.json().catch(() => ({}));
+            const changed = await orgSecurityPolicy.setRequire2fa(env, {
+              organizationId, actorUserId: customer.id, require2fa: body.require2fa, reason: body.reason,
+              requestId, ipHash: customerIpHash, endpoint: path, method
+            });
+            if (!changed.ok) return json({ success: false, error: changed.error }, changed.status);
+            return json({ success: true, changed: changed.changed, data: changed.policy, enforcement: changed.enforcement, membersWithout2fa: changed.membersWithout2fa });
           }
 
           // Organization lifecycle (master prompt section 7, roadmap 1.2):
@@ -1079,8 +1257,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const result = await (
               subPath === "/deactivate" ? organizations.deactivateOrganization(env, organizationId, customer.id) :
               subPath === "/reactivate" ? organizations.reactivateOrganization(env, organizationId, customer.id) :
-              subPath === "/request-deletion" ? organizations.requestDeletion(env, organizationId, customer.id, { billingService: billing }) :
-              organizations.cancelScheduledDeletion(env, organizationId, customer.id)
+              subPath === "/request-deletion" ? organizations.requestDeletion(env, organizationId, customer.id, { billingService: billing, deleteNow: (await request.clone().json().catch(() => ({}))).deleteNow === true }) :
+              organizations.cancelScheduledDeletion(env, organizationId, customer.id, { billingService: billing })
             );
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -1089,7 +1267,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               requestId, ipHash: customerIpHash
             });
             if (!result.ok) return json({ success: false, error: result.error }, result.status);
-            return json({ success: true, scheduledDeletionAt: result.scheduledDeletionAt, alreadyScheduled: result.alreadyScheduled || false });
+            return json({ success: true, scheduledDeletionAt: result.scheduledDeletionAt, alreadyScheduled: result.alreadyScheduled || false, billingEndsAt: result.billingEndsAt || null, billingCancelQueued: !!result.billingCancelQueued });
           }
 
           if (method === "GET" && subPath === "/invitations") {
@@ -1101,6 +1279,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (method === "POST" && subPath === "/invitations") {
             const guard = await requireOrgRole(organizationId, "admin");
             if (guard) return guard;
+            if (!(await customerAuth.throttle(env, request, "organization_invitation", 10))) return json({ success: false, error: "too_many_attempts" }, 429);
 
             const body = await request.json().catch(() => ({}));
             const result = await organizations.createInvitation(env, {
@@ -1112,13 +1291,18 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               success: result.ok, statusCode: result.ok ? 200 : result.status,
               errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
             });
-            if (!result.ok) return json({ success: false, error: result.error }, result.status);
+            if (result.ok && result.seatLimitShadow) await logAudit(env, {
+              actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method,
+              resource: "billing_gate", resourceId: result.invitationId, action: "seat_limit_shadow",
+              success: true, statusCode: 200, errorMessage: result.seatLimitShadow.reason, requestId, ipHash: customerIpHash
+            });
+            if (!result.ok) return json({ success: false, error: result.error, ...(result.error === "seat_limit_reached" ? { message: result.message, limit: result.limit, used: result.used } : {}) }, result.status);
             const org = await organizations.getOrganization(env, organizationId).catch(() => null);
             const invQueued = await queueEmail(env, {
               to: String(body.email).trim().toLowerCase(), template: "invitation", organizationId,
               vars: { link: portalLink(env, "/app/invitation", { token: result.token }), organizationName: (org && org.name) || "an organization", role: body.role }
             });
-            if (invQueued.ok) ctx.waitUntil(flushOutbox(env).catch(() => {}));
+            if (invQueued.ok) ctx.waitUntil(flushOutbox(env, { fetchImpl: typeof env.EMAIL_FETCH === "function" ? env.EMAIL_FETCH : fetch }).catch(() => {}));
             // Token is only returned when email delivery is not configured,
             // so the inviter can share the link manually; otherwise it goes
             // only to the invitee's inbox.
@@ -1298,6 +1482,81 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // what the org is being charged is not a write).
           // -------------------------------------------
 
+          // Phase 5: usage history and commercial workflow APIs.
+          if (method === "GET" && subPath === "/usage/snapshots") {
+            // GET is read-only. Daily snapshots are written by the scheduled sweep.
+            return json({ success: true, data: await commercial.listUsageSnapshots(env, organizationId) });
+          }
+          if (method === "GET" && subPath === "/billing/addons") {
+            return json({ success: true, data: await commercial.listActiveAddons(env) });
+          }
+          if (method === "GET" && subPath === "/billing/credit-packs") {
+            return json({ success: true, data: await commercial.listActiveCreditPacks(env) });
+          }
+          if (method === "POST" && subPath === "/billing/credit-packs/checkout") {
+            const guard = await requireOrgRole(organizationId, "billing");
+            if (guard) return guard;
+            const body = await request.json().catch(() => ({}));
+            const portalOrigin = (env.PORTAL_BASE_URL || url.origin).replace(/\/$/, "");
+            const result = await commercial.startCreditPackCheckout(env, organizationId, String(body.packId || ""), portalOrigin, String(body.idempotencyKey || ""));
+            await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "credit_pack_checkout", action: "create", success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
+            return result.ok ? json({ success: true, checkoutUrl: result.checkoutUrl }) : json({ success: false, error: result.error }, result.status);
+          }
+          if (method === "POST" && subPath === "/billing/save-offer") {
+            const guard = await requireOrgRole(organizationId, "admin"); if (guard) return guard;
+            const body = await request.json().catch(() => ({}));
+            const sub = await commercial.latestActiveSubscriptionId(env,organizationId);
+            if (!sub) return json({success:false,error:'no_active_subscription'},409);
+            const result = await commercial.beginSaveOffer(env,organizationId,sub.id,String(body.offerKey||''),body.detail);
+            await logAudit(env,{actorType:'customer_user',customerUserId:customer.id,organizationId,endpoint:path,method,resource:'billing_save_offer',resourceId:result.offer?.id||null,action:'show',success:result.ok,statusCode:result.ok? 200:result.status||400,requestId,ipHash:customerIpHash});
+            return result.ok ? json({success:true,data:result}) : json({success:false,error:result.error},result.status||400);
+          }
+          if (method === "POST" && subPath === "/billing/addons/change") {
+            const guard = await requireOrgRole(organizationId, "admin"); if (guard) return guard;
+            const body = await request.json().catch(() => ({}));
+            const result = await commercial.changeAddon(env,organizationId,String(body.addonId||''),body.quantity,{requestKey:String(body.idempotencyKey||'')});
+            await logAudit(env,{actorType:'customer_user',customerUserId:customer.id,organizationId,endpoint:path,method,resource:'subscription_addon',resourceId:body.addonId||null,action:'change',success:result.ok,statusCode:result.ok? 200:result.status||400,errorMessage:result.ok?null:result.error,requestId,ipHash:customerIpHash});
+            return result.ok ? json({success:true,data:result}) : json({success:false,error:result.error},result.status||400);
+          }
+          if (method === "POST" && subPath === "/billing/save-offer/complete") {
+            const guard = await requireOrgRole(organizationId, "admin"); if (guard) return guard;
+            const body = await request.json().catch(() => ({})); const result=await commercial.completeSaveOffer(env,String(body.offerId||''),String(body.status||'accepted'));
+            return result.ok ? json({success:true}) : json({success:false,error:result.error},result.status||400);
+          }
+          if (method === "POST" && subPath === "/billing/cancellation-feedback") {
+            const guard = await requireOrgRole(organizationId, "admin");
+            if (guard) return guard;
+            const body = await request.json().catch(() => ({}));
+            const result = await commercial.recordCancellationFeedback(env, {
+              organizationId, subscriptionId: body.subscriptionId || null, reason: body.reason,
+              detail: body.detail, offerShown: body.offerShown || null, offerAccepted: body.offerAccepted === true
+            });
+            await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "cancellation_feedback", action: "create", success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
+            return result.ok ? json({ success: true }) : json({ success: false, error: result.error }, result.status);
+          }
+          const quoteAcceptMatch = subPath.match(/^\/billing\/quotes\/([^/]+)\/accept$/);
+          if (method === "POST" && quoteAcceptMatch) {
+            const guard = await requireOrgRole(organizationId, "billing");
+            if (guard) return guard;
+            const result = await commercial.acceptQuote(env, quoteAcceptMatch[1], { organizationId, userId: customer.id });
+            await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "quote", resourceId: quoteAcceptMatch[1], action: "accept", success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
+            return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status);
+          }
+
+          if (subPath === "/billing/profile" && method === "GET") {
+            const guard = await requireOrgRole(organizationId, "billing");
+            if (guard) return guard;
+            return json({ success: true, data: await billing.getBillingProfile(env, organizationId) });
+          }
+          if (subPath === "/billing/profile" && method === "PUT") {
+            const guard = await requireOrgRole(organizationId, "billing");
+            if (guard) return guard;
+            const body = await request.json().catch(() => ({}));
+            const result = await billing.updateBillingProfile(env, organizationId, body, { actorUserId: customer.id });
+            await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "billing_profile", action: "update", success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
+            return result.ok ? json({ success: true, data: result.profile }) : json({ success: false, error: result.error }, result.status);
+          }
+
           if (method === "POST" && subPath === "/billing/coupon/validate") {
             const guard = await requireOrgRole(organizationId, "admin");
             if (guard) return guard;
@@ -1333,7 +1592,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           }
 
           if (method === "POST" && subPath === "/billing/portal") {
-            const guard = await requireOrgRole(organizationId, "admin");
+            const guard = await requireOrgRole(organizationId, "billing");
             if (guard) return guard;
             // Built server-side like checkout URLs: the return target is never taken from the request.
             const portalOrigin = (env.PORTAL_BASE_URL || url.origin).replace(/\/$/, "");
@@ -1354,7 +1613,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
             const body = await request.json().catch(() => ({}));
             const result = await billing.cancelSubscription(env, organizationId, {
-              atPeriodEnd: body.atPeriodEnd !== false, actorUserId: customer.id
+              atPeriodEnd: true, actorUserId: customer.id
             });
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -1364,6 +1623,22 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             });
             if (!result.ok) return json({ success: false, error: result.error }, result.status);
             return json({ success: true, canceledImmediately: result.canceledImmediately });
+          }
+
+          if (method === "POST" && subPath === "/billing/pause") {
+            const guard = await requireOrgRole(organizationId, "admin");
+            if (guard) return guard;
+            const body = await request.json().catch(() => ({}));
+            const result = await billing.pauseSubscription(env, organizationId, { resumesAt: body.resumesAt, actorUserId: customer.id });
+            await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "subscription", action: "pause", success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
+            return result.ok ? json({ success: true, resumesAt: result.resumesAt }) : json({ success: false, error: result.error }, result.status);
+          }
+          if (method === "POST" && subPath === "/billing/pause/resume") {
+            const guard = await requireOrgRole(organizationId, "admin");
+            if (guard) return guard;
+            const result = await billing.resumePausedSubscription(env, organizationId, { actorUserId: customer.id });
+            await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "subscription", action: "resume_pause", success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
+            return result.ok ? json({ success: true }) : json({ success: false, error: result.error }, result.status);
           }
 
           if (method === "POST" && subPath === "/billing/resume") {
@@ -1393,11 +1668,14 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               success: result.ok, statusCode: result.ok ? 200 : result.status,
               errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
             });
-            if (!result.ok) return json({ success: false, error: result.error }, result.status);
-            return json({ success: true });
+            if (!result.ok) return json({ success: false, error: result.error, blockers: result.blockers || [] }, result.status);
+            // pending: the change was sent to the provider and takes effect when its webhook confirms it (BILLING_ENFORCE=enforce).
+            return json({ success: true, ...(result.pending ? { pending: true, intentId: result.intentId || null, direction: result.direction || null, scheduled: !!result.scheduled, effectiveAt: result.effectiveAt || null } : {}) });
           }
 
           if (method === "GET" && subPath === "/billing/invoices") {
+            const guard = await requireOrgRole(organizationId, "billing");
+            if (guard) return guard;
             return json({ success: true, data: await billing.listInvoices(env, organizationId) });
           }
 
@@ -1859,7 +2137,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               result = await tenantPortal.listAlerts(env, targetSite);
             }
 
-            if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status);
+            if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status);
             return json(result.data);
           }
 
@@ -1882,7 +2160,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               success: result.ok, statusCode: result.ok ? 200 : result.status,
               errorMessage: result.ok ? null : result.message, requestId, ipHash: customerIpHash
             });
-            if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status);
+            if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status);
             return json(result.data);
           }
 
@@ -1945,7 +2223,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               success: result.ok, statusCode: result.ok ? 200 : result.status,
               errorMessage: result.ok ? null : result.message, requestId, ipHash: customerIpHash
             });
-            if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status);
+            if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status);
             return json(result.data);
           }
 
@@ -1967,7 +2245,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               success: result.ok, statusCode: result.ok ? 200 : result.status,
               errorMessage: result.ok ? null : result.message, requestId, ipHash: customerIpHash
             });
-            if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status);
+            if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status);
             return json(result.data);
           }
 
@@ -2228,6 +2506,23 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return json({ success: true, data: await listOrganizationAuditLog(env, organizationId) });
           }
 
+          // Round 6.4B: audit-log CSV, one bounded page per request (X-Next-Cursor names the next). Dark (404) while CUSTOMER_AUDIT_CSV=off.
+          if (method === "GET" && subPath === "/audit-log.csv") {
+            const q = new URL(request.url).searchParams;
+            const exported = await customerAuditCsv.exportAuditCsv(env, { organizationId, actorUserId: customer.id, limit: q.get("limit"), cursor: q.get("cursor"), requestId, ipHash: customerIpHash, endpoint: path, method });
+            if (!exported.ok) return json({ success: false, error: exported.error }, exported.status);
+            return new Response(exported.csv, {
+              status: 200,
+              headers: {
+                "Content-Type": "text/csv; charset=utf-8",
+                "Content-Disposition": `attachment; filename="lummet-audit-log-${/^[A-Za-z0-9-]{1,64}$/.test(organizationId) ? organizationId : "org"}.csv"`,
+                "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                "X-Has-More": exported.nextCursor ? "true" : "false",
+                ...(exported.nextCursor ? { "X-Next-Cursor": exported.nextCursor } : {})
+              }
+            });
+          }
+
           const siteHealthMatch = subPath.match(/^\/sites\/([^/]+)\/health$/);
           if (method === "GET" && siteHealthMatch) {
             const [, siteId] = siteHealthMatch;
@@ -2318,6 +2613,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // without verifying ownership).
           const membership = await organizations.getMembership(env, site.organization_id, customer.id);
           if (!membership) return json({ success: false, error: "forbidden" }, 403);
+          const siteIpDenied = await orgIpDenied(env, request, site.organization_id); // Round 6.4C: the site's own organization decides
+          if (siteIpDenied) return siteIpDenied;
           return json({ success: true, data: site });
         }
 
@@ -2356,6 +2653,11 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
         ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
         ctx.waitUntil(requestErrorsRepo.purgeOlderThanDays(env, 14).catch(() => {}));
+        ctx.waitUntil(billingLifecycle.sweep(env, Date.now(), { billingService: billing }).catch(logLifecycleFailure));
+        ctx.waitUntil(billingReminders.sweepReminders(env).then(() => billingNotifications.drain(env)).then(() => flushOutbox(env)).then(() => billingNotifications.drain(env)).catch(logNotificationFailure));
+        // Round 6.5A: the monitors run in the background (their probes can take longer than a pinger waits), so this check reads the
+        // result of the previous call. Off by default (SYNTHETIC_MONITORS), then inert.
+        ctx.waitUntil(runSyntheticMonitors(env).catch((error) => console.error(JSON.stringify({ msg: "synthetic_monitors_run_failed", errorName: error && error.name ? String(error.name).slice(0, 40) : "Error" }))));
         const result = await alerts.runAlertCheck(env);
         return json({ success: true, skipped: result.skipped || null, results: (result.results || []).map((r) => ({ key: r.key, action: r.action })), jobs: jobSweep.results.map((r) => ({ jobId: r.jobId, action: r.action })) });
       }
@@ -2455,11 +2757,15 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           const site = await sites.getSite(env, siteId);
           if (!site || site.organization_id !== apiAuth.organizationId) return null;
           if (apiAuth.siteId && apiAuth.siteId !== siteId) return null;
+          const serveGate = await evaluateServeGate(env, { organizationId: site.organization_id, entryPoint: "api-key:site-scope" });
+          if (serveGate.blocked) return { __blocked: true, reasonCode: refusalFor(serveGate.access).reasonCode };
           return site;
         }
 
         if (method === "GET" && path === "/api/v1/sites") {
           if (!apiKeys.hasScope(apiAuth, "sites:read")) return json({ success: false, error: "insufficient_scope" }, 403);
+          const serveGate = await evaluateServeGate(env, { organizationId: apiAuth.organizationId, entryPoint: "api-key:sites-list" });
+          if (serveGate.blocked) return json({ success:false,error:"billing_access_restricted",reasonCode:refusalFor(serveGate.access).reasonCode },402);
           const allSites = await sites.listSitesForOrganization(env, apiAuth.organizationId);
           const scoped = apiAuth.siteId ? allSites.filter((s) => s.id === apiAuth.siteId) : allSites;
           return json({ success: true, data: scoped });
@@ -2473,6 +2779,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (method === "GET" && rest === "") {
             if (!apiKeys.hasScope(apiAuth, "sites:read")) return json({ success: false, error: "insufficient_scope" }, 403);
             const site = await siteInScope(siteId);
+            if (site?.__blocked) return json({ success:false,error:"billing_access_restricted",reasonCode:site.reasonCode },402);
             if (!site) return json({ success: false, error: "not_found" }, 404);
             return json({ success: true, data: site });
           }
@@ -2480,6 +2787,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (method === "GET" && rest === "/domains") {
             if (!apiKeys.hasScope(apiAuth, "domains:read")) return json({ success: false, error: "insufficient_scope" }, 403);
             const site = await siteInScope(siteId);
+            if (site?.__blocked) return json({ success:false,error:"billing_access_restricted",reasonCode:site.reasonCode },402);
             if (!site) return json({ success: false, error: "not_found" }, 404);
             return json({ success: true, data: await domains.listDomainsForSite(env, siteId) });
           }
@@ -2487,6 +2795,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (method === "GET" && rest === "/domain-zones") {
             if (!apiKeys.hasScope(apiAuth, "domains:read")) return json({ success: false, error: "insufficient_scope" }, 403);
             const site = await siteInScope(siteId);
+            if (site?.__blocked) return json({ success:false,error:"billing_access_restricted",reasonCode:site.reasonCode },402);
             if (!site) return json({ success: false, error: "not_found" }, 404);
             const zonesView = await zoneDomains.listForSite(env, siteId);
             return json({ success: true, data: zonesView.map((v) => ({
@@ -2498,13 +2807,14 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (method === "GET" && rest === "/analytics/overview") {
             if (!apiKeys.hasScope(apiAuth, "analytics:read")) return json({ success: false, error: "insufficient_scope" }, 403);
             const site = await siteInScope(siteId);
+            if (site?.__blocked) return json({ success:false,error:"billing_access_restricted",reasonCode:site.reasonCode },402);
             if (!site) return json({ success: false, error: "not_found" }, 404);
             const v1Params = new URL(request.url).searchParams;
             const result = await tenantPortal.getAnalyticsOverview(env, site, {
               startDate: v1Params.get("start_date"), endDate: v1Params.get("end_date"),
               dimensionType: v1Params.get("dimension_type"), currency: v1Params.get("currency")
             });
-            if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status);
+            if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status);
             return json(result.data);
           }
         }
@@ -2527,7 +2837,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       // ---------------------------------------------
 
       if ((path === "/app" || path.startsWith("/app/")) && method === "GET") {
-        const portalCustomer = await customerAuth.getCurrentCustomer(request, env);
+        const { customer: portalSessionCustomer, policy: portalPolicy } = await customerAuth.getCustomerSession(request, env);
+        // A session an organization policy blocks counts as signed out for the login page, so the person can sign in again; every other
+        // page below the login check shows the 2FA notice instead (Round 6.4A).
+        const portalCustomer = portalPolicy.blocked ? null : portalSessionCustomer;
 
         if (path === "/app/verify-email") return html(renderVerifyEmailPage());
         if (path === "/app/reset-password") return html(renderResetPasswordPage());
@@ -2535,9 +2848,15 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (path === "/app/invitation") return html(renderInvitationPage());
         if (path === "/app/login") {
           if (portalCustomer) return redirect("/app/overview");
-          return html(renderCustomerLoginPage());
+          return html(renderCustomerLoginPage({ turnstileSiteKey: String(env.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" ? (env.TURNSTILE_SITE_KEY || "") : "" }));
         }
 
+        // Customer 2FA enrollment page (release 2.6.0.16). Served before the org-policy block on purpose: it is the way out of a restricted session.
+        if (path === ENROLL_PAGE_PATH && customer2faEnrollMode(env) === "on") {
+          if (!portalSessionCustomer) return redirect("/app/login");
+          return html(renderCustomer2faEnrollPage(), 200, { "Cache-Control": "no-store" });
+        }
+        if (portalSessionCustomer && portalPolicy.blocked) return html(renderOrg2faRequiredPage({ enrollPath: customer2faEnrollMode(env) === "on" ? ENROLL_PAGE_PATH : null }), 403, { "Cache-Control": "no-store" });
         if (!portalCustomer) return redirect("/app/login");
 
         const myOrgs = await organizations.listOrganizationsForUser(env, portalCustomer.id);
@@ -2578,6 +2897,12 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             })
           );
         }
+
+        // Round 6.4C: the active organization's IP allowlist. A denied address sees a plain notice and no organization data; ?org= can still pick
+        // another organization of the same person, which is checked on its own list.
+        const portalIpVerdict = await orgSecurityPolicy.evaluateOrgIpAccess(env, request, activeOrgId);
+        if (portalIpVerdict.wouldDeny && !portalIpVerdict.denied) console.log(JSON.stringify({ msg: "org_ip_allowlist_would_deny", organizationId: activeOrgId, mode: portalIpVerdict.mode }));
+        if (portalIpVerdict.denied) return html(renderOrgIpDeniedPage(), 403, { "Cache-Control": "no-store" });
 
         const activeOrg = await organizations.getOrganization(env, activeOrgId);
         // Hide nav links for features this plan doesn't include, so a Starter
@@ -2764,7 +3089,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (path === "/app/billing") {
           const subscription = await plans.getActiveSubscription(env, activeOrgId);
           const plan = subscription ? await plans.getPlan(env, subscription.plan_id) : null;
-          const invoices = await billing.listInvoices(env, activeOrgId);
+          const [invoices, billingProfile, access, usage, aiCredits] = await Promise.all([
+            billing.listInvoices(env, activeOrgId), billing.getBillingProfile(env, activeOrgId),
+            resolveAccess(env, activeOrgId), getUsageSnapshot(env, activeOrgId), getAiBalance(env, activeOrgId)
+          ]);
 
           // New customers see every plan; subscribers see the other plans of their own product (to switch).
           let availablePlans = [];
@@ -2777,12 +3105,13 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             availablePlans = (await plans.listPlans(env, plan.product_id)).filter((p) => p.id !== plan.id || !subscription.provider);
           }
           const checkoutStatus = ["success", "canceled"].includes(url.searchParams.get("checkout")) ? url.searchParams.get("checkout") : null;
+          const canManageBilling = myMembership ? roleAtLeast(myMembership.my_role, "billing") : false;
 
           return html(
             shell({
               title: "Billing", activeKey: "billing", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, checkoutStatus })
+              bodyHtml: renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling, checkoutStatus, selectedPlanId: url.searchParams.get("plan") || null, billingProfile, access, usage, aiCredits })
             })
           );
         }
@@ -3124,7 +3453,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (!tenant) return json({ success: true, data: [] });
 
           const result = await getFromTenant(env, tenant, "/en/api/super/media");
-          if (!result.ok) return json({ success: false, error: result.reason }, result.status);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason }, result.status);
           return json({ success: true, data: result.data.data || [] });
         }
 
@@ -3142,7 +3471,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3160,7 +3489,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3178,7 +3507,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3197,7 +3526,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3216,7 +3545,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3234,7 +3563,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3256,7 +3585,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3274,7 +3603,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3296,7 +3625,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3315,7 +3644,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3334,7 +3663,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3352,7 +3681,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3371,7 +3700,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data });
         }
 
@@ -3380,7 +3709,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (guard) return guard;
           const reportType = new URL(request.url).searchParams.get("report_type") || "";
           const result = await fetchReportColumnOptions(env, admin, reportType);
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data });
         }
 
@@ -3399,7 +3728,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data });
         }
 
@@ -3417,7 +3746,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3435,7 +3764,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3453,7 +3782,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3471,7 +3800,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3487,7 +3816,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3504,7 +3833,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3519,7 +3848,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3535,7 +3864,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data });
         }
 
@@ -3551,7 +3880,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3568,7 +3897,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3583,7 +3912,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3600,7 +3929,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3617,7 +3946,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3633,7 +3962,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true }, 201);
         }
 
@@ -3661,7 +3990,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           // Tenant's AI handlers return their fields top-level
           // (e.g. { success, generated, text }), not nested under
           // `data` like the ordinary CRUD handlers -- re-nest here
@@ -3746,7 +4075,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true }, 201);
         }
 
@@ -3762,7 +4091,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             errorMessage: result.ok ? null : result.message || result.error || result.reason,
             requestId, ipHash
           });
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3777,7 +4106,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           const categorySlug = url.searchParams.get("category_slug");
           if (!countryCode && !categorySlug) return json({ success: false, error: "country_code_or_category_slug_required" }, 422);
           const result = await proxyHubEligibleCasinos(env, admin, countryCode, categorySlug);
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data || [] });
         }
 
@@ -3802,7 +4131,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data });
         }
 
@@ -3822,7 +4151,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3835,7 +4164,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (guard) return guard;
           const q = url.searchParams.get("q") || "";
           const result = await proxySearchCountries(env, admin, q);
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data || [] });
         }
 
@@ -3846,7 +4175,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           const categorySlug = url.searchParams.get("category_slug");
           if (!countryCode) return json({ success: false, error: "country_code_required" }, 422);
           const result = await proxyEligibleCasinos(env, admin, countryCode, categorySlug);
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data || [] });
         }
 
@@ -3864,7 +4193,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3882,7 +4211,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true, data: result.data?.data }, 201);
         }
 
@@ -3906,7 +4235,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             requestId, ipHash
           });
 
-          if (!result.ok) return json({ success: false, error: result.reason, message: result.message }, result.status || 400);
+          if (!result.ok) return json({ success: false, error: result.reason, reasonCode: result.reasonCode || result.reason, message: result.message }, result.status || 400);
           return json({ success: true });
         }
 
@@ -3930,12 +4259,179 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           }
           const staffBody = async () => (await request.json().catch(() => ({})));
 
+          // Round 6.1C: staff-only revenue analytics CSV and finance unit-cost settings (super-admin gate above).
+          if (method === "GET" && path === "/api/platform/saas/revenue-analytics/export.csv") {
+            const mode = revenueAnalytics.analyticsMode(env);
+            if (mode === "off") return json({ success: false, error: "revenue_analytics_disabled" }, 404);
+            const cohorts = await revenueAnalytics.monthlyCohorts(env, { limit: revenueAnalytics.MAX_COHORT_MONTHS });
+            const csv = revenueAnalytics.toCsv(
+              ["cohort_month", "currency", "logos", "starting_mrr_cents", "current_mrr_cents", "nrr_percent", "grr_percent", "logo_churn_percent", "churned_logos"],
+              cohorts.map((r) => [r.cohortMonth, r.currency, r.logos, r.startingMrrCents, r.currentMrrCents, r.nrrPercent, r.grrPercent, r.logoChurnPercent, r.churnedLogos])
+            );
+            await logAudit(env, { adminId: admin.id, endpoint: path, method, resource: "revenue_analytics", action: "export_csv", success: true, statusCode: 200, requestId, ipHash, reason: `cohort rows exported: ${cohorts.length}` });
+            return new Response(csv, { status: 200, headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="lummet-revenue-cohorts.csv"', "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+          }
+          if (method === "POST" && path === "/api/platform/saas/revenue-analytics/finance-unit-costs") {
+            const body = await staffBody();
+            const reason = String(body.reason || "").trim();
+            const result = reason.length < 5 || reason.length > 500
+              ? { ok: false, status: 422, error: "reason_required" }
+              : await revenueAnalytics.setFinanceUnitCosts(env, body.costs);
+            await logAudit(env, { adminId: admin.id, endpoint: path, method, resource: "finance_unit_costs", resourceId: "finance_unit_costs_by_tier", action: "update", success: result.ok, statusCode: result.ok ? 200 : result.status || 422, errorMessage: result.ok ? null : result.error, requestId, ipHash, reason: reason.slice(0, 500) || null });
+            return result.ok ? json({ success: true }) : json({ success: false, error: result.error }, result.status || 422);
+          }
+
+          // Phase 5.6/5.7: paginated staff quote queue and scoped Customer 360.
+          if (method === "GET" && path === "/api/platform/saas/quotes") {
+            const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+            const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+            return json({ success: true, data: await commercial.listQuoteQueue(env, { limit, offset }) });
+          }
+          const customer360Match = path.match(/^\/api\/platform\/saas\/organizations\/([^/]+)\/customer-360$/);
+          if (method === "GET" && customer360Match) {
+            const data = await commercial.getCustomer360(env, decodeURIComponent(customer360Match[1]));
+            if (!data) return json({ success: false, error: "organization_not_found" }, 404);
+            return json({ success: true, data });
+          }
+          const staffQuoteMatch = path.match(/^\/api\/platform\/saas\/quotes\/([^/]+)\/(edit|send|fulfill|invoice)$/);
+          if (method === "POST" && staffQuoteMatch) {
+            const body = await staffBody();
+            if (!String(body.reason || "").trim()) return json({ success: false, error: "reason_required" }, 422);
+            const quoteId = decodeURIComponent(staffQuoteMatch[1]);
+            const result = staffQuoteMatch[2] === "edit"
+              ? await commercial.editQuote(env, quoteId, body, { staffId: admin.id })
+              : staffQuoteMatch[2] === "fulfill"
+                ? await commercial.fulfillQuote(env, quoteId, { staffId: admin.id, reason: body.reason })
+                : staffQuoteMatch[2] === "invoice"
+                  ? await commercial.sendQuoteInvoice(env, quoteId, { staffId: admin.id, reason: body.reason, mode: body.mode || "one_time" })
+                  : await commercial.sendQuote(env, quoteId, { staffId: admin.id });
+            await logAudit(env, { adminId: admin.id, endpoint: path, method, resource: "quote", resourceId: quoteId, action: staffQuoteMatch[2], reason: String(body.reason).trim().slice(0,500), success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
+            return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status || 400);
+          }
+
+          // v2.5.2.2: dunning queue, reason-required dunning actions, four-eyes approvals.
+          if (method === "GET" && path === "/api/platform/saas/dunning") {
+            const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+            const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+            return json({ success: true, data: await commercial.listDunningQueue(env, { limit, offset }) });
+          }
+          const compMatch = path.match(/^\/api\/platform\/saas\/dunning\/([^/]+)\/comp$/);
+          if (method === "POST" && compMatch) {
+            const body = await staffBody();
+            if (!String(body.reason || "").trim()) return json({ success: false, error: "reason_required" }, 422);
+            const subscriptionId = decodeURIComponent(compMatch[1]);
+            const result = await commercial.requestCompApproval(env, subscriptionId, { invoiceId: body.invoiceId || null, reason: body.reason, staffId: admin.id });
+            await logAudit(env, { adminId: admin.id, organizationId: result.organizationId || null, endpoint: path, method, resource: "subscription", resourceId: subscriptionId, action: "dunning_comp_requested", reason: String(body.reason).trim().slice(0, 500), success: result.ok, statusCode: result.ok ? 200 : (result.status || 400), errorMessage: result.ok ? null : result.error, requestId, ipHash });
+            return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status || 400);
+          }
+          if (method === "GET" && path === "/api/platform/saas/webhooks/failed") {
+            const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+            const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+            return json({ success: true, data: await billing.listFailedWebhookEvents(env, { limit, offset }) });
+          }
+          const replayMatch = path.match(/^\/api\/platform\/saas\/webhooks\/(evt_[A-Za-z0-9_]+)\/replay$/);
+          if (method === "POST" && replayMatch) {
+            const body = await staffBody();
+            if (!String(body.reason || "").trim()) return json({ success: false, error: "reason_required" }, 422);
+            const result = await billing.replayWebhookEvent(env, replayMatch[1], { reason: body.reason, staffId: admin.id });
+            await logAudit(env, { adminId: admin.id, organizationId: null, endpoint: path, method, resource: "billing_webhook_event", resourceId: replayMatch[1], action: "webhook_replay", reason: String(body.reason).trim().slice(0, 500), success: result.ok, statusCode: result.ok ? 200 : (result.status || 400), errorMessage: result.ok ? null : result.error, requestId, ipHash });
+            return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status || 400);
+          }
+          const dunningMatch = path.match(/^\/api\/platform\/saas\/dunning\/([^/]+)\/(extend-grace|resend-notice)$/);
+          if (method === "POST" && dunningMatch) {
+            const body = await staffBody();
+            if (!String(body.reason || "").trim()) return json({ success: false, error: "reason_required" }, 422);
+            const subscriptionId = decodeURIComponent(dunningMatch[1]);
+            const result = dunningMatch[2] === "extend-grace"
+              ? await commercial.extendGrace(env, subscriptionId, { days: body.days, reason: body.reason, staffId: admin.id })
+              : await commercial.resendDunningNotice(env, subscriptionId, { reason: body.reason, staffId: admin.id });
+            await logAudit(env, { adminId: admin.id, organizationId: result.organizationId || null, endpoint: path, method, resource: "subscription", resourceId: subscriptionId, action: dunningMatch[2] === "extend-grace" ? "dunning_extend_grace" : "dunning_resend_notice", reason: String(body.reason).trim().slice(0, 500), success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
+            return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status || 400);
+          }
+          if (method === "GET" && path === "/api/platform/saas/approvals") {
+            const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+            const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+            return json({ success: true, data: await commercial.listApprovals(env, { status: url.searchParams.get("status"), limit, offset }) });
+          }
+          if (method === "POST" && path === "/api/platform/saas/approvals") {
+            const body = await staffBody();
+            const result = await commercial.requestApproval(env, { kind: body.kind, organizationId: String(body.organizationId || ""), amount: body.amount, paymentId: body.paymentId || null, currency: body.currency || null, reason: body.reason, staffId: admin.id });
+            await logAudit(env, { adminId: admin.id, organizationId: String(body.organizationId || "") || null, endpoint: path, method, resource: "approval_request", resourceId: result.requestId || null, action: "request_" + String(body.kind || "unknown"), reason: String(body.reason || "").trim().slice(0, 500), success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
+            return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status || 400);
+          }
+          const approvalMatch = path.match(/^\/api\/platform\/saas\/approvals\/([^/]+)\/(approve|reject)$/);
+          if (method === "POST" && approvalMatch) {
+            const body = await staffBody();
+            const approvalId = decodeURIComponent(approvalMatch[1]);
+            const result = await commercial.decideApproval(env, approvalId, { decision: approvalMatch[2], staffId: admin.id, reason: body.reason });
+            await logAudit(env, { adminId: admin.id, organizationId: result.organizationId || null, endpoint: path, method, resource: "approval_request", resourceId: approvalId, action: approvalMatch[2], reason: String(body.reason || "").trim().slice(0, 500), success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
+            return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status || 400);
+          }
+
           if (method === "POST") {
+            const immediateCancel = matchPath("/api/platform/saas/organizations/:id/immediate-cancel", path);
+            if (immediateCancel) {
+              const b=await staffBody(); const decision=await commercial.recordImmediateCancelDecision(env,{organizationId:immediateCancel.id,subscriptionId:String(b.subscriptionId||''),staffId:admin.id,refundDecision:b.refundDecision,refundAmountCents:b.refundAmountCents||0,currency:b.currency||'usd',reason:b.reason});
+              if(!decision.ok) return json({success:false,error:decision.error},decision.status||400);
+              const result=await commercial.immediateCancelStaff(env,immediateCancel.id,String(b.subscriptionId||''),{staffId:admin.id,reason:b.reason});
+              await logAudit(env,{adminId:admin.id,organizationId:immediateCancel.id,endpoint:path,method,resource:'subscription',resourceId:b.subscriptionId,action:'immediate_cancel',reason:String(b.reason).trim().slice(0,1000),success:result.ok,statusCode:result.ok? 200:result.status||400,errorMessage:result.ok?null:result.error,requestId,ipHash});
+              return result.ok?json({success:true,data:result}):json({success:false,error:result.error},result.status||400);
+            }
+            const tax=matchPath("/api/platform/saas/tax-checklist/:jurisdiction",path);
+            if(tax){const b=await staffBody();const result=await commercial.updateTaxChecklist(env,{jurisdiction:tax.id,status:b.status,evidenceUrl:b.evidenceUrl,notes:b.notes,staffId:admin.id});await logAudit(env,{adminId:admin.id,endpoint:path,method,resource:'tax_registration',resourceId:tax.id,action:'update',reason:String(b.notes||'').slice(0,500),success:result.ok,statusCode:result.ok? 200:result.status||400,requestId,ipHash});return result.ok?json({success:true}):json({success:false,error:result.error},result.status||400);}
+            const founder=matchPath("/api/platform/saas/quotes/:id/founder-license",path);
+            if(founder){const b=await staffBody();const result=await commercial.founderLicenseInvoice(env,founder.id,{staffId:admin.id,reason:b.reason});await logAudit(env,{adminId:admin.id,endpoint:path,method,resource:'quote',resourceId:founder.id,action:'founder_license_invoice',reason:String(b.reason||'').slice(0,500),success:result.ok,statusCode:result.ok? 200:result.status||400,requestId,ipHash});return result.ok?json({success:true,data:result}):json({success:false,error:result.error},result.status||400);}
+            const retryPushMatch = path.match(/^\/api\/platform\/saas\/sites\/([^/]+)\/access-push\/retry$/);
+            if (retryPushMatch) {
+              let b; try { b = await request.json(); } catch { return json({ success:false,error:"invalid_json",reasonCode:"invalid_json" },400); }
+              if (!String(b.reason || "").trim()) return json({ success:false,error:"reason_required",reasonCode:"reason_required" },422);
+              const result = await siteAccess.retrySiteAccessPush(env, decodeURIComponent(retryPushMatch[1]), { actorId: admin.id, reason: b.reason });
+              if (!result.ok) return json({ success:false,error:result.error,reasonCode:result.reasonCode },result.status||400);
+              await logAudit(env,{adminId:admin.id,endpoint:path,method,resource:"site",resourceId:result.siteId,action:"retry_site_access_push",reason:String(b.reason).trim().slice(0,500),success:true,statusCode:200,requestId,ipHash});
+              return json({success:true,data:result});
+            }
+            if (path === "/api/platform/saas/sites/reactivate-bulk") {
+              let b; try { b = await request.json(); } catch { return json({ success:false,error:"invalid_json",reasonCode:"invalid_json" },400); }
+              const result = await siteAccess.bulkReactivateSites(env, { siteIds: b.siteIds, actorId: admin.id, reason: b.reason });
+              const fullySuccessful = result.ok && result.failed === 0;
+              // Round 6.5B: name the sites in the audit row (sorted, de-duplicated, bounded) so an incident record can say exactly which sites were touched.
+              const auditSiteIds = Array.isArray(b.siteIds) ? [...new Set(b.siteIds.map((x) => String(x).slice(0, 100)))].sort().join(",").slice(0, 1000) : null;
+              await logAudit(env, { adminId: admin.id, endpoint: path, method, resource: "site", resourceId: auditSiteIds, action: "bulk_reactivate", reason: String(b.reason || "").trim().slice(0,1000), success: fullySuccessful, statusCode: fullySuccessful ? 200 : result.ok ? 207 : result.status || 400, errorMessage: fullySuccessful ? null : result.ok ? "partial_failure" : result.error, requestId, ipHash });
+              return result.ok ? json({ success: fullySuccessful, ...result }, fullySuccessful ? 200 : 207) : json({ success: false, error: result.error }, result.status || 400);
+            }
+            const staffPlanChange = matchPath("/api/platform/saas/organizations/:id/change-plan", path);
+            if (staffPlanChange) {
+              const b = await staffBody();
+              if (!String(b.reason || "").trim()) return json({ success: false, error: "reason_required" }, 422);
+              const owned = await env.LUMMET_DB.prepare(`SELECT id FROM subscriptions WHERE organization_id=? AND status NOT IN ('canceled','expired','incomplete_expired') ORDER BY created_at DESC LIMIT 1`).bind(staffPlanChange.id).first();
+              if (!owned || owned.id !== String(b.subscriptionId || "")) return json({ success: false, error: "subscription_not_current" }, 404);
+              const result = await billing.changePlan(env, staffPlanChange.id, b.planId, { actorUserId: `staff:${admin.id}`, staffOverrideReason: String(b.reason).trim() });
+              await logAudit(env, { adminId: admin.id, organizationId: staffPlanChange.id, endpoint: path, method, resource: "subscription", resourceId: b.subscriptionId, action: "staff_change_plan", reason: String(b.reason).trim().slice(0,1000), success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
+              return result.ok ? json({ success: true, pending: !!result.pending, scheduled: !!result.scheduled, effectiveAt: result.effectiveAt || null }) : json({ success: false, error: result.error, blockers: result.blockers || [] }, result.status || 400);
+            }
+            const driftResolve = matchPath("/api/platform/saas/reconciliation-findings/:id/resolve", path);
+            if (driftResolve) {
+              const b = await staffBody();
+              const finding = await env.LUMMET_DB.prepare("SELECT organization_id FROM reconciliation_findings WHERE id=?").bind(driftResolve.id).first();
+              if (!finding) return json({ success: false, error: "finding_not_found" }, 404);
+              let result;
+              try { result = await resolveDrift(env, { findingId: driftResolve.id, decision: b.decision, actorId: `staff:${admin.id}`, reason: String(b.reason || "") }); }
+              catch (e) { result = { ok: false, status: 422, error: e?.message || "drift_resolution_failed" }; }
+              await logAudit(env, { adminId: admin.id, organizationId: finding.organization_id, endpoint: path, method, resource: "reconciliation_finding", resourceId: driftResolve.id, action: `resolve:${b.decision}`, reason: String(b.reason || "").trim().slice(0,1000), success: !result?.error, statusCode: result?.error ? (result.status || 422) : 200, errorMessage: result?.error || null, requestId, ipHash });
+              return result?.error ? json({ success: false, error: result.error }, result.status || 422) : json({ success: true, ...result });
+            }
             const orgStatus = matchPath("/api/platform/saas/organizations/:id/status", path);
             if (orgStatus) {
               const b = await staffBody();
               if (b.status !== "active" && !String(b.reason || "").trim()) return json({ success: false, error: "reason_required" }, 422);
               return staffAudit("organization", orgStatus.id, `set_status:${b.status}`, await staffSaas.setOrganizationStatus(env, orgStatus.id, b.status, b.reason), orgStatus.id);
+            }
+            // Round 6.4C: recovery for an owner locked out by their own IP allowlist. Super-admin gate above; reason required; audited with the staff id.
+            const ipClear = matchPath("/api/platform/saas/organizations/:id/ip-allowlist/clear", path);
+            if (ipClear && method === "POST") {
+              const b = await staffBody();
+              const r = await orgSecurityPolicy.clearIpAllowlistAsStaff(env, { organizationId: ipClear.id, adminId: admin.id, reason: b.reason, requestId, ipHash, endpoint: path, method });
+              return r.ok ? json({ success: true, cleared: r.cleared }) : json({ success: false, error: r.error }, r.status);
             }
             const stopDel = matchPath("/api/platform/saas/organizations/:id/stop-deletion", path);
             if (stopDel) return staffAudit("organization", stopDel.id, "stop_scheduled_deletion", await staffSaas.stopScheduledDeletion(env, stopDel.id), stopDel.id);
@@ -4036,6 +4532,24 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               const r = await flushOutbox(env);
               return staffAudit("email_outbox", "all", "flush", r.skipped ? { ok: false, status: 409, error: r.skipped } : { ok: true });
             }
+            // Staff resend of a billing notification (Phase 2.3). Dedupe-aware: see billingNotifications.resend.
+            const notifResend = matchPath("/api/platform/saas/notifications/:id/resend", path);
+            if (notifResend) {
+              const r = await billingNotifications.resend(env, notifResend.id);
+              await logAudit(env, {
+                adminId: admin.id, organizationId: r.organizationId || null, endpoint: path, method, resource: "billing_notification", resourceId: notifResend.id,
+                action: r.ok ? `resend:${r.kind}:${r.action}` : `resend:${r.kind || "unknown"}`, success: r.ok, statusCode: r.ok ? 200 : r.status || 400, errorMessage: r.ok ? null : r.error, requestId, ipHash
+              });
+              if (!r.ok) return json({ success: false, error: r.error }, r.status || 400);
+              return json({ success: true, action: r.action, queued: r.queued ?? 0, requeued: r.requeued ?? 0 });
+            }
+            // Staff closes a plan-sync issue they have dealt with (for example an unknown price that is not ours). Audited.
+            const issueResolve = matchPath("/api/platform/saas/plan-sync-issues/:id/resolve", path);
+            if (issueResolve) {
+              const issueId = Number(issueResolve.id);
+              const done = Number.isInteger(issueId) && issueId > 0 && (await planChangeRepo.resolveIssue(env, issueId, `staff:${admin.id}`));
+              return staffAudit("plan_sync_issue", String(issueResolve.id), "resolve", done ? { ok: true } : { ok: false, status: 404, error: "issue_not_found_or_already_resolved" });
+            }
             // ---- Tenant release rollouts and staff API tokens (v1.2, docs/TENANT_RELEASES.md) ----
             const rolloutAudit = async (resourceId, action, result, extra = {}) => {
               await logAudit(env, {
@@ -4093,6 +4607,53 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const r = await tenantTemplate.putAsset(env, { path: assetPath, bytes });
             if (!r.ok) return json({ success: false, error: r.error }, r.status);
             return json({ success: true, hash: r.hash, size: r.size });
+          }
+          if (method === "GET" && path === "/api/platform/saas/notifications") {
+            const q = url.searchParams;
+            const pageNo = Math.min(Math.max(parseInt(q.get("page") || "1", 10) || 1, 1), 10000);
+            const kindQ = BILLING_KINDS.includes(q.get("kind")) ? q.get("kind") : "";
+            const stateQ = notificationRepoStates.includes(q.get("state")) ? q.get("state") : "";
+            const rows = await notificationRepoList(env, { organizationId: String(q.get("organization") || "").slice(0, 64), kind: kindQ, state: stateQ, limit: 51, offset: (pageNo - 1) * 50 });
+            return json({ success: true, data: rows.slice(0, 50), hasMore: rows.length > 50, page: pageNo });
+          }
+          if (method === "GET" && path === "/api/platform/saas/site-access/sites") {
+            return json({ success: true, data: await (await import("./repositories/site-access.js")).listSitesForStaffAccess(env, 1000) });
+          }
+          if (method === "GET" && path === "/api/platform/saas/site-access/push-failures") {
+            return json({ success: true, data: await (await import("./repositories/site-access.js")).listPushFailures(env, 200) });
+          }
+          if (method === "GET" && path === "/api/platform/saas/access-shadow") {
+            const q = url.searchParams; const pageNo = Math.min(Math.max(parseInt(q.get("page") || "1", 10) || 1, 1), 10000);
+            const rows = await billingLifecycleRepo.listShadow(env, { limit: Math.min(pageNo*50, 500) });
+            return json({success:true,data:rows.slice((pageNo-1)*50,pageNo*50),page:pageNo});
+          }
+          if (method === "GET" && path === "/api/platform/saas/reconciliation-findings") {
+            const q = url.searchParams;
+            const pageNo = Math.min(Math.max(parseInt(q.get("page") || "1", 10) || 1, 1), 10000);
+            const status = ["open","accepted_stripe","kept_lummet","resolved"].includes(q.get("status")) ? q.get("status") : "open";
+            const data = await listDrift(env, { status, limit: 50, offset: (pageNo - 1) * 50 });
+            return json({ success: true, data, page: pageNo });
+          }
+          // Sprint 3.2: what the plan sync found (unknown prices, shadow changes) and the customers' plan-change intents. Paged, read-only.
+          if (method === "GET" && path === "/api/platform/saas/plan-sync-issues") {
+            const q = url.searchParams;
+            const pageNo = Math.min(Math.max(parseInt(q.get("page") || "1", 10) || 1, 1), 10000);
+            const kind = ["unknown_price_id", "shadow_plan_change"].includes(q.get("kind")) ? q.get("kind") : "";
+            const page = await planChangeRepo.listIssues(env, { kind, open: q.get("all") !== "1", limit: 50, offset: (pageNo - 1) * 50 });
+            return json({ success: true, data: page.rows, hasMore: page.hasMore, page: pageNo });
+          }
+          if (method === "GET" && path === "/api/platform/saas/plan-change-intents") {
+            const q = url.searchParams;
+            const pageNo = Math.min(Math.max(parseInt(q.get("page") || "1", 10) || 1, 1), 10000);
+            const status = ["pending", "submitted", "confirmed", "failed", "superseded"].includes(q.get("status")) ? q.get("status") : "";
+            const page = await planChangeRepo.listIntents(env, { subscriptionId: String(q.get("subscription") || "").slice(0, 64), status, limit: 50, offset: (pageNo - 1) * 50 });
+            return json({ success: true, data: page.rows, hasMore: page.hasMore, page: pageNo });
+          }
+          if (method === "GET" && path === "/api/platform/saas/plan-prices") {
+            const q = url.searchParams;
+            const pageNo = Math.min(Math.max(parseInt(q.get("page") || "1", 10) || 1, 1), 10000);
+            const page = await planPriceList(env, { planId: String(q.get("plan") || "").slice(0, 64), limit: 50, offset: (pageNo - 1) * 50 });
+            return json({ success: true, data: page.rows, hasMore: page.hasMore, page: pageNo });
           }
           if (method === "GET" && path === "/api/platform/saas/rollouts") return json({ success: true, data: await rollouts.dashboard(env) });
           const rolloutGet = method === "GET" ? matchPath("/api/platform/saas/rollouts/:id", path) : null;
@@ -4454,20 +5015,41 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       // Staff console — SaaS operations (master prompt section 45)
       // ---------------------------------------------
 
+      if (method === "GET" && path === "/api/platform/saas/tax-checklist") { const guard=requireSuperAdmin(); if(guard)return guard; return json({success:true,data:await commercial.listTaxChecklist(env)}); }
+      if (method === "POST" && path === "/api/platform/saas/credit-packs/reconcile") { const guard=requireSuperAdmin(); if(guard)return guard; const result=await commercial.reconcileCreditPacks(env); await logAudit(env,{adminId:admin.id,endpoint:path,method,resource:'credit_pack_grants',action:'reconcile',success:result.ok,statusCode:result.ok? 200:502,requestId,ipHash}); return json({success:true,data:result}); }
       if (method === "GET" && path.startsWith("/platform/saas")) {
         const guard = requireSuperAdmin();
         if (guard) return guard;
+        if (path === "/platform/saas/site-access") {
+          return html(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Site access operations</title><main style="max-width:1100px;margin:2rem auto;font:16px system-ui;padding:0 1rem"><h1>Site access operations</h1><p>Bulk reactivation is audited. Choose sites or whole organizations, enter a reason, then confirm.</p><p><a href="/platform/saas/access-shadow">Subscription access shadow report</a> · <a href="/platform/saas/site-access#failures">Push failures</a> · <a href="/platform/saas/alerts">Operational alerts</a></p><section><h2>Suspended sites and organizations</h2><label>Filter <input id="filter" type="search" placeholder="Organization or site"></label><div id="sites" aria-live="polite">Loading…</div><label for="reason">Reason (required)</label><textarea id="reason" required minlength="5" rows="3" style="display:block;width:100%;max-width:50rem"></textarea><button id="reactivate" type="button">Review and reactivate selected</button><pre id="result" aria-live="polite"></pre></section><section id="failures"><h2>Repeated push failures</h2><div id="pushFailures">Loading…</div></section></main><script nonce="${nonceToken()}">
+const $=id=>document.getElementById(id);let allSites=[];
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function renderSites(){const q=$('filter').value.toLowerCase();const rows=allSites.filter(s=>(s.status==='suspended'||s.organization_status==='suspended'||s.organization_status==='closed')&&(String(s.name)+' '+String(s.organization_name)+' '+String(s.id)).toLowerCase().includes(q));const orgs=new Map();rows.forEach(function(s){if(!orgs.has(s.organization_id))orgs.set(s.organization_id,{name:s.organization_name,sites:[]});orgs.get(s.organization_id).sites.push(s)});$('sites').innerHTML=Array.from(orgs.entries()).map(function(pair){const id=pair[0],o=pair[1];return '<fieldset><legend><label><input type="checkbox" class="org" value="'+esc(id)+'"> Organization: '+esc(o.name)+' ('+o.sites.length+' sites)</label></legend>'+o.sites.map(function(s){return '<label style="display:block;margin:.3rem 1rem"><input type="checkbox" class="site" data-org="'+esc(id)+'" value="'+esc(s.id)+'" '+(s.status!=='suspended'?'disabled':'')+'> '+esc(s.name)+' — '+esc(s.status)+' '+(s.tenant_id?'':'(not provisioned)')+'</label>'}).join('')+'</fieldset>'}).join('')||'<p>No suspended or closed-organization sites found.</p>';document.querySelectorAll('.org').forEach(function(c){c.addEventListener('change',function(){document.querySelectorAll('.site[data-org="'+CSS.escape(c.value)+'"]:not(:disabled)').forEach(function(x){x.checked=c.checked})})})}
+async function loadFailures(){const r=await fetch('/api/platform/saas/site-access/push-failures');const j=await r.json();$('pushFailures').innerHTML=(j.data||[]).map(function(x){return '<article><strong>'+esc(x.organization_name)+' / '+esc(x.site_name)+'</strong> — '+esc(x.desired_state)+'; attempts '+esc(x.attempts)+'<p>'+esc(x.last_error)+'</p><label>Retry reason <input id="why-'+esc(x.site_id)+'" required></label> <button data-retry="'+esc(x.site_id)+'">Retry push</button></article>'}).join('')||'<p>No failed pushes.</p>';document.querySelectorAll('[data-retry]').forEach(function(b){b.onclick=async function(){const id=b.dataset.retry,reason=$('why-'+id).value.trim();if(reason.length<5||!confirm('Retry tenant access push for '+id+'?'))return;const r=await fetch('/api/platform/saas/sites/'+encodeURIComponent(id)+'/access-push/retry',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reason:reason})});$('result').textContent=JSON.stringify(await r.json(),null,2);await loadFailures()}})}
+fetch('/api/platform/saas/site-access/sites').then(function(r){return r.json()}).then(function(j){allSites=j.data||[];renderSites()}).catch(function(e){$('sites').textContent='Unable to load sites: '+e.message});$('filter').addEventListener('input',renderSites);
+$('reactivate').onclick=async function(){const reason=$('reason').value.trim();const ids=Array.from(document.querySelectorAll('.site:checked:not(:disabled)')).map(function(x){return x.value});document.querySelectorAll('.org:checked').forEach(function(c){document.querySelectorAll('.site[data-org="'+CSS.escape(c.value)+'"]:not(:disabled)').forEach(function(x){if(!ids.includes(x.value))ids.push(x.value)})});if(reason.length<5){$('result').textContent='A reason of at least five characters is required.';return}if(!ids.length){$('result').textContent='Select at least one suspended site or organization.';return}if(!confirm('Reactivate '+ids.length+' site(s)? This action will be audited.'))return;const r=await fetch('/api/platform/saas/sites/reactivate-bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteIds:ids,reason:reason})});$('result').textContent=JSON.stringify(await r.json(),null,2);await Promise.all([loadFailures(),fetch('/api/platform/saas/site-access/sites').then(function(r){return r.json()}).then(function(j){allSites=j.data||[];renderSites()})])};loadFailures().catch(function(e){$('pushFailures').textContent='Unable to load failures: '+e.message});
+</script></html>`);
+        }
+        if (path === "/platform/saas/access-shadow") {
+          const rows = await billingLifecycleRepo.listShadow(env, { limit: 100 });
+          const esc = (v) => String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;", "\"":"&quot;", "'":"&#39;"}[c]));
+          const body = (rows.results || []).map(r => `<tr><td>${esc(r.organization_name || r.organization_id)}</td><td>${esc(r.state)}</td><td>${esc(r.reason)}</td><td>${esc(r.evaluated_at)}</td></tr>`).join("");
+          return html(`<!doctype html><html><meta charset="utf-8"><title>Access shadow report</title><h1>Subscription access shadow report</h1><p>Would-be access refusals only; shadow mode does not enforce.</p><table><thead><tr><th>Organization</th><th>State</th><th>Reason / entry point</th><th>Evaluated</th></tr></thead><tbody>${body}</tbody></table></html>`);
+        }
         if (path === "/platform/saas") return html(await renderSaasOverview(env, admin));
+        if (path === "/platform/saas/revenue-analytics") return html(await renderRevenueAnalyticsPage(env, admin, { trialPage: url.searchParams.get("trialPage") || 1, activationPage: url.searchParams.get("activationPage") || 1 }));
         if (path === "/platform/saas/organizations") return html(await renderOrganizationsPage(env, admin, { q: url.searchParams.get("q") || "", status: url.searchParams.get("status") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/subscriptions") return html(await renderSubscriptionsPage(env, admin, { status: url.searchParams.get("status") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/plans") return html(await renderPlansPage(env, admin));
         if (path === "/platform/saas/jobs") return html(await renderJobsPage(env, admin, { status: url.searchParams.get("status") || "", type: url.searchParams.get("type") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/email") return html(await renderEmailPage(env, admin));
+        if (path === "/platform/saas/notifications") return html(await renderNotificationsPage(env, admin, { organization: url.searchParams.get("organization") || "", kind: url.searchParams.get("kind") || "", state: url.searchParams.get("state") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/releases") return html(await renderTenantTemplatePage(env, admin));
         const opStatus = url.searchParams.get("status") || "";
         if (path === "/platform/saas/key-rotation") return html(await renderKeyRotationPage(env, admin));
         if (path === "/platform/saas/cp-backups") return html(await renderCpBackupsPage(env, admin));
         if (path === "/platform/saas/alerts") return html(await renderOpsAlertsPage(env, admin));
+        if (path === "/platform/saas/reconciliation") return html(await renderReconciliationPage(env, admin));
         if (path === "/platform/saas/errors") return html(await renderServerErrorsPage(env, admin));
         if (path === "/platform/saas/errors") return html(await renderServerErrorsPage(env, admin));
         if (path === "/platform/saas/domains") return html(await renderDomainsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
@@ -4476,6 +5058,13 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (path === "/platform/saas/api-keys") return html(await renderApiKeysAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/backups") return html(await renderBackupsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/coupons") return html(await renderCouponsPage(env, admin));
+        if (path === "/platform/saas/quotes") return html(await renderPhase5StaffPage(env, admin, 'quotes'));
+        if (path === "/platform/saas/customer-360") return html(await renderPhase5StaffPage(env, admin, 'customer-360'));
+        if (path === "/platform/saas/dunning") return html(await renderPhase5StaffPage(env, admin, 'dunning'));
+        if (path === "/platform/saas/approvals") return html(await renderPhase5StaffPage(env, admin, 'approvals'));
+        if (path === "/platform/saas/catalog-drift") return html(await renderPhase5StaffPage(env, admin, 'catalog-drift'));
+        if (path === "/platform/saas/tax") return html(await renderPhase5StaffPage(env, admin, 'tax'));
+        if (path === "/platform/saas/webhook-replay") return html(await renderPhase5StaffPage(env, admin, 'webhook-replay'));
         const orgPage = matchPath("/platform/saas/organizations/:id", path);
         if (orgPage) { const page = await renderOrganizationDetailPage(env, admin, orgPage.id); return page ? html(page) : html("<h1>Not found</h1>", 404); }
         const jobPage = matchPath("/platform/saas/jobs/:id", path);
@@ -4558,11 +5147,69 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
   // sweep and the audit-log retention prune finish, since scheduled
   // handlers otherwise terminate as soon as the function returns.
 async function runScheduled(event, env, ctx) {
+  const cron = event && event.cron ? event.cron : scheduler.TICK_CRON;
+  // Phase 3.5: daily reconciliation surfaces drift without changing local subscription/access state.
+  // This branch records exactly one heartbeat with the reconciliation outcome below.
+  if (scheduler.cronKind(cron) === "daily") {
+    // Usage capture is an independent scheduled task: Stripe reconciliation failure must not suppress it.
+    // Round 6.1A: one bounded step of the deterministic revenue backfill per day (a no-op once every subscription has a revenue state, and under REVENUE_METRICS=off).
+    // Round 6.1B: then the daily revenue job writes revenue_snapshots from the ledger. Each step has its own failure handling, so a failed backfill never stops the job.
+    ctx.waitUntil((async () => {
+      try {
+        const result = await runRevenueBackfillTick(env);
+        console.log(JSON.stringify({ msg: "revenue_backfill_tick", ...result }));
+      } catch (error) {
+        console.error(JSON.stringify({ msg: "revenue_backfill_failed", error: error?.message || String(error) }));
+      }
+      try {
+        const result = await runDailyRevenueJob(env);
+        console.log(JSON.stringify({ msg: "revenue_daily_job", ...result }));
+      } catch (error) {
+        console.error(JSON.stringify({ msg: "revenue_daily_job_failed", error: error?.message || String(error) }));
+      }
+    })());
+    ctx.waitUntil(captureDailyUsageSnapshots(env).then((result) => {
+      console.log(JSON.stringify({ msg: "usage_snapshots_completed", organizations: result.organizations, metrics: result.metrics }));
+    }).catch((error) => {
+      console.error(JSON.stringify({ msg: "usage_snapshots_failed", error: error?.message || String(error) }));
+    }));
+    ctx.waitUntil((async () => {
+      try {
+        let afterId = "";
+        let checked = 0;
+        let findingCount = 0;
+        while (true) {
+          const page = await reconcileSubscriptions(env, {
+            afterId, limit: 100,
+            fetchSubscription: (id) => stripeRequest(env, "GET", `/subscriptions/${encodeURIComponent(id)}`)
+          });
+          checked += page.checked;
+          findingCount += page.findings.length;
+          if (!page.nextCursor) break;
+          afterId = page.nextCursor;
+        }
+        console.log(JSON.stringify({msg:"billing_reconciliation_completed",checked,findings:findingCount}));
+        await scheduler.recordTick(env, cron, {ok:true,detail:`reconciliation checked=${checked} findings=${findingCount}`});
+      } catch (error) {
+        console.error(JSON.stringify({msg:"billing_reconciliation_failed",error:error?.message || String(error)}));
+        await scheduler.recordTick(env, cron, {ok:false,detail:error?.message || String(error)});
+      }
+    })());
+    return;
+  }
+  // Weekly work is reserved for a later phase. Unknown crons fall through to the existing tick.
+  if (scheduler.cronKind(cron) === "weekly") { ctx.waitUntil(scheduler.recordTick(env, cron)); return; }
+  // Heartbeat first for the ordinary tick path: it proves the trigger fires even if work below fails.
+  ctx.waitUntil(scheduler.recordTick(env, cron));
+
   ctx.waitUntil(runHealthChecks(env));
+  ctx.waitUntil(siteAccess.processSiteAccessPushes(env).catch((error) => console.error(JSON.stringify({msg:"site_access_push_sweep_failed",error:error?.message||String(error)}))));
+  ctx.waitUntil(storageSync.runStorageSync(env).catch((error) => console.error(JSON.stringify({msg:"storage_sync_failed",error:error?.message||String(error)}))));
   ctx.waitUntil(pruneOldAuditLogs(env));
-  ctx.waitUntil(flushOutbox(env).catch(() => {}));
+  ctx.waitUntil(flushOutbox(env, { fetchImpl: typeof env.EMAIL_FETCH === "function" ? env.EMAIL_FETCH : fetch }).catch(() => {}));
   ctx.waitUntil(backups.purgeExpired(env).catch(() => {}));
-  ctx.waitUntil(alerts.runAlertCheck(env).catch(() => {}));
+  // Round 6.5A: synthetic monitors probe first, then the alert check reads what they recorded (SYNTHETIC_MONITORS=off is inert).
+  ctx.waitUntil(runMonitorsThenAlertCheck(env));
   ctx.waitUntil(cpBackup.runControlPlaneBackupIfDue(env).catch(() => {}));
   ctx.waitUntil(erasure.purgeDueOrganizations(env).catch(() => {}));
   ctx.waitUntil(erasure.sweepExpiredFinancialRecords(env).catch(() => {}));
@@ -4571,6 +5218,50 @@ async function runScheduled(event, env, ctx) {
   ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
   ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
   ctx.waitUntil(requestErrorsRepo.purgeOlderThanDays(env, 14).catch(() => {}));
+  // Billing lifecycle (Phase 1.2). Failures are logged, never swallowed: this path decides who keeps access.
+  ctx.waitUntil(billingLifecycle.sweep(env, Date.now(), { billingService: billing }).catch(logLifecycleFailure));
+  // Billing emails (Phase 2.1): finish unqueued notifications, then deliver, then record what was delivered.
+  ctx.waitUntil(billingReminders.sweepReminders(env).then(() => billingNotifications.drain(env)).then(() => flushOutbox(env)).then(() => billingNotifications.drain(env)).catch(logNotificationFailure));
+}
+
+// Round 6.5A. Probes first, so the alert check sees this tick's result. A failure of the probe run itself is logged and must not stop the
+// alert check (the other alerts still need to go out); nothing is recorded as ok in that case, so the monitors go stale and page.
+async function runMonitorsThenAlertCheck(env) {
+  try {
+    const run = await runSyntheticMonitors(env);
+    if (!run.skipped) console.log(JSON.stringify({ msg: "synthetic_monitors_tick", mode: run.mode, results: run.results.map((r) => `${r.monitor}:${r.status}`) }));
+  } catch (error) {
+    console.error(JSON.stringify({ msg: "synthetic_monitors_run_failed", errorName: error && error.name ? String(error.name).slice(0, 40) : "Error" }));
+  }
+  await alerts.runAlertCheck(env).catch(() => {});
+}
+
+async function captureDailyUsageSnapshots(env) {
+  // Paginate by stable organization ID; snapshot writes are idempotent per organization/day/metric.
+  let afterId = "";
+  let organizations = 0;
+  let metrics = 0;
+  while (true) {
+    const rows = await organizationsRepo.selectOrganizationIdsAfter(env, afterId, 100);
+    if (!rows.length) break;
+    for (const row of rows) {
+      const usage = await getUsageSnapshot(env, row.id);
+      const result = await commercial.captureUsageSnapshot(env, row.id, usage, { source: "daily_scheduler" });
+      organizations++;
+      metrics += result.written || 0;
+    }
+    afterId = rows[rows.length - 1].id;
+    if (rows.length < 100) break;
+  }
+  return { organizations, metrics };
+}
+
+function logNotificationFailure(error) {
+  console.error(JSON.stringify({ msg: "billing_notification_tick_failed", error: error?.message || String(error) }));
+}
+
+function logLifecycleFailure(error) {
+  console.error(JSON.stringify({ msg: "billing_lifecycle_sweep_failed", error: error?.message || String(error) }));
 }
 
 // -----------------------------------------------------

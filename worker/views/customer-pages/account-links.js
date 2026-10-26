@@ -70,3 +70,27 @@ export function renderInvitationPage() {
             else{f.innerHTML='<div class="flash flash-error">'+(d.error==='unauthorized'?'Please log in first.':d.error==='invitation_email_mismatch'?'This invitation was sent to a different email address.':'This invitation is invalid or expired.')+'</div>';}});});})();</script>`
   });
 }
+
+/**
+ * Shown instead of any portal page to a signed-in person whose organization requires 2FA and who has none (Round 6.4A).
+ * Static and script-free on purpose. Sign-out is a plain link to the existing login page, which signs the old session out when a new
+ * sign-in replaces it; enrolling uses the existing /api/customer/2fa routes (there is no portal page for 2FA setup yet, see OPEN_ITEMS).
+ */
+export function renderOrg2faRequiredPage({ enrollPath = null } = {}) {
+  return renderAuthShell({
+    title: "Two-factor authentication required",
+    bodyHtml: `<div class="flash flash-error">An organization you belong to requires two-factor authentication.</div>
+      <p>Your account has no active authenticator factor, so this session can only be used to set one up. Once two-factor authentication is active on your account, sign in again to continue.</p>${enrollPath ? `<p style="text-align:center;"><a class="btn" href="${enrollPath}">Set up two-factor authentication</a></p>` : ""}
+      <p style="font-size:13px;text-align:center;margin-top:16px;"><a href="/app/login">Back to login</a></p>`
+  });
+}
+
+/** Round 6.4C: shown at /app/* when the active organization's IP allowlist denies the address. It names no organization and shows no data. */
+export function renderOrgIpDeniedPage() {
+  return renderAuthShell({
+    title: "Access not allowed from this network",
+    bodyHtml: `<div class="flash flash-error">This organization only allows access from approved networks, and this network is not one of them.</div>
+      <p>Sign in from an approved network, or ask an owner of the organization to update the allowed networks. If every owner is locked out, contact support.</p>
+      <p style="font-size:13px;text-align:center;margin-top:16px;"><a href="/app/login">Back to login</a></p>`
+  });
+}

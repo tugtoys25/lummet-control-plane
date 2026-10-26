@@ -5,11 +5,13 @@ import { nonceToken, onClick } from "../../csp.js";
 // (both already built and tested in Phase 1) rather than a server-side
 // form POST — no new server-side parsing/adapter code needed, and the
 // exact same validated path every JSON API consumer already uses.
-export function renderCustomerLoginPage() {
+export function renderCustomerLoginPage({ turnstileSiteKey = "" } = {}) {
   return renderAuthShell({
     title: "Log in",
     bodyHtml: `
       <div id="flash"></div>
+      ${turnstileSiteKey ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="${escapeHtml(turnstileSiteKey)}" data-callback="lummetTurnstileSuccess"></div>` : ""}
+      <input type="hidden" id="turnstile-token" value="" />
 
       <div id="login-view">
         <form id="login-form">
@@ -40,6 +42,20 @@ export function renderCustomerLoginPage() {
       </div>
 
       <script nonce="${nonceToken()}">
+        // Preserve the pricing choice through account creation and later verification/login.
+        // The plan is only an intent hint; billing revalidates plan status and price server-side.
+        var signupIntent = (function () {
+          var q = new URLSearchParams(location.search);
+          var plan = q.get('plan'); var period = q.get('period');
+          if (plan && /^[A-Za-z0-9_-]{1,100}$/.test(plan) && ['monthly','annual'].indexOf(period) >= 0) {
+            var intent = { planId: plan, period: period }; localStorage.setItem('lummetSignupIntent', JSON.stringify(intent)); return intent;
+          }
+          try { return JSON.parse(localStorage.getItem('lummetSignupIntent') || 'null'); } catch (_) { return null; }
+        })();
+        function intentDestination() {
+          return signupIntent && signupIntent.planId ? '/app/billing?plan=' + encodeURIComponent(signupIntent.planId) + '&period=' + encodeURIComponent(signupIntent.period) : '/app/overview';
+        }
+        function lummetTurnstileSuccess(token) { var field = document.getElementById('turnstile-token'); if (field) field.value = token || ''; }
         function flash(message, kind) {
           document.getElementById('flash').innerHTML = message
             ? '<div class="flash flash-' + kind + '">' + message + '</div>' : '';
@@ -62,12 +78,13 @@ export function renderCustomerLoginPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               email: document.getElementById('login-email').value,
-              password: document.getElementById('login-password').value
+              password: document.getElementById('login-password').value,
+              turnstileToken: (document.getElementById('turnstile-token') || {}).value || ''
             })
           })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-              if (data.success) { location.href = '/app/overview'; }
+              if (data.success) { location.href = intentDestination(); }
               else { flash('Could not log in — check your email and password.', 'error'); }
             })
             .catch(function () { flash('Could not reach the server.', 'error'); });
@@ -81,12 +98,15 @@ export function renderCustomerLoginPage() {
             body: JSON.stringify({
               organizationName: document.getElementById('signup-org').value,
               email: document.getElementById('signup-email').value,
-              password: document.getElementById('signup-password').value
+              password: document.getElementById('signup-password').value,
+              planId: signupIntent && signupIntent.planId || null,
+              billingPeriod: signupIntent && signupIntent.period || null,
+              turnstileToken: (document.getElementById('turnstile-token') || {}).value || ''
             })
           })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-              if (data.success) { location.href = '/app/overview'; }
+              if (data.success) { location.href = intentDestination(); }
               else { flash('Could not create your account — ' + (data.error || 'please check your details') + '.', 'error'); }
             })
             .catch(function () { flash('Could not reach the server.', 'error'); });

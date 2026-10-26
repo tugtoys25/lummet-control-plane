@@ -28,6 +28,12 @@ export function createFakeBillingProvider() {
       return { providerCustomerId };
     },
 
+    async updateCustomer(env, providerCustomerId, profile, opts = {}) {
+      calls.push({ method: "updateCustomer", providerCustomerId, profile, ...opts });
+      if (provider._failUpdateCustomer) throw new Error("customer update unavailable");
+      return { ok: true };
+    },
+
     async createCheckoutSession(env, params) {
       const providerSessionId = `fake_cs_${nextId++}`;
       checkoutSessions.set(providerSessionId, params);
@@ -51,8 +57,42 @@ export function createFakeBillingProvider() {
       return { ok: true };
     },
 
-    async changePlan(env, providerSubscriptionId, newPriceId) {
-      calls.push({ method: "changePlan", providerSubscriptionId, newPriceId });
+    async pauseSubscription(env, providerSubscriptionId, opts = {}) {
+      calls.push({ method: "pauseSubscription", providerSubscriptionId, ...opts });
+      if (provider._failPause) throw new Error("pause unavailable");
+      return { ok: true, resumesAt: opts.resumesAt };
+    },
+
+    async resumePausedSubscription(env, providerSubscriptionId, opts = {}) {
+      calls.push({ method: "resumePausedSubscription", providerSubscriptionId, ...opts });
+      if (provider._failPause) throw new Error("resume pause unavailable");
+      return { ok: true };
+    },
+
+    async changePlan(env, providerSubscriptionId, newPriceId, opts = {}) {
+      calls.push({ method: "changePlan", providerSubscriptionId, newPriceId, ...opts });
+      return { ok: true };
+    },
+
+    async getSubscription(env, providerSubscriptionId) {
+      calls.push({ method: "getSubscription", providerSubscriptionId });
+      return { id: providerSubscriptionId, items: { data: [] } };
+    },
+
+    async changeSubscriptionAddon(env, providerSubscriptionId, { priceId, quantity, subscriptionItemId, idempotencyKey } = {}) {
+      calls.push({ method: "changeSubscriptionAddon", providerSubscriptionId, priceId, quantity, subscriptionItemId, idempotencyKey });
+      if (provider._failAddon) throw new Error("addon unavailable");
+      return { ok: true, subscriptionItemId: subscriptionItemId || `fake_si_${nextId++}`, quantity };
+    },
+
+    async getCardFingerprint(env, providerSubscriptionId) {
+      calls.push({ method: "getCardFingerprint", providerSubscriptionId });
+      if (provider._failFingerprint) throw new Error("stripe unreachable");
+      return provider._cardFingerprints.get(providerSubscriptionId) || null;
+    },
+
+    async endTrialNow(env, providerSubscriptionId) {
+      calls.push({ method: "endTrialNow", providerSubscriptionId });
       return { ok: true };
     },
 
@@ -78,6 +118,7 @@ export function createFakeBillingProvider() {
 
     // --- test-only helpers, not part of the provider contract ---
     _pendingEvent: null,
+    _cardFingerprints: new Map(), // providerSubscriptionId -> card fingerprint (test helper)
     _calls: calls,
     _customers: customers
   };

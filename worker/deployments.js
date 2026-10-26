@@ -29,6 +29,7 @@
 import * as cloudflareProvider from "./infra-cloudflare.js";
 import * as jobsModule from "./jobs.js";
 import * as tenantTemplate from "./tenant-template.js";
+import { evaluateWriteGate, refusalFor } from "./access.js";
 import { buildSiteBindings } from "./site-bindings.js";
 import * as siteResources from "./repositories/site-resources.js";
 import * as sites from "./sites.js";
@@ -41,6 +42,22 @@ const TENANT_CRONS = ["0 */6 * * *"];
 
 const INITIAL_DEPLOY_STEPS = ["validate_site_state", "run_migrations", "deploy_worker_script", "health_check"];
 const ROLLBACK_STEPS = ["validate_site_state", "deploy_worker_script", "health_check"];
+
+// A tenant migration that half-applied on an earlier deploy (some statements ran, then it failed) must be re-runnable:
+// "duplicate column" and "already exists" mean that statement is already in place, so it is skipped, anything else fails.
+const MIGRATION_OVERLAP = /duplicate column name|already exists/i;
+function splitMigrationStatements(sql) {
+  return String(sql).split("\n").map((l) => { const i = l.indexOf("--"); return i < 0 ? l : l.slice(0, i); }).join("\n")
+    .split(";").map((x) => x.trim()).filter(Boolean);
+}
+export async function applyMigrationSql(infra, env, databaseId, sql) {
+  try { await infra.runD1Query(env, { databaseId, sql }); return; }
+  catch (e) { if (!MIGRATION_OVERLAP.test(String((e && e.message) || e))) throw e; }
+  for (const stmt of splitMigrationStatements(sql)) {
+    try { await infra.runD1Query(env, { databaseId, sql: stmt + ";" }); }
+    catch (e) { if (!MIGRATION_OVERLAP.test(String((e && e.message) || e))) throw e; }
+  }
+}
 
 function reachableUrl(site, workerName, env) {
   if (site.primary_domain) return `https://${site.primary_domain}/`;
@@ -97,6 +114,9 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
   async function startDeployment(env, { siteId, version, migrations, scriptContent, actorUserId, actorType = "customer_user" }) {
     const site = await sites.getSite(env, siteId);
     if (!site) return { ok: false, status: 404, error: "site_not_found" };
+    const accessGate = await evaluateWriteGate(env, { organizationId: site.organization_id, method: "POST", subPath: `/sites/${siteId}/deployments` });
+    if (accessGate.blocked) return { ok: false, status: 402, ...refusalFor(accessGate.access) };
+    if (site.status === "suspended") return { ok: false, status: 409, error: "site_suspended", reasonCode: "site_suspended" };
     if (!["provisioned", "active"].includes(site.status)) {
       return { ok: false, status: 409, error: "site_not_deployable", currentStatus: site.status };
     }
@@ -236,7 +256,7 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
                 .first();
               if (already) continue;
 
-              await infra.runD1Query(env, { databaseId: d1Resource.resource_id, sql: migration.sql });
+              await applyMigrationSql(infra, env, d1Resource.resource_id, migration.sql);
               await env.LUMMET_DB.prepare(
                 `INSERT INTO site_migrations_applied (site_id, migration_name, deployment_id) VALUES (?, ?, ?)`
               )

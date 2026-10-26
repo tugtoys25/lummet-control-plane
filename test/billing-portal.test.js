@@ -83,6 +83,20 @@ test('route: admins get a portal URL with a server-built return URL; only their 
   assert.equal((await call(env, 'POST', `/api/organizations/${fresh.orgId}/billing/portal`, { cookie: fresh.cookie })).status, 409);
 });
 
+test('pause route is authenticated, tenant-scoped, audited, and disabled by default', async (t) => {
+  __setBillingProviderForTests(createFakeBillingProvider()); t.after(() => __setBillingProviderForTests(null));
+  const env = makeEnv();
+  const a = await signup(env, 'pause-owner@example.com');
+  const b = await signup(env, 'pause-other@example.com');
+  const body = { resumesAt: new Date(Date.now() + 86400000).toISOString() };
+  const own = await call(env, 'POST', `/api/organizations/${a.orgId}/billing/pause`, { cookie: a.cookie, body });
+  assert.equal(own.status, 404); assert.equal(own.json.error, 'save_flow_disabled');
+  const cross = await call(env, 'POST', `/api/organizations/${a.orgId}/billing/pause`, { cookie: b.cookie, body });
+  assert.ok([403, 404].includes(cross.status));
+  const rows = await env.LUMMET_DB.prepare(`SELECT success, status_code FROM lummet_audit_logs WHERE resource='subscription' AND action='pause' ORDER BY created_at DESC`).all();
+  assert.equal(rows.results.length, 1); assert.equal(rows.results[0].success, 0);
+});
+
 test('view: the portal button and a past-due warning appear for paid subscriptions, only to managers', () => {
   const sub = { status: 'past_due', provider: 'stripe', plan_id: 'p', cancel_at_period_end: 0 };
   const mgr = renderBillingPage({ subscription: sub, plan: { name: 'P' }, invoices: [], availablePlans: [], canManage: true });
@@ -92,4 +106,10 @@ test('view: the portal button and a past-due warning appear for paid subscriptio
   assert.doesNotMatch(active, /last payment failed/);
   const viewer = renderBillingPage({ subscription: sub, plan: { name: 'P' }, invoices: [], availablePlans: [], canManage: false });
   assert.doesNotMatch(viewer, /Update payment method &amp; invoices/);
+  const restricted = renderBillingPage({ subscription: { ...sub, status: 'active' }, access: { state: 'restricted' }, plan: { name: 'P' }, invoices: [], availablePlans: [], canManage: false });
+  assert.match(restricted, /read-only until payment is resolved/);
+  const suspended = renderBillingPage({ subscription: { ...sub, status: 'active' }, access: { state: 'suspended' }, plan: { name: 'P' }, invoices: [], availablePlans: [], canManage: false });
+  assert.match(suspended, /suspended for non-payment/);
+  const usage = renderBillingPage({ subscription: sub, access: { state: 'past_due' }, usage: { sites: { used: 1, limit: 2 }, users: { used: 3, limit: 5 }, customDomains: { used: 0, limit: 1 }, storageBytes: null }, aiCredits: 12, plan: { name: 'P' }, invoices: [], availablePlans: [], canManage: true });
+  assert.match(usage, /Storage/); assert.match(usage, /Unknown/); assert.match(usage, /AI credits/); assert.match(usage, /billing-invoices/);
 });

@@ -9,6 +9,7 @@ import { createBillingService } from '../worker/billing.js';
 import * as customerAuth from '../worker/customer-auth.js';
 import * as staff from '../worker/staff-saas.js';
 import { renderCouponsPage } from '../worker/views/pages/saas-admin.js';
+import { setPlanPrice } from './support/plan-prices.js';
 
 function makeEnv() { const db = createTestDb(); applyMigrations(db); return { LUMMET_DB: db }; }
 let n = 0;
@@ -18,7 +19,7 @@ async function signupOrg(env) {
 }
 async function setup() {
   const env = makeEnv();
-  await env.LUMMET_DB.prepare(`UPDATE plans SET stripe_price_id = 'price_x' WHERE id = 'plan_casino_news_starter'`).run();
+  await setPlanPrice(env, 'plan_casino_news_starter', 'price_x');
   const provider = createFakeBillingProvider();
   return { env, provider, billing: createBillingService(provider) };
 }

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "description": "Versioned Logpush plan for the Lummet control-plane Worker (Round 6.3C). A reviewed template, NOT an applied Cloudflare payload: every value marked with an open-marker is an owner decision. Check and render it with scripts/logpush-config.mjs (offline, never calls Cloudflare, never prints a destination). Live Cloudflare changes are owner-run; see docs/LOGPUSH.md.",
+  "status": "[OPEN] owner has not approved this Logpush plan or its destination",
+  "job": {
+    "name": "lummet-control-plane-worker-logs",
+    "dataset": "workers_trace_events",
+    "scriptName": "lummet-control-plane",
+    "enabled": false,
+    "fields": ["EventTimestampMs", "EventType", "Outcome", "ScriptName", "ScriptVersion", "Entrypoint", "CPUTimeMs", "WallTimeMs", "Truncated", "Exceptions", "Logs"],
+    "neverInclude": ["Event", "RequestHeaders", "ResponseHeaders", "Cookies", "ClientIP"],
+    "sampleRate": "[OPEN: owner-approved sample rate between 0 and 1, 1 = every event; log volume is billed]",
+    "destination": "[OPEN: owner-approved destination (R2, S3-compatible, or a SIEM). Its credentials are entered in the Cloudflare dashboard or API only, never in this file or the repository]",
+    "retention": "[OPEN: owner-approved retention at the destination, in days]"
+  },
+  "auditRows": {
+    "how": "Logpush cannot read D1. With AUDIT_LOG_STREAM=on the Worker writes each audit row once as one JSON log line (event \"audit\") with an allowlisted, scrubbed set of fields, and that line travels in the Logs field of the job above. Split audit lines from other logs at the destination (match the string \"event\":\"audit\").",
+    "requires": ["AUDIT_LOG_STREAM=on", "LOG_REDACTION=on"],
+    "excludedFields": ["ip_hash", "free-form request bodies", "tokens", "secrets"]
+  },
+  "notes": [
+    "The Event field of workers_trace_events carries the full request URL, which can hold one-time tokens in the query string. It is never requested.",
+    "Exceptions and Logs carry message text. Run LOG_REDACTION=on before this job is enabled; the scrubber is a safety net over free text, not proof that no personal data reaches a log.",
+    "The job ships disabled. Enabling it needs an owner-approved destination, retention and, where personal data can appear in logs, a lawful basis and sub-processor entry."
+  ]
+}

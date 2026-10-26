@@ -29,7 +29,7 @@ test('every inline script on the main staff and customer pages is valid JavaScri
   };
   await call('POST', '/api/auth/bootstrap', { body: { email: 'root@example.com', password: 'Correct-Horse-Battery-9' } });
   const staff = (await call('POST', '/api/auth/login', { body: { email: 'root@example.com', password: 'Correct-Horse-Battery-9' } })).cookie;
-  for (const p of ['/dashboard', '/account/2fa', '/account/password', '/platform/saas', '/platform/saas/organizations', '/platform/saas/subscriptions', '/platform/saas/plans', '/platform/saas/coupons', '/platform/saas/domains', '/platform/saas/deployments', '/platform/saas/webhooks', '/platform/saas/api-keys', '/platform/saas/backups', '/platform/saas/alerts', '/platform/saas/errors', '/platform/saas/cp-backups', '/platform/saas/key-rotation', '/platform/saas/jobs', '/platform/saas/email', '/platform/saas/releases', '/tenants']) {
+  for (const p of ['/dashboard', '/account/2fa', '/account/password', '/platform/saas', '/platform/saas/revenue-analytics', '/platform/saas/organizations', '/platform/saas/subscriptions', '/platform/saas/plans', '/platform/saas/coupons', '/platform/saas/domains', '/platform/saas/deployments', '/platform/saas/webhooks', '/platform/saas/api-keys', '/platform/saas/backups', '/platform/saas/alerts', '/platform/saas/errors', '/platform/saas/cp-backups', '/platform/saas/key-rotation', '/platform/saas/jobs', '/platform/saas/email', '/platform/saas/releases', '/tenants']) {
     const r = await call('GET', p, { cookie: staff });
     assert.equal(r.status, 200, `staff ${p}`);
     check(`staff ${p}`, r);

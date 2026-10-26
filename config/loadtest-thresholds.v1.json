@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "confirmed": false,
+  "status": "[OPEN] Every value below is an editable placeholder, taken from the starting set already written in docs/LOAD_TESTING.md section 6. None is owner-approved. Set confirmed to true only after the owner approves the numbers.",
+  "note": "STAGING ONLY. Thresholds are limits for one nightly run against the staging Worker and a staging D1 database. null means not evaluated (never a pass). Zero is not accepted for latency or rate limits.",
+  "scenarios": {
+    "portal-read": {
+      "users": 50, "concurrency": 20, "durationSec": 30,
+      "thresholds": { "minRequests": 200, "maxErrorRate": 0.01, "maxServerErrors": null, "p95Ms": 500, "p99Ms": null, "minRequestsPerSecond": null, "maxRateLimitedRate": 0.1 }
+    },
+    "write-own": {
+      "users": 50, "concurrency": 20, "durationSec": 30,
+      "thresholds": { "minRequests": 100, "maxErrorRate": 0.01, "maxServerErrors": 0, "p95Ms": null, "p99Ms": null, "minRequestsPerSecond": null, "maxRateLimitedRate": 0.1 }
+    },
+    "write-hot": {
+      "users": 50, "concurrency": 25, "durationSec": 30,
+      "thresholds": { "minRequests": 100, "maxErrorRate": 0.01, "maxServerErrors": 0, "p95Ms": null, "p99Ms": null, "minRequestsPerSecond": null, "maxRateLimitedRate": 0.1 }
+    },
+    "login": {
+      "users": 50, "concurrency": 10, "durationSec": 30,
+      "thresholds": { "minRequests": 50, "maxErrorRate": null, "maxServerErrors": 0, "p95Ms": null, "p99Ms": null, "minRequestsPerSecond": null, "maxRateLimitedRate": 0.1 }
+    }
+  }
+}

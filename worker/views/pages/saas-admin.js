@@ -3,16 +3,36 @@
 import * as errorsRepo from "../../repositories/request-errors.js";
 import { configIssues } from "../../config-check.js";
 import * as alertsModule from "../../alerts.js";
+import { monitorStatuses } from "../../synthetic-monitors.js";
 import * as cpBackupModule from "../../cp-backup.js";
 import * as keyRotationModule from "../../key-rotation.js";
 import { renderShell, escapeHtml as h } from "../layout.js";
 import * as staff from "../../staff-saas.js";
+import * as notificationRepo from "../../repositories/billing-notifications.js";
+import { BILLING_KINDS } from "../../billing-email-templates.js";
 import * as tenantTemplate from "../../tenant-template.js";
 import * as rolloutsModule from "../../rollouts.js";
+import { listDrift } from "../../phase3-source-of-truth.js";
 import * as staffTokensModule from "../../staff-tokens.js";
 import { nonceToken, onClick, onSubmit, onChange } from "../../csp.js";
+import * as revenueAnalytics from "../../revenue-analytics.js";
 
 const money = (c) => (c == null ? "custom" : `$${(c / 100).toFixed(2)}`);
+// Round 6.1B: revenue is shown with its own currency code and is never summed across currencies. Unknown is "n/a", never zero.
+const currencyMoney = (cents, currency) => (cents == null ? "n/a" : `${(cents / 100).toFixed(2)} ${currency || ""}`.trim());
+function mrrCardValue(s) {
+  const r = s.revenue || {};
+  if (!r.available) return "n/a";
+  if (r.mixedCurrency) return "mixed currencies";
+  return currencyMoney(s.monthlyRecurringCents, s.monthlyRecurringCurrency);
+}
+function revenueNote(s) {
+  const r = s.revenue || {};
+  if (!r.available) return r.reason === "off" ? "MRR is off (REVENUE_METRICS=off)." : "MRR has no snapshot yet: the daily job has not run.";
+  const per = (r.perCurrency || []).filter((c) => c.mrrCents > 0 || c.active > 0 || c.pastDue > 0).map((c) => `${currencyMoney(c.mrrCents, c.currency)} MRR / ${currencyMoney(c.arrCents, c.currency)} ARR`).join(" · ");
+  const flags = [r.mixedCurrency ? "Mixed currencies are reported separately and never added together." : "", (r.flags || []).includes("reporting_currency_mismatch") ? `This is not the reporting currency (${r.reportingCurrency}); nothing is converted.` : "", r.stale ? "The newest snapshot is more than a day old: the daily job may have stopped." : ""].filter(Boolean).join(" ");
+  return `MRR from the daily snapshot of ${r.day}: active and past-due subscriptions, annual divided by 12, minus recurring coupons, trials excluded. ${per} ${flags}`.trim();
+}
 const badge = (s) => `<span class="role-badge">${h(s)}</span>`;
 const table = (heads, rows, empty = "Nothing here yet.") =>
   rows.length
@@ -29,16 +49,31 @@ function act(url, body, confirmMsg) {
 }
 // Handlers that used to be inline code. Each is a named function the delegated runtime calls.
 function actReason(url, status, label) { var r = prompt(label); if (r) act(url, { status: status, reason: r }); }
+function actDrift(url, decision) { var r = prompt("Required audit reason for this reconciliation decision:"); if (r && r.trim()) act(url, { decision: decision, reason: r.trim() }); }
 function actOverrideForm(f, api, subscriptionId) {
   act(api + '/override', { subscriptionId: subscriptionId, key: f.key.value, valueType: f.vt.value, value: f.value.value, reason: f.reason.value });
 }
 function actCreditsForm(f, api) { act(api + '/ai-credits', { amount: parseInt(f.amount.value, 10), reason: f.reason.value }); }
-function actPromptStripeId(url, current) { var v = prompt('Stripe price id (price_...)', current); if (v !== null) act(url, { stripePriceId: v || null }); }
-function actPromptPrice(url, current) { var v = prompt('Price in cents (blank = custom)', current); if (v !== null) act(url, { priceCents: v === '' ? null : parseInt(v, 10) }); }
 function actPublishTemplate(f) {
   try { var d = JSON.parse(f.payload.value); act('/api/platform/saas/tenant-template/publish', d); }
   catch (e) { alert('Invalid JSON: ' + e.message); }
 }
+function bindRevenueFinanceForm() {
+  var form = document.getElementById('revenue-finance-form');
+  if (!form) return;
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var result = document.getElementById('finance-result');
+    var costs;
+    try { costs = JSON.parse(form.elements.costs.value); }
+    catch (_) { result.textContent = 'Enter a valid JSON object of tier keys to monthly unit-cost cents.'; return; }
+    fetch('/api/platform/saas/revenue-analytics/finance-unit-costs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ costs: costs, reason: form.elements.reason.value }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { result.textContent = d.success ? 'Saved finance costs.' : ('Not saved: ' + (d.error || 'unknown')); })
+      .catch(function () { result.textContent = 'Unable to save finance costs.'; });
+  });
+}
+bindRevenueFinanceForm();
 // Staff API token: shown ONCE, built with textContent so nothing from the response is ever parsed as HTML.
 function actCreateStaffToken(f) {
   var scopes = [];
@@ -113,12 +148,12 @@ export async function renderSaasOverview(env, admin) {
     ${configBanner}
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       ${card("Organizations", s.organizations)}${card("Live subscriptions", s.liveSubscriptions)}
-      ${card("MRR (active, monthly)", money(s.monthlyRecurringCents))}
+      ${card("MRR (daily snapshot)", mrrCardValue(s))}
       ${card("Failed jobs", s.failedJobs, true)}${card("Stuck jobs (>30m)", s.stuckJobs, true)}${card("Failed sites", s.failedSites, true)}
       ${card("Emails queued", s.queuedEmails)}${card("Emails failed", s.failedEmails, true)}
     </div>
-    <p style="margin-top:16px"><a href="/platform/saas/organizations">Organizations</a> · <a href="/platform/saas/subscriptions">Subscriptions</a> · <a href="/platform/saas/plans">Plans</a> · <a href="/platform/saas/jobs">Jobs</a> · <a href="/platform/saas/email">Email outbox</a></p>
-    <p style="color:var(--text-dim);font-size:12px">MRR counts active monthly subscriptions at list price; it ignores coupons, annual plans and unsynced Stripe state, so treat it as an estimate.</p>`);
+    <p style="margin-top:16px"><a href="/platform/saas/organizations">Organizations</a> · <a href="/platform/saas/subscriptions">Subscriptions</a> · <a href="/platform/saas/plans">Plans</a> · <a href="/platform/saas/revenue-analytics">Revenue analytics</a> · <a href="/platform/saas/jobs">Jobs</a> · <a href="/platform/saas/email">Email outbox</a></p>
+    <p style="color:var(--text-dim);font-size:12px">${h(revenueNote(s))}</p>`);
 }
 
 export async function renderOrganizationsPage(env, admin, { q = "", status = "", page: rawPage } = {}) {
@@ -178,13 +213,16 @@ export async function renderSubscriptionsPage(env, admin, { status = "", page: r
 
 export async function renderPlansPage(env, admin) {
   const plans = await staff.listPlansCatalog(env);
+  const priceCell = (p) => {
+    if (!p.active_price_id) return `<span style="color:var(--text-dim)">${h(p.billing_period === "custom" ? "contract" : "— not synced —")}</span>`;
+    const mismatch = p.price_cents != null && p.price_amount_cents != null && p.price_cents !== p.price_amount_cents;
+    return `<code>${h(p.active_price_id)}</code><br><small>${h(p.price_lookup_key || "")} · v${h(p.price_version)} · ${badge(p.price_mode)}${mismatch ? ` ${badge("amount differs: Stripe " + money(p.price_amount_cents))}` : ""}</small>`;
+  };
   return shell(env, admin, "Plans & pricing", "saas-plans", `
-    <p style="color:var(--text-dim)">Editing a price changes what NEW checkouts charge only if the Stripe price id is updated to match; existing subscribers keep their Stripe price.</p>
-    ${table(["Product", "Plan", "Price", "Period", "Trial", "Status", "Stripe price id", "Live subs", ""], plans.map((p) => [h(p.product), h(p.name), money(p.price_cents), h(p.billing_period), h(p.trial_days), badge(p.status), h(p.stripe_price_id || "— not set —"),
+    <p style="color:var(--text-dim)">Prices are read-only here. They come from <code>catalog/plans.v1.json</code> through <code>scripts/stripe-sync.mjs</code>: change the catalog (a new price version, never an edit), run the sync, and this page shows the result. Existing subscribers keep the Stripe price they bought; only new checkouts use the active version. You can still retire or reactivate a plan.</p>
+    ${table(["Product", "Plan", "Price", "Period", "Trial", "Status", "Stripe price (active)", "Live subs", ""], plans.map((p) => [h(p.product), h(p.name), money(p.price_cents), h(p.billing_period), h(p.trial_days), badge(p.status), priceCell(p),
       h(p.live_subscriptions),
-      `<button class="btn" ${onClick("actPromptStripeId", [`/api/platform/saas/plans/${p.id}`, p.stripe_price_id || ""])}>Stripe id</button>
-       <button class="btn" ${onClick("actPromptPrice", [`/api/platform/saas/plans/${p.id}`, String(p.price_cents ?? "")])}>Price</button>
-       <button class="btn"${onClick("act", [`/api/platform/saas/plans/${p.id}`, {status: (p.status === "active" ? "retired" : "active")}, `${p.status === "active" ? "Retire" : "Reactivate"} this plan?`])}>${p.status === "active" ? "Retire" : "Activate"}</button>`]))}`);
+      `<button class="btn"${onClick("act", [`/api/platform/saas/plans/${p.id}`, {status: (p.status === "active" ? "retired" : "active")}, `${p.status === "active" ? "Retire" : "Reactivate"} this plan?`])}>${p.status === "active" ? "Retire" : "Activate"}</button>`]))}`);
 }
 
 export async function renderJobsPage(env, admin, { status = "", type = "", page: rawPage } = {}) {
@@ -215,8 +253,39 @@ export async function renderEmailPage(env, admin) {
   const [s, failed] = await Promise.all([staff.opsSummary(env), staff.listFailedEmails(env)]);
   return shell(env, admin, "Email outbox", "saas-email", `
     <p>${Object.entries(s.email).map(([k, v]) => `${badge(k)} ${h(v)}`).join(" &nbsp; ") || "Outbox empty."}</p>
-    <p><button class="btn"${onClick("act", ["/api/platform/saas/email/flush", {}])}>Deliver queued now</button></p>
+    <p><button class="btn"${onClick("act", ["/api/platform/saas/email/flush", {}])}>Deliver queued now</button> &nbsp; <a href="/platform/saas/notifications">Billing notifications</a></p>
     <h2>Failed</h2>${table(["To", "Template", "Attempts", "Error", "When"], failed.map((f) => [h(f.to_email), h(f.template), h(f.attempts), h(f.last_error || ""), h(f.created_at)]), "No failed emails.")}`);
+}
+
+const NOTIFICATION_STATE_HELP = {
+  pending: "recorded, still being queued by the five-minute tick",
+  stuck: "recorded but out of attempts; Resend gives it a fresh set",
+  queued: "handed to the outbox, nothing delivered yet",
+  failed: "a message could not be delivered; Resend puts that same message back in the queue",
+  sent: "delivered; it cannot be resent"
+};
+
+export async function renderNotificationsPage(env, admin, { organization = "", kind = "", state = "", page: rawPage } = {}) {
+  const page = pageNumber(rawPage);
+  const org = String(organization || "").slice(0, 64);
+  const k = BILLING_KINDS.includes(kind) ? kind : "";
+  const st = notificationRepo.NOTIFICATION_STATES.includes(state) ? state : "";
+  const { rows, hasMore } = paged(await notificationRepo.listForStaff(env, { organizationId: org, kind: k, state: st, ...pageArgs(page) }));
+  const canResend = (n) => n.state === "stuck" || n.state === "pending" || n.state === "failed";
+  return shell(env, admin, "Billing notifications", "saas-notifications", `
+    <p style="color:var(--text-dim)">Every billing email Lummet decided to send, one row per notice. Resend is dedupe-aware: it never writes a new message, so it cannot send a duplicate. It only retries a notice that never reached the outbox, or puts a message that failed delivery back in the queue. A delivered or in-flight notice cannot be resent. Resend does nothing unless <code>BILLING_EMAILS</code> is <code>on</code>, and every resend is audited.</p>
+    <form method="get" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <input name="organization" value="${h(org)}" placeholder="organization id" />
+      <select name="kind"><option value="">all kinds</option>${BILLING_KINDS.map((x) => `<option ${x === k ? "selected" : ""}>${h(x)}</option>`).join("")}</select>
+      <select name="state"><option value="">all states</option>${notificationRepo.NOTIFICATION_STATES.map((x) => `<option ${x === st ? "selected" : ""}>${h(x)}</option>`).join("")}</select>
+      <button class="btn" type="submit">Filter</button></form>
+    ${table(["When", "Organization", "Notice", "Stage", "State", "Recipients", "Detail", ""], rows.map((n) => [
+      h(n.created_at), orgLink(n.organization_id, n.organization_name || n.organization_id), h(n.kind), h(n.stage || ""),
+      `${badge(n.state)}`, h(n.recipient_count) + (n.suppressed_count ? ` (+${h(n.suppressed_count)} suppressed)` : ""),
+      h(n.last_error || (n.failed_messages ? `${n.failed_messages} message(s) failed` : "")),
+      canResend(n) ? `<button class="btn"${onClick("act", [`/api/platform/saas/notifications/${n.id}/resend`, {}, `Resend this ${n.kind} notice? Only a message that failed, or a notice that never reached the outbox, is sent again.`])}>Resend</button>` : ""
+    ]), "No billing notifications match.")}${pager("/platform/saas/notifications", { organization: org, kind: k, state: st }, page, hasMore)}
+    <h3>States</h3><ul>${Object.entries(NOTIFICATION_STATE_HELP).map(([a, b]) => `<li>${badge(a)} ${h(b)}</li>`).join("")}</ul>`);
 }
 
 
@@ -375,16 +444,52 @@ export async function renderBackupsAdminPage(env, admin, { status = "", page: ra
     ${table(["Site", "Organization", "Kind", "Status", "Size", "Integrity", "Created", "Error"], rows.map((b) => [h(b.site || "deleted site"), b.organization_id ? orgLink(b.organization_id, b.organization) : "—", h(b.kind), badge(b.status), size(b.size_bytes), h(b.verified_at ? b.verification_status : "not verified"), h(b.created_at), h(b.error_message || "")]), "No backups.")}${pager("/platform/saas/backups", { status }, page, hasMore)}`);
 }
 
+
+// Round 6.5A: synthetic monitor tile. Only a monitor whose latest probe passed reads "Passing". Never probed is "Unknown",
+// not configured / skipped / blocked / stale / off are each named, and none of them is presented as healthy.
+const MONITOR_STATUS_LABEL = { off: "Off", not_configured: "Not configured", skipped: "Skipped", unknown: "Unknown", ok: "Passing", failing: "Failing", blocked: "Blocked", stale: "Stale" };
+const monitorModeNote = (mode) => mode === "on" ? "Monitors are on: a failing monitor pages through the alert channel."
+  : mode === "shadow" ? "Monitors are in shadow mode: probes run and are recorded here, but nothing is paged."
+  : "Monitors are off (SYNTHETIC_MONITORS=off): nothing is probed, so nothing below is verified.";
+async function monitorTile(env) {
+  let statuses;
+  try { statuses = await monitorStatuses(env); } catch (error) {
+    return `<section class="card" aria-labelledby="tile-monitors"><h2 id="tile-monitors">Synthetic monitors</h2><p>The monitor status could not be read. Treat every monitor as unverified.</p></section>`;
+  }
+  const mode = statuses.length ? statuses[0].mode : "off";
+  const rows = statuses.map((m) => [h(m.label), badge(MONITOR_STATUS_LABEL[m.status] || "Unknown"), h(m.reason || "—"), h(m.consecutiveFailures || 0), h(m.lastProbeAt || "never"), h(m.lastOkAt || "never")]);
+  return `<section class="card" aria-labelledby="tile-monitors"><h2 id="tile-monitors">Synthetic monitors</h2><p style="color:var(--text-dim)">${h(monitorModeNote(mode))}</p>${table(["Monitor", "Status", "Reason", "Failed in a row", "Last probe", "Last pass"], rows)}</section>`;
+}
+
 export async function renderOpsAlertsPage(env, admin) {
-  const rows = await alertsModule.listAlertState(env);
+  const [rows, driftCount, lagCount, liveTrialCount] = await Promise.all([
+    alertsModule.listAlertState(env),
+    alertsModule.countAlert(env, "reconcile_drift"),
+    alertsModule.countAlert(env, "webhook_lag"),
+    alertsModule.countAlert(env, "trial_expired_still_live")
+  ]);
   const channels = [env.ALERT_WEBHOOK_URL ? "chat webhook" : null, env.ALERT_EMAIL ? "email" : null].filter(Boolean);
   return shell(env, admin, "Alerts", "saas-alerts", `
     <p style="color:var(--text-dim)">${channels.length
       ? `Alerts go to: ${h(channels.join(" and "))}. A problem notifies once when it starts, reminds every ${h(alertsModule.REMINDER_HOURS)} hours while it lasts, and notifies when it clears.`
       : "No alert channel is configured, so no alerts are being sent. Set ALERT_WEBHOOK_URL and/or ALERT_EMAIL."}
       ${env.ALERT_CHECK_TOKEN ? "" : " The external trigger endpoint is off because ALERT_CHECK_TOKEN is not set."}</p>
+    <div class="grid" aria-label="Alert tiles">
+      <section class="card" aria-labelledby="tile-drift"><h2 id="tile-drift">Reconciliation drift</h2><p>Open findings: <strong>${h(driftCount)}</strong></p><a href="/platform/saas/reconciliation">Review billing reconciliation drift</a></section>
+      <section class="card" aria-labelledby="tile-lag"><h2 id="tile-lag">Webhook lag</h2><p>Overdue deliveries: <strong>${h(lagCount)}</strong></p><a href="/platform/saas/webhooks">Review outgoing webhooks</a></section>
+      <section class="card" aria-labelledby="tile-trial"><h2 id="tile-trial">Expired trials still live</h2><p>Organizations: <strong>${h(liveTrialCount)}</strong></p><a href="/platform/saas/subscriptions">Review subscriptions</a></section>
+    </div>
+    ${await monitorTile(env)}
     <button class="btn"${onClick("act", ["/api/platform/saas/alerts/check", {}, "Run the alert check now?"])}>Run check now</button>
     ${table(["Check", "Firing", "Last count", "First seen", "Last notified"], rows.map((r) => [h(r.key), r.firing ? badge("failed") : badge("active"), h(r.last_count), h(r.first_seen_at || "—"), h(r.last_notified_at || "—")]), "Nothing has fired yet.")}`);
+}
+
+export async function renderReconciliationPage(env, admin) {
+  const rows = await listDrift(env, { status: "open", limit: 100 });
+  return shell(env, admin, "Billing reconciliation", "saas-reconciliation", `
+    <p style="color:var(--text-dim)">Stripe is authoritative for money; Lummet remains authoritative for access until a staff member makes an audited decision. Findings are never silently overwritten. Each decision requires a reason.</p>
+    ${table(["Found", "Organization", "Subscription", "Field", "Lummet value", "Stripe value", "Actions"], rows.map((r) => [h(r.found_at), orgLink(r.organization_id, r.organization_name || r.organization_id), h(r.provider_subscription_id || r.subscription_id || "—"), h(r.field), `<code>${h(r.lummet_value ?? "null")}</code>`, `<code>${h(r.stripe_value ?? "null")}</code>`, `<button class="btn"${onClick("actDrift", [`/api/platform/saas/reconciliation-findings/${r.id}/resolve`, "accept_stripe"])}>Accept Stripe value</button> <button class="btn btn-danger"${onClick("actDrift", [`/api/platform/saas/reconciliation-findings/${r.id}/resolve`, "keep_lummet"])}>Keep Lummet value</button>`]), "No open reconciliation findings.")}
+    <p><a href="/platform/saas/alerts">Operational alerts</a> · <a href="/platform/audit-logs">Audit log</a></p>`);
 }
 
 export async function renderServerErrorsPage(env, admin) {
@@ -428,4 +533,41 @@ export async function renderKeyRotationPage(env, admin) {
     ${st.previousKeyId ? `<button class="btn"${onClick("act", ["/api/platform/saas/key-rotation/run", {}, `Re-encrypt up to ${keyRotationModule.DEFAULT_BATCH} values under the current key?`])}>Re-encrypt now</button> <small>Repeat until nothing remains.</small>` : ""}
     ${table(["Stored in", "Values", "Under current key", "Under another key"], st.tables.map((t) => [h(t.table), h(t.total), h(t.underActiveKey), h(t.underOtherKey)]), "")}
     <p style="color:var(--text-dim)">Database backups checked: ${h(st.backupsChecked)}; still using another key: ${h(st.backupsUnderOtherKeys)}. Those age out as new backups replace them (the newest ${h(cpBackupModule.KEEP_COMPLETE_BACKUPS)} are kept).</p>`);
+}
+
+// Round 6.1C: revenue analytics remains behind REVENUE_ANALYTICS=shadow|on until owner validates definitions and finance costs.
+export async function renderRevenueAnalyticsPage(env, admin, { trialPage: rawTrialPage = 1, activationPage: rawActivationPage = 1 } = {}) {
+  const trialPage = pageNumber(rawTrialPage); const activationPage = pageNumber(rawActivationPage);
+  const d = await revenueAnalytics.dashboardData(env);
+  const moneyCents = (v, currency = "") => v == null ? "unknown" : `${(Number(v) / 100).toFixed(2)} ${currency}`.trim();
+  const pct = (v) => v == null ? "unknown" : `${Number(v).toFixed(2)}%`;
+  const cohorts = table(["Cohort month", "Currency", "Logos", "Starting MRR", "Current MRR", "NRR", "GRR", "Logo churn"], d.cohorts.map((r) => [h(r.cohortMonth), h(r.currency), h(r.logos), h(moneyCents(r.startingMrrCents, r.currency)), h(moneyCents(r.currentMrrCents, r.currency)), h(pct(r.nrrPercent)), h(pct(r.grrPercent)), h(pct(r.logoChurnPercent))]), "No provider-confirmed revenue cohorts yet.");
+  const f = d.funnel;
+  const funnel = f ? table(["Stage", "Count", "Rate"], [
+    ["Organizations", h(f.organizations), ""],
+    ["Trials ended", h(f.trialsEnded), `${h(f.trialsEndedStillInWindow)} still inside their 14-day window`],
+    ["Paid within 14 days of trial end", h(f.trialToPaid14Days), h(pct(f.trialToPaidPercent))],
+    ["Signups past their 14-day window", h(f.signupsMatured), ""],
+    ["Activated within 14 days (live site + active domain/SSL)", h(f.activated14Days), h(pct(f.activationPercent))]
+  ]) : `<p>Analytics are disabled. Set <code>REVENUE_ANALYTICS=shadow</code> to expose the staff-only read view.</p>`;
+  const arpa = table(["Currency", "Paying organizations", "MRR", "ARPA"], (d.arpa || []).map((r) => [h(r.currency), h(r.payingOrganizations), h(moneyCents(r.mrrCents, r.currency)), h(moneyCents(r.arpaCents, r.currency))]), "No current revenue ledger states yet.");
+  const deferred = table(["Currency", "Prepaid terms running", "Annual prepayments (net of tax)", "Recognized to date", "Deferred balance"], d.deferredRevenue.map((r) => [h(r.currency), h(r.invoices), h(moneyCents(r.prepaidCents, r.currency)), h(moneyCents(r.recognizedCents, r.currency)), h(moneyCents(r.deferredCents, r.currency))]), "No paid annual invoices with a running service period.");
+  const margins = table(["Tier key", "Plan", "Subscriptions", "MRR revenue", "Unit cost / month", "Total cost", "Gross margin", "Margin %"], d.margins.map((r) => [h(r.tier), h(r.plan), h(r.subscriptions), h(moneyCents(r.revenueCents, r.currency)), h(moneyCents(r.unitCostCents, r.currency)), h(moneyCents(r.totalCostCents, r.currency)), h(moneyCents(r.grossMarginCents, r.currency)), h(pct(r.grossMarginPercent))]), "No active or past-due subscriptions.");
+  const list = (rows, type) => table(type === "trials" ? ["Organization", "Plan", "Status", "Trial ends", "Updated"] : ["Organization", "Created", "First live site", "First active domain"], rows.slice(0, 20).map((r) => type === "trials" ? [h(r.organization), h(r.plan), badge(r.status), h(r.trial_ends_at || "—"), h(r.updated_at || "—")] : [h(r.organization), h(r.created_at || "—"), h(r.site_created_at || "—"), h(r.domain_created_at || "—")]), "No rows.");
+  const pageHref = (key, to) => `?${key === "trialPage" ? `trialPage=${to}&activationPage=${activationPage}` : `trialPage=${trialPage}&activationPage=${to}`}`;
+  const analyticsPager = (key, page, hasMore) => `<p>${page > 1 ? `<a class="btn" href="${pageHref(key, page - 1)}">Previous</a>` : ""} <span>Page ${page}</span> ${hasMore ? `<a class="btn" href="${pageHref(key, page + 1)}">Next</a>` : ""}</p>`;
+  const trialRows = d.enabled ? await revenueAnalytics.paginatedAnalyticsList(env, { kind: "trials", limit: 21, offset: (trialPage - 1) * 20 }) : [];
+  const activationRows = d.enabled ? await revenueAnalytics.paginatedAnalyticsList(env, { kind: "activation", limit: 21, offset: (activationPage - 1) * 20 }) : [];
+  const financeForm = `<form id="revenue-finance-form"><label for="costs">Monthly finance unit costs (JSON: plan key → integer cents, in the plan's currency)</label><textarea id="costs" name="costs" rows="3" style="display:block;width:100%;max-width:42rem" placeholder='{"plan_key":0}' required></textarea><label for="reason">Reason (required, recorded in the audit log)</label><input id="reason" name="reason" type="text" minlength="5" maxlength="500" required style="display:block;width:100%;max-width:42rem"><button class="btn" type="submit">Save costs</button> <span id="finance-result" aria-live="polite"></span></form>`;
+  return shell(env, admin, "Revenue analytics", "saas-revenue-analytics", `
+    <p><a href="/api/platform/saas/revenue-analytics/export.csv">Export cohort CSV</a> · <a href="/platform/saas">SaaS overview</a></p>
+    <p>Mode: <b>${h(d.mode)}</b>. ${d.mode === "shadow" ? "Shadow mode: read-only analytics; validate definitions before relying on them." : d.mode === "off" ? "Metrics are disabled by the safe default." : "Enabled staff analytics."} Money is reported per currency and never added across currencies.</p>
+    <h2>Monthly revenue cohorts</h2>${cohorts}
+    <h2>Funnel</h2>${funnel}
+    <h2>Average revenue per account (ARPA)</h2>${arpa}
+    <h2>Annual prepayments and deferred revenue</h2>${deferred}
+    <h2>Gross margin by tier</h2><p>Unit cost not configured is shown as unknown, never zero.</p>${margins}
+    <h3>Finance unit-cost settings</h3>${financeForm}
+    <h2>Recent trial funnel records</h2>${list(trialRows, "trials")}${analyticsPager("trialPage", trialPage, trialRows.length > 20)}
+    <h2>Recent activation records</h2>${list(activationRows, "activation")}${analyticsPager("activationPage", activationPage, activationRows.length > 20)}`);
 }

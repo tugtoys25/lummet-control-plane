@@ -256,7 +256,7 @@
     "staging": {
       "name": "lummet-control-plane-staging",
       "workers_dev": true,
-      "routes": [],
+      "routes": [{ "pattern": "staging.luminousagents.com", "custom_domain": true }],
       "d1_databases": [{"binding":"LUMMET_DB","database_name":"lummet-control-plane-staging-db","database_id":"00000000-0000-0000-0000-000000000001"}],
       "r2_buckets": [{"binding":"BACKUPS","bucket_name":"lummet-backups-staging"},{"binding":"TENANT_TEMPLATES","bucket_name":"lummet-tenant-templates-staging"}],
       "queues": {"producers":[{"binding":"JOB_QUEUE","queue":"lummet-jobs-staging"}],"consumers":[{"queue":"lummet-jobs-staging","max_batch_size":1,"max_retries":5,"dead_letter_queue":"lummet-jobs-staging-dlq"}]},

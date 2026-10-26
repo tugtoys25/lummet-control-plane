@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(__dirname, "..", "migrations");
 const LOCAL_WRANGLER = join(__dirname, "..", "node_modules", ".bin", process.platform === "win32" ? "wrangler.cmd" : "wrangler");
-const WRANGLER_BIN = existsSync(LOCAL_WRANGLER) ? LOCAL_WRANGLER : "wrangler";
+const WRANGLER_BIN = existsSync(LOCAL_WRANGLER) && !process.env.FAKE_WRANGLER_DB_PATH ? LOCAL_WRANGLER : "wrangler";
 const TRACKING_TABLE_SQL = `CREATE TABLE IF NOT EXISTS schema_migrations (
   filename TEXT PRIMARY KEY,
   applied_at TEXT DEFAULT CURRENT_TIMESTAMP

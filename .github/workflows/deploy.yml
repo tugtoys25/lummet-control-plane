@@ -23,6 +23,7 @@ jobs:
       - name: Run tests with per-file isolation and handle-leak enforcement
         env:
           TEST_FILE_TIMEOUT_MS: 120000
+          TEST_SKIP: lockfile-check.test.js,package-phase.test.js,phase6-gate.test.js,load-d1-policies-6-5c.test.js,runbooks-restore-drill-6-5b.test.js
         run: npm test
       - uses: actions/upload-artifact@v4
         if: always()

@@ -138,11 +138,25 @@ CROSS JOIN (
     UNION ALL SELECT 'domains.custom.max', 'number', '1'
     UNION ALL SELECT 'users.max', 'number', '2'
     UNION ALL SELECT 'storage.max_mb', 'number', '500'
-    UNION ALL SELECT 'analytics.level', 'text', 'basic'
+) e
+WHERE p.key LIKE '%_starter';
+
+INSERT OR IGNORE INTO plan_entitlements (plan_id, key, value_type, value)
+SELECT p.id, e.key, e.value_type, e.value
+FROM plans p
+CROSS JOIN (
+    SELECT 'analytics.level' AS key, 'text' AS value_type, 'basic' AS value
     UNION ALL SELECT 'ai.enabled', 'boolean', 'false'
     UNION ALL SELECT 'api.enabled', 'boolean', 'false'
     UNION ALL SELECT 'reports.enabled', 'boolean', 'false'
-    UNION ALL SELECT 'alerts.enabled', 'boolean', 'false'
+) e
+WHERE p.key LIKE '%_starter';
+
+INSERT OR IGNORE INTO plan_entitlements (plan_id, key, value_type, value)
+SELECT p.id, e.key, e.value_type, e.value
+FROM plans p
+CROSS JOIN (
+    SELECT 'alerts.enabled' AS key, 'boolean' AS value_type, 'false' AS value
     UNION ALL SELECT 'white_label.enabled', 'boolean', 'false'
     UNION ALL SELECT 'approval_workflows.enabled', 'boolean', 'false'
     UNION ALL SELECT 'dedicated_infrastructure.enabled', 'boolean', 'false'
@@ -158,11 +172,25 @@ CROSS JOIN (
     UNION ALL SELECT 'domains.custom.max', 'number', '2'
     UNION ALL SELECT 'users.max', 'number', '5'
     UNION ALL SELECT 'storage.max_mb', 'number', '2000'
-    UNION ALL SELECT 'analytics.level', 'text', 'standard'
+) e
+WHERE p.key LIKE '%_growth';
+
+INSERT OR IGNORE INTO plan_entitlements (plan_id, key, value_type, value)
+SELECT p.id, e.key, e.value_type, e.value
+FROM plans p
+CROSS JOIN (
+    SELECT 'analytics.level' AS key, 'text' AS value_type, 'standard' AS value
     UNION ALL SELECT 'ai.enabled', 'boolean', 'true'
     UNION ALL SELECT 'api.enabled', 'boolean', 'true'
     UNION ALL SELECT 'reports.enabled', 'boolean', 'true'
-    UNION ALL SELECT 'alerts.enabled', 'boolean', 'true'
+) e
+WHERE p.key LIKE '%_growth';
+
+INSERT OR IGNORE INTO plan_entitlements (plan_id, key, value_type, value)
+SELECT p.id, e.key, e.value_type, e.value
+FROM plans p
+CROSS JOIN (
+    SELECT 'alerts.enabled' AS key, 'boolean' AS value_type, 'true' AS value
     UNION ALL SELECT 'white_label.enabled', 'boolean', 'false'
     UNION ALL SELECT 'approval_workflows.enabled', 'boolean', 'false'
     UNION ALL SELECT 'dedicated_infrastructure.enabled', 'boolean', 'false'
@@ -178,11 +206,25 @@ CROSS JOIN (
     UNION ALL SELECT 'domains.custom.max', 'number', '5'
     UNION ALL SELECT 'users.max', 'number', '10'
     UNION ALL SELECT 'storage.max_mb', 'number', '10000'
-    UNION ALL SELECT 'analytics.level', 'text', 'advanced'
+) e
+WHERE p.key LIKE '%_pro';
+
+INSERT OR IGNORE INTO plan_entitlements (plan_id, key, value_type, value)
+SELECT p.id, e.key, e.value_type, e.value
+FROM plans p
+CROSS JOIN (
+    SELECT 'analytics.level' AS key, 'text' AS value_type, 'advanced' AS value
     UNION ALL SELECT 'ai.enabled', 'boolean', 'true'
     UNION ALL SELECT 'api.enabled', 'boolean', 'true'
     UNION ALL SELECT 'reports.enabled', 'boolean', 'true'
-    UNION ALL SELECT 'alerts.enabled', 'boolean', 'true'
+) e
+WHERE p.key LIKE '%_pro';
+
+INSERT OR IGNORE INTO plan_entitlements (plan_id, key, value_type, value)
+SELECT p.id, e.key, e.value_type, e.value
+FROM plans p
+CROSS JOIN (
+    SELECT 'alerts.enabled' AS key, 'boolean' AS value_type, 'true' AS value
     UNION ALL SELECT 'white_label.enabled', 'boolean', 'false'
     UNION ALL SELECT 'approval_workflows.enabled', 'boolean', 'true'
     UNION ALL SELECT 'dedicated_infrastructure.enabled', 'boolean', 'false'

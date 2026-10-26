@@ -18,7 +18,7 @@
   "0015_enterprise.sql": "e5eaa52dc4179428c95fd896a2026558c9397d8c765ed9096c1737658331dc3f",
   "0016_webauthn.sql": "a78228853dbe673440c29954be40f9a1ade8d7386d1d096f94ed94c0d6825c53",
   "0017_sso_oidc.sql": "7ec05092ae3d63bf7da2d420171cbb6c3f149805cc29371ded3cc39d93925af7",
-  "0018_seed_catalog.sql": "7cd114f91a5df912ea2875e7d2050f8bffb6a7cdc09d6766a4d6fc18a2a140b9",
+  "0018_seed_catalog.sql": "baf4fc1f204f903f103a82a70751b96af0b4d8ff8298daefb84a7c2bef6b6d08",
   "0019_email_outbox.sql": "6e35e8e67bc6b300fe19f39c551a1c9a14393f4f68bc6c9c9581b258dc09d492",
   "0020_usage_ai_credits_job_history.sql": "51449597105e7cbde2c30a5a4acbe09ca4d8a6acac5b0812e4b303ab7b7d15c4",
   "0021_backups_automations.sql": "bfdf94e1ca70be411f8b3a2ce00842236b4be31bbb2f17010903dbf987a7c0a5",

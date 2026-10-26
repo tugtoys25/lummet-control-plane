@@ -25,6 +25,6 @@
   },
   "version": "2.6.0",
   "devDependencies": {
-    "wrangler": "4.46.0"
+    "wrangler": "4.152.0"
   }
 }

@@ -257,7 +257,7 @@ export function renderHelp(topic) {
       "  /lu-agent <goal>           bounded think/search/act mode (still previews any write)",
       "",
       'Add tenant=<name> to any command to target a tenant other than the active one:',
-      "  /lu-list-casinos tenant=freewin.xyz country=Rwanda"
+      "  /lu-list-casinos tenant=example.com country=Rwanda"
     );
     return lines.join("\n");
   }

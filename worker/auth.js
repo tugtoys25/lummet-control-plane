@@ -7,38 +7,20 @@
 // =====================================================
 
 import { getStaffTotpStatus, createChallenge, completeChallenge } from "./staff-2fa.js";
+import { hashPasswordWith, hashPasswordForEnv, verifyPasswordHash, passwordHashNeedsUpgrade } from "./password-hash.js";
+import { updateStaffPasswordHash } from "./repositories/password-hashes.js";
 
 const SESSION_COOKIE = "lummet_session";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 12; // 12 hours
 
 // -----------------------------------------------------
-// Password hashing (PBKDF2, 100k iterations, salt:hash hex)
+// Password hashing (PBKDF2-SHA256; formats and rehash in password-hash.js)
 // -----------------------------------------------------
 
-export async function hashPassword(password) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const encoder = new TextEncoder();
-
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-
-  const hashBuffer = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
-    keyMaterial,
-    256
-  );
-
-  const saltHex = [...salt].map((b) => b.toString(16).padStart(2, "0")).join("");
-  const hashHex = [...new Uint8Array(hashBuffer)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  return `${saltHex}:${hashHex}`;
+// Without an env this is the legacy format, byte-for-byte as in every earlier release (the tenant repo copies it and a test checks
+// the two agree). With an env it follows PASSWORD_HASH_FORMAT (see password-hash.js).
+export async function hashPassword(password, env = null) {
+  return env ? hashPasswordForEnv(password, env) : hashPasswordWith(password);
 }
 
 // Workers don't expose Node's crypto.timingSafeEqual, so this is the
@@ -70,31 +52,17 @@ export function constantTimeEqual(a, b) {
 }
 
 export async function verifyPassword(password, storedHash) {
-  const [saltHex, hashHex] = (storedHash || "").split(":");
-  if (!saltHex || !hashHex) return false;
+  return verifyPasswordHash(password, storedHash, constantTimeEqual);
+}
 
-  const salt = new Uint8Array(saltHex.match(/.{2}/g).map((b) => parseInt(b, 16)));
-  const encoder = new TextEncoder();
-
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-
-  const hashBuffer = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
-    keyMaterial,
-    256
-  );
-
-  const computedHex = [...new Uint8Array(hashBuffer)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  return constantTimeEqual(computedHex, hashHex);
+/** Rewrite a staff hash in the target format after a correct password. A failure is logged and never blocks the login. */
+async function upgradeStaffHashIfNeeded(env, admin, password) {
+  if (!passwordHashNeedsUpgrade(admin.password_hash, env)) return;
+  try {
+    await updateStaffPasswordHash(env, admin.id, await hashPasswordForEnv(password, env));
+  } catch (err) {
+    console.error("password_rehash_failed", { scope: "staff", adminId: admin.id, message: String(err && err.message || err).slice(0, 120) });
+  }
 }
 
 // -----------------------------------------------------
@@ -155,7 +123,7 @@ export async function bootstrapFirstAdmin(env, email, password) {
     return { ok: false, status: 422, error: "invalid_email_or_password" };
   }
 
-  const passwordHash = await hashPassword(password);
+  const passwordHash = await hashPassword(password, env);
   const trimmedEmail = email.trim();
 
   const inserted = await env.LUMMET_DB.prepare(
@@ -220,6 +188,8 @@ export async function authenticateAdmin(env, email, password, ipHash) {
     await logFailedAttempt(env, ipHash, "login");
     return { ok: false, status: 403, error: "account_disabled", email, adminId: admin.id };
   }
+
+  await upgradeStaffHashIfNeeded(env, admin, password);
 
   // 2FA gate: a verified password alone is NOT a login for an admin with an
   // active second factor. Only a short-lived challenge is created; the session
@@ -391,7 +361,7 @@ export async function createAdmin(env, { email, role, createdBy }) {
   if (existing) return { ok: false, status: 409, error: "email_already_registered" };
 
   const tempPassword = randomTempPassword();
-  const passwordHash = await hashPassword(tempPassword);
+  const passwordHash = await hashPassword(tempPassword, env);
 
   const inserted = await env.LUMMET_DB.prepare(
     `INSERT INTO lummet_admins (email, password_hash, role, status, created_by, must_change_password)
@@ -450,7 +420,7 @@ export async function changeOwnPassword(env, adminId, currentPassword, newPasswo
   const valid = await verifyPassword(currentPassword || "", admin.password_hash);
   if (!valid) return { ok: false, status: 401, error: "invalid_current_password" };
 
-  const newHash = await hashPassword(newPassword);
+  const newHash = await hashPassword(newPassword, env);
   await env.LUMMET_DB.prepare(
     `UPDATE lummet_admins SET password_hash = ?, must_change_password = 0 WHERE id = ?`
   ).bind(newHash, adminId).run();
@@ -467,7 +437,7 @@ export async function setPasswordDirect(env, adminId, newPassword) {
   if (!newPassword || newPassword.length < 12) {
     return { ok: false, status: 422, error: "password_too_short" };
   }
-  const newHash = await hashPassword(newPassword);
+  const newHash = await hashPassword(newPassword, env);
   await env.LUMMET_DB.prepare(
     `UPDATE lummet_admins SET password_hash = ?, must_change_password = 0 WHERE id = ?`
   ).bind(newHash, adminId).run();

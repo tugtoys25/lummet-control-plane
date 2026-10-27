@@ -197,7 +197,7 @@ export async function handleChatMessage(env, admin, { conversationId, message })
   if (/^\/lu-agent\b/i.test(trimmed)) {
     const goal = trimmed.replace(/^\/lu-agent\b/i, "").trim();
     if (!goal) {
-      const msg = "Give the agent a goal, e.g. \"/lu-agent find casinos on freewin.xyz with no bonus_title set\".";
+      const msg = "Give the agent a goal, e.g. \"/lu-agent find casinos on example.com with no bonus_title set\".";
       await appendMessage(env, convId, "assistant", msg);
       return { ok: true, conversationId: convId, intent: { operation: "agent", resource: null }, result: { ok: false, message: msg }, reply: msg };
     }

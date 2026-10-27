@@ -35,6 +35,8 @@ STRIPE_WEBHOOK_SECRET=
 
 # ---------------------------------------------------------------- email (Resend)
 RESEND_API_KEY=
+# Svix signing secret of the Resend webhook (whsec_...). Needed once BILLING_EMAILS=on. Webhook URL: <PORTAL_BASE_URL>/api/email/webhook/resend
+RESEND_WEBHOOK_SECRET=
 
 # ---------------------------------------------------------------- operations
 # Bearer token for POST /api/ops/alert-check (the maintenance tick; see wrangler.jsonc). `openssl rand -hex 32`.
@@ -60,3 +62,12 @@ ALERT_EMAIL=
 # OUTBOUND_DNS_CHECK=off
 # Load testing only (docs/LOAD_TESTING.md): never set in production.
 # LOADTEST_PASSWORD=
+
+# Optional: salt for the stored trial-abuse hashes (card fingerprint, business email domain). Set once, never change.
+TRIAL_FINGERPRINT_SALT=
+
+# Phase 5 commercial feature flags (keep disabled until owner-approved staging evidence exists).
+BILLING_SAVE_FLOW=off
+PUBLIC_FORMS_TURNSTILE_REQUIRED=off
+# Catalog rows stay inactive until real Stripe price IDs and owner-approved policies are verified.
+# ADDON_PURCHASES_ENABLED=off

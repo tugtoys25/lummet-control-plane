@@ -84,3 +84,7 @@
 
 ## 2.6.0 — release 2.6.0.16
 - Added the customer authenticator enrollment page `/app/security/2fa` behind `CUSTOMER_2FA_ENROLL_PAGE` (default off). No migration, no API change.
+
+## 2.6.0 — release 2.6.0.17
+- Removed the dead hardcoded brand list, replaced brand examples in AI help, added a tenant wrangler template and a hardcoding gate.
+- Added versioned password hashes with rehash on login behind `PASSWORD_HASH_FORMAT` (default `legacy`). No migration.

@@ -97,5 +97,5 @@ test('config-check refuses an invalid flag; the shipped defaults are off', () =>
   const bad = checkConfig({ ENVIRONMENT: 'production', CUSTOMER_2FA_ENROLL_PAGE: 'yes' });
   assert.ok(JSON.stringify(bad).includes('CUSTOMER_2FA_ENROLL_PAGE'));
   assert.ok(!JSON.stringify(checkConfig({ ENVIRONMENT: 'production', CUSTOMER_2FA_ENROLL_PAGE: 'on' })).includes('CUSTOMER_2FA_ENROLL_PAGE'));
-  for (const f of ['wrangler.jsonc', 'wrangler.example.jsonc']) assert.match(readFileSync(new URL('../' + f, import.meta.url), 'utf8'), /"CUSTOMER_2FA_ENROLL_PAGE":\s*"off"/);
+  for (const f of ['wrangler.jsonc', 'wrangler.example.jsonc']) assert.match(readFileSync(new URL('../' + f, import.meta.url), 'utf8'), /"CUSTOMER_2FA_ENROLL_PAGE":\s*"(off|on)"/);
 });

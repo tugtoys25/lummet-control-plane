@@ -183,8 +183,8 @@
 	"vars": {
 		"ENVIRONMENT": "production",
 		// Billing lifecycle (docs/CHANGES_PHASE_1.md). BILLING_ENFORCE is the rollout flag: off, then shadow, then enforce.
-		"BILLING_ENFORCE": "shadow",
-		"BILLING_SUSPEND_SITES": "shadow",
+		"BILLING_ENFORCE": "enforce",
+		"BILLING_SUSPEND_SITES": "enforce",
 		"BILLING_EMAILS": "on",
 		"REVENUE_METRICS": "on",
 		"REVENUE_ANALYTICS": "on",

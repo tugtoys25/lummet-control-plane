@@ -200,9 +200,9 @@
 		// Synthetic monitors (6.5A): off (default; nothing probed), shadow (probe and record, never page), on (a failing monitor pages through the alert channel). Needs the monitor account and canary settings in docs/SYNTHETIC_MONITORS.md; secrets (SYNTHETIC_SIGNIN_PASSWORD) are Worker secrets, never vars.
 		"SYNTHETIC_MONITORS": "shadow",
 		// IP allowlist (6.4C): off, shadow (log would-deny, nothing blocked), enforce. Also needs the plan entitlement security.ip_allowlist.enabled (granted to no plan). Stays off until OPEN_ITEMS_v2.6.0.11.md is answered.
-		"ORG_IP_ALLOWLIST": "shadow",
+		"ORG_IP_ALLOWLIST": "off",
 		// SSO requirement (6.4C): a stub. off or shadow only; never enforced because no identity provider is named.
-		"ORG_SSO_REQUIREMENT": "shadow",
+		"ORG_SSO_REQUIREMENT": "off",
 		// Public trust pages (6.2A): off, shadow (review, noindex), on. STATUS_PROVIDER_URL, SECURITY_CONTACT and SECURITY_TXT_EXPIRES are owner values, set per environment.
 		"PUBLIC_TRUST_PAGES": "shadow",
 		// Legal pages (6.2B): off, draft (watermarked DRAFT FOR COUNSEL, noindex), on (only with recorded counsel approval per market). See docs/CONFIGURATION.md.
@@ -220,7 +220,7 @@
 		// CSP violation-report collection (6.3C): basic (default, the 2.6.0.7 behaviour) | full (Reporting API, scrubbed fields, flood cap). CSP_MODE stays report-only here; see docs/CSP_REPORTING.md.
 		"CSP_REPORT_MODE": "full",
 		// Error tracking (6.3C): off (default) | shadow (build + scrub + log a summary, send nothing) | on (send scrubbed events to SENTRY_DSN, a Worker SECRET set with `wrangler secret put`, never a var). "on" also needs ERROR_TRACKING_APPROVED=yes [OPEN owner approval, tracker as sub-processor]; see docs/ERROR_TRACKING.md.
-		"ERROR_TRACKING": "shadow",
+		"ERROR_TRACKING": "off",
 		"ERROR_TRACKING_APPROVED": "no",
 		// Log redaction (6.3C): off (default) | on (scrub emails, IPs, tokens, secrets from console output, and so from Logpush). Turn on before enabling Logpush or the audit stream; see docs/LOGPUSH.md.
 		"LOG_REDACTION": "on",
@@ -228,7 +228,7 @@
 		"AUDIT_LOG_STREAM": "on",
 		// Cloudflare Access JWT for /platform/* and /api/platform/* (6.3B): off (default) | shadow (log only) | enforce (refuse without a valid Access JWT; fails closed).
 		// CF_ACCESS_ISSUER (https://<team>.cloudflareaccess.com) and CF_ACCESS_AUD (application AUD tag) are owner inputs [OPEN] and are required once the mode is not off; see docs/CLOUDFLARE_ACCESS.md.
-		"PLATFORM_ACCESS_JWT_MODE": "shadow",
+		"PLATFORM_ACCESS_JWT_MODE": "off",
 		"CF_ACCESS_ISSUER": "",
 		"CF_ACCESS_AUD": "",
 		"REVENUE_REPORTING_CURRENCY": "USD",

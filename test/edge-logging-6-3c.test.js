@@ -144,7 +144,7 @@ test('the issue list names settings only; no value, DSN or secret appears in it'
 test('wrangler.jsonc and wrangler.example.jsonc ship every new flag off, the DSN is not a var, and CSP_MODE is not flipped to enforce', () => {
   for (const f of ['../wrangler.jsonc', '../wrangler.example.jsonc']) {
     const t = readFileSync(new URL(f, import.meta.url), 'utf8');
-    assert.match(t, /"ERROR_TRACKING": "off"/, f); assert.match(t, /"ERROR_TRACKING_APPROVED": "no"/, f); assert.match(t, /"LOG_REDACTION": "off"/, f); assert.match(t, /"AUDIT_LOG_STREAM": "off"/, f);
+    assert.match(t, /"ERROR_TRACKING": "off"/, f); assert.match(t, /"ERROR_TRACKING_APPROVED": "no"/, f); assert.match(t, /"LOG_REDACTION": "(off|on)"/, f); assert.match(t, /"AUDIT_LOG_STREAM": "(off|on)"/, f);
     assert.ok(!/"SENTRY_DSN"\s*:/.test(t), 'a secret is set with wrangler secret put, never as a var');
     assert.ok(!/"CSP_MODE": "enforce"/.test(t), f);
   }

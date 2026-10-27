@@ -39,7 +39,13 @@ export async function runHardcodingCheck() {
   try { await access(path.join(root, "worker/public-brands.js")); problems.push("worker/public-brands.js exists again (it was removed as dead code)"); } catch { /* absent is the expected state */ }
   const examplePath = path.resolve(root, "../lummet-tenant/wrangler.example.jsonc");
   let example = null;
-  try { example = await readFile(examplePath, "utf8"); } catch { problems.push("lummet-tenant/wrangler.example.jsonc is missing"); }
+  // The control plane and the tenant live in separate git repositories. When this repo is checked out alone (CI), the sibling
+  // tenant folder does not exist, so the template check only applies when it is present next to this repo.
+  let tenantPresent = true;
+  try { await access(path.resolve(root, "../lummet-tenant")); } catch { tenantPresent = false; }
+  if (tenantPresent) {
+    try { example = await readFile(examplePath, "utf8"); } catch { problems.push("lummet-tenant/wrangler.example.jsonc is missing"); }
+  }
   if (example !== null) {
     if (!example.includes("REPLACE_WITH_D1_DATABASE_ID")) problems.push("tenant template does not use a REPLACE_WITH_ placeholder for the D1 database id");
     for (const h of findRealLookingIds(example)) problems.push(`tenant template holds a real-looking resource id at line ${h.line}`);

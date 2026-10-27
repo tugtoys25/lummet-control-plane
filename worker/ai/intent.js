@@ -35,7 +35,7 @@ Respond with ONLY a raw JSON object, no markdown, no code fences, no explanation
 Field meanings:
 - operation: "read" for viewing/finding/listing records or their current values; "create"/"update"/"delete" for a requested change; "schema" if they're asking what fields/columns a resource has; "unknown" if you cannot tell.
 - resource: the single resource key this request is about, or null if unclear or not about a specific resource.
-- tenantHint: a tenant name/host the admin explicitly mentioned (e.g. "level.casino", "for Tenant B"), or null if they mean whatever tenant is currently active. This is only a HINT for the server to look up among tenants that admin can already access -- it is never used directly as an id.
+- tenantHint: a tenant name/host the admin explicitly mentioned (e.g. "example.com", "for Tenant B"), or null if they mean whatever tenant is currently active. This is only a HINT for the server to look up among tenants that admin can already access -- it is never used directly as an id.
 - recordId: the specific record identifier mentioned (an id or slug), or null for a list/filter request.
 - filters: a flat object of simple field:value filters mentioned (e.g. {"country":"Rwanda"} or {"status":"published"}). Keep this small and literal -- do not guess values that weren't stated.
 - fields: for create/update requests only -- the exact field:value pairs the admin wants written, using the real field names listed above. Do not include a field the admin didn't mention. Never invent a value.

@@ -11,6 +11,8 @@
 import { onEmailVerified } from "./billing-notifications.js";
 import { emailKey } from "./email-key.js";
 import { hashPassword, verifyPassword } from "./auth.js";
+import { hashPasswordForEnv, passwordHashNeedsUpgrade } from "./password-hash.js";
+import { updateCustomerPasswordHash } from "./repositories/password-hashes.js";
 import { createOrganization } from "./organizations.js";
 import { getTotpStatus, verifyFactorForLogin } from "./totp.js";
 import { evaluateSessionUse } from "./org-security-policy.js";
@@ -152,6 +154,16 @@ async function verifyCustomerTurnstile(request, env, token) {
   } finally { clearTimeout(timeout); }
 }
 
+/** Rewrite a customer hash in the target format after a correct password (PASSWORD_HASH_FORMAT=v2 only). Never blocks the login. */
+async function upgradeCustomerHashIfNeeded(env, user, password) {
+  if (!passwordHashNeedsUpgrade(user.password_hash, env)) return;
+  try {
+    await updateCustomerPasswordHash(env, user.id, await hashPasswordForEnv(password, env));
+  } catch (err) {
+    console.error("password_rehash_failed", { scope: "customer", userId: user.id, message: String(err && err.message || err).slice(0, 120) });
+  }
+}
+
 export async function signUp(request, env) {
   const body = await request.json().catch(() => ({}));
   const challenge = await verifyCustomerTurnstile(request, env, body.turnstileToken);
@@ -189,7 +201,7 @@ export async function signUp(request, env) {
   }
 
   const userId = crypto.randomUUID();
-  const passwordHash = await hashPassword(password);
+  const passwordHash = await hashPassword(password, env);
 
   await env.LUMMET_DB.prepare(
     `INSERT INTO customer_users (id, email, email_key, password_hash, full_name, signup_plan_id, signup_billing_period) VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -255,6 +267,8 @@ export async function login(request, env) {
     await logFailedAttempt(env, ipHash, "customer_login");
     return { ok: false, status: 403, error: "account_disabled", userId: user.id };
   }
+
+  await upgradeCustomerHashIfNeeded(env, user, password);
 
   const firstOrg = await env.LUMMET_DB.prepare(
     `SELECT organization_id FROM organization_users WHERE user_id = ? ORDER BY created_at LIMIT 1`
@@ -468,7 +482,7 @@ export async function resetPassword(env, userId, token, newPassword) {
   if (!row) return { ok: false, status: 404, error: "invalid_token" };
   if (new Date(row.expires_at).getTime() < Date.now()) return { ok: false, status: 410, error: "token_expired" };
 
-  const newHash = await hashPassword(newPassword);
+  const newHash = await hashPassword(newPassword, env);
   await env.LUMMET_DB.prepare(`UPDATE customer_users SET password_hash = ? WHERE id = ?`)
     .bind(newHash, userId)
     .run();

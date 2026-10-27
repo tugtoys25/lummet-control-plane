@@ -1,16 +1,182 @@
 # Per-file test timing and handle-leak report
 
-Generated: 2026-10-26T10:19:51.725Z
-Files selected: 2; tests: 1; passed: 1; failed tests: 0; skipped: 0; todo: 0; cancelled: 0; failing files/timeouts/forced exits: 1; per-file timeout: 20000ms
+Generated: 2026-10-27T07:30:05.243Z
+Files selected: 167; tests: 2215; passed: 2213; failed tests: 2; skipped: 0; todo: 0; cancelled: 0; failing files/timeouts/forced exits: 4; per-file timeout: 20000ms
 Force-exit allow-list: none
 
 | Test file | Tests | Passed | Failed | Skipped | Duration | Result | Natural exit |
 |---|---:|---:|---:|---:|---:|---|---|
-| `test/migrate.test.js` | 0 | 0 | 0 | 0 | 40217 ms | FORCED_EXIT | HANGS; forced retry diagnostic only |
-| `test/phase3-migrations.test.js` | 1 | 1 | 0 | 0 | 2452 ms | PASS | exits naturally |
+| `test/admin-shell.test.js` | 10 | 10 | 0 | 0 | 1536 ms | PASS | exits naturally |
+| `test/ai-agent.test.js` | 7 | 7 | 0 | 0 | 1247 ms | PASS | exits naturally |
+| `test/ai-audit.test.js` | 3 | 3 | 0 | 0 | 557 ms | PASS | exits naturally |
+| `test/ai-chat-page.test.js` | 6 | 6 | 0 | 0 | 955 ms | PASS | exits naturally |
+| `test/ai-chat.test.js` | 19 | 19 | 0 | 0 | 2834 ms | PASS | exits naturally |
+| `test/ai-commands.test.js` | 26 | 26 | 0 | 0 | 184 ms | PASS | exits naturally |
+| `test/ai-form-adapter.test.js` | 12 | 12 | 0 | 0 | 136 ms | PASS | exits naturally |
+| `test/ai-history-previews.test.js` | 6 | 6 | 0 | 0 | 995 ms | PASS | exits naturally |
+| `test/ai-intent.test.js` | 12 | 12 | 0 | 0 | 161 ms | PASS | exits naturally |
+| `test/ai-pending-operations.test.js` | 6 | 6 | 0 | 0 | 1104 ms | PASS | exits naturally |
+| `test/ai-read.test.js` | 12 | 12 | 0 | 0 | 147 ms | PASS | exits naturally |
+| `test/ai-resolver.test.js` | 19 | 19 | 0 | 0 | 2804 ms | PASS | exits naturally |
+| `test/ai-schema.test.js` | 7 | 7 | 0 | 0 | 144 ms | PASS | exits naturally |
+| `test/ai-web-search.test.js` | 6 | 6 | 0 | 0 | 156 ms | PASS | exits naturally |
+| `test/ai-write-confirm.test.js` | 15 | 15 | 0 | 0 | 2386 ms | PASS | exits naturally |
+| `test/alerts.test.js` | 20 | 20 | 0 | 0 | 3829 ms | PASS | exits naturally |
+| `test/analytics-page.test.js` | 21 | 21 | 0 | 0 | 581 ms | PASS | exits naturally |
+| `test/annual-pricing.test.js` | 9 | 9 | 0 | 0 | 1859 ms | PASS | exits naturally |
+| `test/api-keys.test.js` | 6 | 6 | 0 | 0 | 1620 ms | PASS | exits naturally |
+| `test/audit-log.test.js` | 3 | 3 | 0 | 0 | 800 ms | PASS | exits naturally |
+| `test/audit.test.js` | 6 | 6 | 0 | 0 | 1130 ms | PASS | exits naturally |
+| `test/auth-password.test.js` | 20 | 20 | 0 | 0 | 3342 ms | PASS | exits naturally |
+| `test/backups-automations.test.js` | 13 | 13 | 0 | 0 | 3068 ms | PASS | exits naturally |
+| `test/billing-lifecycle.test.js` | 34 | 34 | 0 | 0 | 7190 ms | PASS | exits naturally |
+| `test/billing-notifications-staff.test.js` | 15 | 15 | 0 | 0 | 3586 ms | PASS | exits naturally |
+| `test/billing-notifications.test.js` | 19 | 19 | 0 | 0 | 4360 ms | PASS | exits naturally |
+| `test/billing-portal.test.js` | 5 | 5 | 0 | 0 | 1242 ms | PASS | exits naturally |
+| `test/billing-reminders.test.js` | 26 | 26 | 0 | 0 | 6552 ms | PASS | exits naturally |
+| `test/billing-stripe-schedule.test.js` | 3 | 3 | 0 | 0 | 144 ms | PASS | exits naturally |
+| `test/billing-stripe.test.js` | 6 | 6 | 0 | 0 | 157 ms | PASS | exits naturally |
+| `test/billing-webhook-retry.test.js` | 8 | 8 | 0 | 0 | 1280 ms | PASS | exits naturally |
+| `test/billing.test.js` | 18 | 18 | 0 | 0 | 3588 ms | PASS | exits naturally |
+| `test/branding.test.js` | 3 | 3 | 0 | 0 | 730 ms | PASS | exits naturally |
+| `test/casinos-schema-drift.test.js` | 1 | 1 | 0 | 0 | 164 ms | PASS | exits naturally |
+| `test/catalog.test.js` | 8 | 8 | 0 | 0 | 324 ms | PASS | exits naturally |
+| `test/cbor.test.js` | 10 | 10 | 0 | 0 | 124 ms | PASS | exits naturally |
+| `test/change-requests.test.js` | 5 | 5 | 0 | 0 | 1171 ms | PASS | exits naturally |
+| `test/checkout-page.test.js` | 7 | 7 | 0 | 0 | 817 ms | PASS | exits naturally |
+| `test/cloudflare-access-jwt.test.js` | 26 | 26 | 0 | 0 | 3969 ms | PASS | exits naturally |
+| `test/commercial-phase5-followups.test.js` | 14 | 14 | 0 | 0 | 3224 ms | PASS | exits naturally |
+| `test/commercial-phase5.test.js` | 4 | 4 | 0 | 0 | 149 ms | PASS | exits naturally |
+| `test/content-pages-routes.test.js` | 9 | 9 | 0 | 0 | 4161 ms | PASS | exits naturally |
+| `test/coupons.test.js` | 16 | 16 | 0 | 0 | 4113 ms | PASS | exits naturally |
+| `test/cp-backup.test.js` | 11 | 11 | 0 | 0 | 4574 ms | PASS | exits naturally |
+| `test/csp-reporting.test.js` | 22 | 22 | 0 | 0 | 1503 ms | PASS | exits naturally |
+| `test/csp.test.js` | 22 | 22 | 0 | 0 | 1769 ms | PASS | exits naturally |
+| `test/csrf-guard.test.js` | 8 | 8 | 0 | 0 | 1669 ms | PASS | exits naturally |
+| `test/customer-2fa-enroll-page.test.js` | 5 | 5 | 0 | 0 | 2138 ms | PASS | exits naturally |
+| `test/customer-backups-automations.test.js` | 5 | 5 | 0 | 0 | 567 ms | PASS | exits naturally |
+| `test/customer-deployments-developer.test.js` | 6 | 6 | 0 | 0 | 744 ms | PASS | exits naturally |
+| `test/customer-portal-views.test.js` | 6 | 6 | 0 | 0 | 184 ms | PASS | exits naturally |
+| `test/customer-sessions-6-4b.test.js` | 16 | 16 | 0 | 0 | 7231 ms | PASS | exits naturally |
+| `test/customer-shell.test.js` | 7 | 7 | 0 | 0 | 159 ms | PASS | exits naturally |
+| `test/dashboard-admin.test.js` | 9 | 9 | 0 | 0 | 3047 ms | PASS | exits naturally |
+| `test/deploy-routes.test.js` | 2 | 2 | 0 | 0 | 864 ms | PASS | exits naturally |
+| `test/deployments.test.js` | 7 | 7 | 0 | 0 | 1777 ms | PASS | exits naturally |
+| `test/domains.test.js` | 8 | 8 | 0 | 0 | 1901 ms | PASS | exits naturally |
+| `test/durable-jobs.test.js` | 12 | 12 | 0 | 0 | 2149 ms | PASS | exits naturally |
+| `test/edge-logging-6-3c.test.js` | 15 | 15 | 0 | 0 | 1282 ms | PASS | exits naturally |
+| `test/email.test.js` | 12 | 12 | 0 | 0 | 2452 ms | PASS | exits naturally |
+| `test/erasure.test.js` | 15 | 15 | 0 | 0 | 4114 ms | PASS | exits naturally |
+| `test/error-tracking.test.js` | 21 | 21 | 0 | 0 | 1173 ms | PASS | exits naturally |
+| `test/forms.test.js` | 29 | 29 | 0 | 0 | 3662 ms | PASS | exits naturally |
+| `test/hardcoding-check.test.js` | 3 | 3 | 0 | 0 | 237 ms | PASS | exits naturally |
+| `test/hsts-preload.test.js` | 18 | 18 | 0 | 0 | 772 ms | PASS | exits naturally |
+| `test/inline-scripts-syntax.test.js` | 1 | 1 | 0 | 0 | 794 ms | PASS | exits naturally |
+| `test/inquiries-admin.test.js` | 9 | 9 | 0 | 0 | 4167 ms | PASS | exits naturally |
+| `test/ip-allowlist.test.js` | 10 | 10 | 0 | 0 | 178 ms | PASS | exits naturally |
+| `test/jwt.test.js` | 9 | 9 | 0 | 0 | 520 ms | PASS | exits naturally |
+| `test/key-rotation.test.js` | 10 | 10 | 0 | 0 | 1471 ms | PASS | exits naturally |
+| `test/legal-pages.test.js` | 10 | 10 | 0 | 0 | 3058 ms | PASS | exits naturally |
+| `test/load-d1-policies-6-5c.test.js` | 32 | 32 | 0 | 0 | 4416 ms | PASS | exits naturally |
+| `test/loadtest-harness.test.js` | 8 | 8 | 0 | 0 | 3562 ms | PASS | exits naturally |
+| `test/lockfile-check.test.js` | 1 | 0 | 1 | 0 | 189 ms | FAIL | exits naturally |
+| `test/log-redaction.test.js` | 17 | 17 | 0 | 0 | 263 ms | PASS | exits naturally |
+| `test/logpush-policy.test.js` | 8 | 8 | 0 | 0 | 139 ms | PASS | exits naturally |
+| `test/merge-v2528-comp-replay-escape.test.js` | 7 | 7 | 0 | 0 | 1589 ms | PASS | exits naturally |
+| `test/migrate.test.js` | 7 | 7 | 0 | 0 | 10329 ms | PASS | exits naturally |
+| `test/nav-entitlements.test.js` | 1 | 1 | 0 | 0 | 688 ms | PASS | exits naturally |
+| `test/newsroom-tags.test.js` | 3 | 3 | 0 | 0 | 303 ms | PASS | exits naturally |
+| `test/newsroom-taxonomy-resources.test.js` | 6 | 6 | 0 | 0 | 145 ms | PASS | exits naturally |
+| `test/no-swallowed-errors.test.js` | 1 | 1 | 0 | 0 | 132 ms | PASS | exits naturally |
+| `test/observability.test.js` | 12 | 12 | 0 | 0 | 2103 ms | PASS | exits naturally |
+| `test/openapi-docs.test.js` | 4 | 4 | 0 | 0 | 991 ms | PASS | exits naturally |
+| `test/org-ip-allowlist-6-4c.test.js` | 25 | 25 | 0 | 0 | 9014 ms | PASS | exits naturally |
+| `test/org-security-policy-routes.test.js` | 8 | 8 | 0 | 0 | 2922 ms | PASS | exits naturally |
+| `test/org-security-policy.test.js` | 24 | 24 | 0 | 0 | 6032 ms | PASS | exits naturally |
+| `test/organization-lifecycle.test.js` | 8 | 8 | 0 | 0 | 2574 ms | PASS | exits naturally |
+| `test/outbound-dns.test.js` | 12 | 12 | 0 | 0 | 1240 ms | PASS | exits naturally |
+| `test/package-phase.test.js` | 4 | 3 | 1 | 0 | 1669 ms | FAIL | exits naturally |
+| `test/password-hash-v2.test.js` | 15 | 15 | 0 | 0 | 3083 ms | PASS | exits naturally |
+| `test/phase-1-3-site-access.test.js` | 10 | 10 | 0 | 0 | 216 ms | PASS | exits naturally |
+| `test/phase-1-4-entrypoint-gates.test.js` | 484 | 484 | 0 | 0 | 551 ms | PASS | exits naturally |
+| `test/phase-f-route-integration.test.js` | 13 | 13 | 0 | 0 | 3247 ms | PASS | exits naturally |
+| `test/phase1-foundation.test.js` | 14 | 14 | 0 | 0 | 2913 ms | PASS | exits naturally |
+| `test/phase2-final-notes.test.js` | 3 | 3 | 0 | 0 | 145 ms | PASS | exits naturally |
+| `test/phase2-gate.test.js` | 7 | 7 | 0 | 0 | 458 ms | PASS | exits naturally |
+| `test/phase3-admin-ui.test.js` | 1 | 1 | 0 | 0 | 422 ms | PASS | exits naturally |
+| `test/phase3-migrations.test.js` | 1 | 1 | 0 | 0 | 280 ms | PASS | exits naturally |
+| `test/phase3-source-of-truth.test.js` | 4 | 4 | 0 | 0 | 128 ms | PASS | exits naturally |
+| `test/phase4-tools.test.js` | 8 | 8 | 0 | 0 | 425 ms | PASS | exits naturally |
+| `test/phase5-accessibility-visual.test.js` | 2 | 2 | 0 | 0 | 444 ms | PASS | exits naturally |
+| `test/phase5-completion-v2524.test.js` | 5 | 5 | 0 | 0 | 958 ms | PASS | exits naturally |
+| `test/phase6-gate-at-5-11-12-13.test.js` | 4 | 4 | 0 | 0 | 912 ms | PASS | exits naturally |
+| `test/phase6-gate.test.js` | 2 | 2 | 0 | 0 | 577 ms | PASS | exits naturally |
+| `test/plan-change-guard.test.js` | 2 | 2 | 0 | 0 | 128 ms | PASS | exits naturally |
+| `test/plan-prices.test.js` | 15 | 15 | 0 | 0 | 3015 ms | PASS | exits naturally |
+| `test/provisioning-autodeploy.test.js` | 4 | 4 | 0 | 0 | 1111 ms | PASS | exits naturally |
+| `test/provisioning.test.js` | 7 | 7 | 0 | 0 | 1641 ms | PASS | exits naturally |
+| `test/public-site.test.js` | 40 | 40 | 0 | 0 | 6606 ms | PASS | exits naturally |
+| `test/rbac.test.js` | 25 | 25 | 0 | 0 | 9069 ms | PASS | exits naturally |
+| `test/release-owner-gate.test.js` | 3 | 3 | 0 | 0 | 343 ms | PASS | exits naturally |
+| `test/release-tools-sync.test.js` | 2 | 2 | 0 | 0 | 273 ms | PASS | exits naturally |
+| `test/reports-column-options.test.js` | 1 | 1 | 0 | 0 | 153 ms | PASS | exits naturally |
+| `test/research-resources.test.js` | 3 | 3 | 0 | 0 | 149 ms | PASS | exits naturally |
+| `test/revenue-analytics.test.js` | 20 | 20 | 0 | 0 | 3451 ms | PASS | exits naturally |
+| `test/revenue-job.test.js` | 17 | 17 | 0 | 0 | 5381 ms | PASS | exits naturally |
+| `test/revenue-movements.test.js` | 21 | 21 | 0 | 0 | 5441 ms | PASS | exits naturally |
+| `test/rollouts.test.js` | 17 | 17 | 0 | 0 | 5459 ms | PASS | exits naturally |
+| `test/routes.test.js` | 14 | 14 | 0 | 0 | 3147 ms | PASS | exits naturally |
+| `test/runbooks-restore-drill-6-5b.test.js` | 0 | 0 | 0 | 0 | 40058 ms | FORCED_EXIT | HANGS; forced retry diagnostic only |
+| `test/search-export.test.js` | 5 | 5 | 0 | 0 | 1161 ms | PASS | exits naturally |
+| `test/security-review-2-1.test.js` | 5 | 5 | 0 | 0 | 1069 ms | PASS | exits naturally |
+| `test/session-status.test.js` | 9 | 9 | 0 | 0 | 3600 ms | PASS | exits naturally |
+| `test/shadow-difference-report.test.js` | 1 | 1 | 0 | 0 | 208 ms | PASS | exits naturally |
+| `test/signed-in-site-access.test.js` | 4 | 4 | 0 | 0 | 2088 ms | PASS | exits naturally |
+| `test/site-access-staff-ui.test.js` | 3 | 3 | 0 | 0 | 168 ms | PASS | exits naturally |
+| `test/site-assets.test.js` | 9 | 9 | 0 | 0 | 1474 ms | PASS | exits naturally |
+| `test/site-bindings.test.js` | 5 | 5 | 0 | 0 | 891 ms | PASS | exits naturally |
+| `test/site-health.test.js` | 4 | 4 | 0 | 0 | 902 ms | PASS | exits naturally |
+| `test/site-routing.test.js` | 7 | 7 | 0 | 0 | 1416 ms | PASS | exits naturally |
+| `test/smoke-script.test.js` | 13 | 13 | 0 | 0 | 259 ms | PASS | exits naturally |
+| `test/sql-boundary.test.js` | 5 | 5 | 0 | 0 | 392 ms | PASS | exits naturally |
+| `test/sso-domains.test.js` | 6 | 6 | 0 | 0 | 1593 ms | PASS | exits naturally |
+| `test/sso.test.js` | 13 | 13 | 0 | 0 | 3883 ms | PASS | exits naturally |
+| `test/staff-2fa.test.js` | 12 | 12 | 0 | 0 | 4615 ms | PASS | exits naturally |
+| `test/staff-console.test.js` | 9 | 9 | 0 | 0 | 2768 ms | PASS | exits naturally |
+| `test/staff-operational-screens.test.js` | 5 | 5 | 0 | 0 | 1725 ms | PASS | exits naturally |
+| `test/staff-paging.test.js` | 3 | 3 | 0 | 0 | 1178 ms | PASS | exits naturally |
+| `test/staff-stop-deletion.test.js` | 3 | 3 | 0 | 0 | 1195 ms | PASS | exits naturally |
+| `test/staff-tokens-ci.test.js` | 13 | 13 | 0 | 0 | 6886 ms | PASS | exits naturally |
+| `test/staging-checks.test.js` | 0 | 0 | 0 | 0 | 40059 ms | FORCED_EXIT | HANGS; forced retry diagnostic only |
+| `test/storage-limit-sync.test.js` | 8 | 8 | 0 | 0 | 1729 ms | PASS | exits naturally |
+| `test/stripe-sync.test.js` | 23 | 23 | 0 | 0 | 11323 ms | PASS | exits naturally |
+| `test/subdomain-domains.test.js` | 8 | 8 | 0 | 0 | 1955 ms | PASS | exits naturally |
+| `test/subdomain-routes.test.js` | 2 | 2 | 0 | 0 | 926 ms | PASS | exits naturally |
+| `test/super-api-hmac.test.js` | 13 | 13 | 0 | 0 | 516 ms | PASS | exits naturally |
+| `test/synthetic-monitors-6-5a.test.js` | 77 | 77 | 0 | 0 | 12172 ms | PASS | exits naturally |
+| `test/tenant-isolation.test.js` | 11 | 11 | 0 | 0 | 3428 ms | PASS | exits naturally |
+| `test/tenant-portal.test.js` | 8 | 8 | 0 | 0 | 1959 ms | PASS | exits naturally |
+| `test/tenant-switching.test.js` | 6 | 6 | 0 | 0 | 2691 ms | PASS | exits naturally |
+| `test/tenant-template.test.js` | 7 | 7 | 0 | 0 | 1219 ms | PASS | exits naturally |
+| `test/totp.test.js` | 9 | 9 | 0 | 0 | 1650 ms | PASS | exits naturally |
+| `test/trial-abuse-phase1.test.js` | 10 | 10 | 0 | 0 | 2664 ms | PASS | exits naturally |
+| `test/trial-abuse.test.js` | 10 | 10 | 0 | 0 | 2264 ms | PASS | exits naturally |
+| `test/usage-ai-jobs.test.js` | 11 | 11 | 0 | 0 | 2485 ms | PASS | exits naturally |
+| `test/usage.test.js` | 3 | 3 | 0 | 0 | 769 ms | PASS | exits naturally |
+| `test/v7c-ops.test.js` | 7 | 7 | 0 | 0 | 1501 ms | PASS | exits naturally |
+| `test/v7d-completion.test.js` | 6 | 6 | 0 | 0 | 934 ms | PASS | exits naturally |
+| `test/v7f-portal.test.js` | 15 | 15 | 0 | 0 | 2660 ms | PASS | exits naturally |
+| `test/v7h-automation.test.js` | 14 | 14 | 0 | 0 | 2805 ms | PASS | exits naturally |
+| `test/waf-rate-limit.test.js` | 14 | 14 | 0 | 0 | 810 ms | PASS | exits naturally |
+| `test/webauthn.test.js` | 11 | 11 | 0 | 0 | 2220 ms | PASS | exits naturally |
+| `test/webhook-delivery-retry.test.js` | 12 | 12 | 0 | 0 | 3051 ms | PASS | exits naturally |
+| `test/webhook-integration.test.js` | 4 | 4 | 0 | 0 | 944 ms | PASS | exits naturally |
+| `test/webhooks.test.js` | 8 | 8 | 0 | 0 | 1823 ms | PASS | exits naturally |
+| `test/zone-domains.test.js` | 23 | 23 | 0 | 0 | 4444 ms | PASS | exits naturally |
 
 ## Files requiring `--test-force-exit`
-- `test/migrate.test.js` — natural process exit failed within 20000 ms; fails the suite unless explicitly allow-listed with justification.
+- `test/runbooks-restore-drill-6-5b.test.js` — natural process exit failed within 20000 ms; fails the suite unless explicitly allow-listed with justification.
+- `test/staging-checks.test.js` — natural process exit failed within 20000 ms; fails the suite unless explicitly allow-listed with justification.
 
-Total tests: 1; passed: 1; failed: 0; skipped: 0; todo: 0; forced_exit: 1; failed files: 1
+Total tests: 2215; passed: 2213; failed: 2; skipped: 0; todo: 0; forced_exit: 2; failed files: 4
 Exit status: 1

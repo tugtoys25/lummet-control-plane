@@ -188,6 +188,7 @@
     "CUSTOMER_SESSION_ADMIN": "off",
     "CUSTOMER_AUDIT_CSV": "off",
     "CUSTOMER_2FA_ENROLL_PAGE": "off",
+    "PASSWORD_HASH_FORMAT": "legacy",
     // Synthetic monitors (6.5A): off (default; nothing probed), shadow (probe and record, never page), on (a failing monitor pages through the alert channel). Needs the monitor account and canary settings in docs/SYNTHETIC_MONITORS.md; secrets (SYNTHETIC_SIGNIN_PASSWORD) are Worker secrets, never vars.
     "SYNTHETIC_MONITORS": "off",
     // IP allowlist (6.4C): off, shadow (log would-deny, nothing blocked), enforce. Also needs the plan entitlement security.ip_allowlist.enabled (granted to no plan). Stays off until OPEN_ITEMS_v2.6.0.11.md is answered.

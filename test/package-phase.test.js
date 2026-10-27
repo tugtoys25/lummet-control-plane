@@ -54,6 +54,8 @@ test('package-phase never packages .wrangler (local cache with the Cloudflare ac
 
 test('release package gate refuses a root-only lockfile with actionable guidance', () => {
   const d = sandbox(); try {
+    const pkg = JSON.parse(readFileSync(path.join(d, 'package.json'), 'utf8'));
+    writeFileSync(path.join(d, 'package-lock.json'), JSON.stringify({ name: pkg.name, version: pkg.version, lockfileVersion: 3, requires: true, packages: { '': { name: pkg.name, version: pkg.version, devDependencies: pkg.devDependencies } } }, null, 2));
     const r = runRelease(d, '--phase', '1', '--version', pkgVersion());
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /stub lockfile/);

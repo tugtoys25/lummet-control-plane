@@ -23,6 +23,7 @@ import { sanitizeHtml } from "./sanitize.js";
 import { renderPage, textResponse } from "./render.js";
 import { buildHead, breadcrumbLd, organizationLd, absoluteUrl } from "./seo.js";
 import { stripTags, truncate, safeUrl, fill } from "./format.js";
+import { demoPlans } from "./demo-plans.js";
 
 export const HONEYPOT_FIELD = "hp_website";
 const DEFAULT_RATE_LIMIT_PER_HOUR = 5;
@@ -184,9 +185,13 @@ async function renderForm(ctx, { key, path: pathOverride, form, fields, values =
     ]
   });
 
+  // /demo only (not its trust-page aliases), and not on the "thanks" page: the plans under the form.
+  const demo_plans = key === "demo" && !pathOverride && !sent && status === 200 ? await demoPlans(ctx) : null;
+
   const response = await renderPage(ctx, {
     template: "form",
     data: {
+      demo_plans,
       form: {
         key,
         action: path,

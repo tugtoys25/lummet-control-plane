@@ -62,3 +62,25 @@
     {{/if}}
   </div>
 </section>
+
+{{#if demo_plans}}
+<section class="section section-tight demo-plans" aria-labelledby="demo-plans-title">
+  <div class="container">
+    <h2 id="demo-plans-title">{{demo_plans.title}}</h2>
+    <p class="lede">{{demo_plans.intro}}</p>
+    <div class="grid grid-3">
+      {{#each demo_plans.plans}}
+      <article class="card pricing-plan">
+        <h3>{{name}}</h3>
+        <p class="pricing-price"><strong>{{price}}</strong> {{period}}</p>
+        {{#if trial}}<p>{{trial}}</p>{{/if}}
+        <ul>{{#each features}}<li>{{this}}</li>{{/each}}</ul>
+        <a class="btn btn-primary" href="{{href}}">{{demo_plans.cta}}</a>
+      </article>
+      {{/each}}
+    </div>
+    {{#if demo_plans.note}}<p class="pricing-note">{{demo_plans.note}}</p>{{/if}}
+    <p><a class="btn btn-secondary" href="/pricing">{{demo_plans.viewAll}}</a></p>
+  </div>
+</section>
+{{/if}}

@@ -187,7 +187,7 @@
 		// Card-required trial: off | on. See worker/billing-config.js (cardRequiredTrial).
 		"CARD_REQUIRED_TRIAL": "on",
 		// Plans listed under the /demo form: off | on (worker/public-site/demo-plans.js). DEMO_PLANS_PRODUCT (optional product id) picks the family shown.
-		"DEMO_PAGE_PLANS": "off",
+		"DEMO_PAGE_PLANS": "on",
 		"BILLING_ENFORCE": "shadow",
 		"BILLING_SUSPEND_SITES": "shadow",
 		"BILLING_EMAILS": "on",

@@ -5,9 +5,10 @@ import { createTestDb, applyMigrations } from './support/d1-shim.js';
 import worker from '../worker/index.js';
 import { demoPlansMode } from '../worker/public-site/demo-plans.js';
 import { setPlanPrice } from './support/plan-prices.js';
+import { createAssets } from './support/public-env.js';
 
 const STARTER = 'plan_casino_news_starter';
-function env(extra = {}) { const db = createTestDb(); applyMigrations(db); return { LUMMET_DB: db, CREDENTIAL_KEK: btoa('k'.repeat(32)), ENVIRONMENT: 'production', ...extra }; }
+function env(extra = {}) { const db = createTestDb(); applyMigrations(db); return { LUMMET_DB: db, ASSETS: createAssets(), CONTACT_EMAIL: 'hello@example.test', CREDENTIAL_KEK: btoa('k'.repeat(32)), ENVIRONMENT: 'production', ...extra }; }
 const ctx = { waitUntil() {} };
 async function get(e, path) {
   const res = await worker.fetch(new Request('https://cp.example.test' + path, { headers: { 'CF-Connecting-IP': '198.51.100.5' }, redirect: 'manual' }), e, ctx);
@@ -23,6 +24,7 @@ test('flag: only "on" turns it on', () => {
 test('/demo with the flag off has no plan section', async () => {
   const e = env(); await setPlanPrice(e, STARTER, 'price_s');
   const r = await get(e, '/demo');
+  assert.equal(r.status, 200);
   assert.doesNotMatch(r.text, /demo-plans/);
 });
 

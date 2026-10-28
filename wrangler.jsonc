@@ -185,7 +185,7 @@
 		"OUTBOUND_DNS_CHECK": "on",
 		// Billing lifecycle (docs/CHANGES_PHASE_1.md). BILLING_ENFORCE is the rollout flag: off, then shadow, then enforce.
 		// Card-required trial: off | on. See worker/billing-config.js (cardRequiredTrial).
-		"CARD_REQUIRED_TRIAL": "off",
+		"CARD_REQUIRED_TRIAL": "on",
 		"BILLING_ENFORCE": "shadow",
 		"BILLING_SUSPEND_SITES": "shadow",
 		"BILLING_EMAILS": "on",

@@ -2859,6 +2859,17 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (path === "/app/reset-password") return html(renderResetPasswordPage());
         if (path === "/app/forgot-password") return html(renderForgotPasswordPage());
         if (path === "/app/invitation") return html(renderInvitationPage());
+        // The pricing page links here with ?plan=&period=. Serve the page itself (no redirect) so the query string survives and
+        // the page can save the choice; a visitor who is already signed in goes straight to billing with the plan selected.
+        if (path === "/app/signup") {
+          if (portalCustomer) {
+            const q = new URL(request.url).searchParams;
+            const plan = q.get("plan"), period = q.get("period");
+            return redirect(plan && /^[A-Za-z0-9_-]{1,100}$/.test(plan) && ["monthly", "annual"].includes(period)
+              ? `/app/billing?plan=${encodeURIComponent(plan)}&period=${encodeURIComponent(period)}` : "/app/billing");
+          }
+          return html(renderCustomerLoginPage({ initialView: "signup", turnstileSiteKey: String(env.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" ? (env.TURNSTILE_SITE_KEY || "") : "" }));
+        }
         if (path === "/app/login") {
           if (portalCustomer) return redirect("/app/overview");
           return html(renderCustomerLoginPage({ turnstileSiteKey: String(env.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" ? (env.TURNSTILE_SITE_KEY || "") : "" }));

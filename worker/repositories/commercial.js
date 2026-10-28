@@ -240,4 +240,5 @@ export async function signupPlan(env,planId,period){return env.LUMMET_DB.prepare
 export async function activePlanPrice(env,planId,interval){return env.LUMMET_DB.prepare(`SELECT stripe_price_id FROM plan_prices WHERE plan_id=? AND interval=? AND active=1 LIMIT 1`).bind(planId,interval).first();}
 export async function latestActiveSubscriptionId(env,organizationId){return env.LUMMET_DB.prepare(`SELECT id FROM subscriptions WHERE organization_id=? AND status NOT IN ('canceled','expired','incomplete_expired') ORDER BY created_at DESC LIMIT 1`).bind(organizationId).first();}
 export async function customerSignupIntent(env,userId){return env.LUMMET_DB.prepare(`SELECT signup_plan_id,signup_billing_period FROM customer_users WHERE id=?`).bind(userId).first();}
+export async function clearCustomerSignupIntent(env,userId){return env.LUMMET_DB.prepare(`UPDATE customer_users SET signup_plan_id=NULL,signup_billing_period=NULL WHERE id=?`).bind(userId).run();}
 export async function customerLoginIdentity(env,userId){return env.LUMMET_DB.prepare(`SELECT id,email,signup_plan_id,signup_billing_period FROM customer_users WHERE id=?`).bind(userId).first();}

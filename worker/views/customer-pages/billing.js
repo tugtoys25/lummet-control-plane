@@ -30,7 +30,7 @@ function planPrice(p) {
   return p.price_cents != null ? formatMoney(p.price_cents, p.currency) + " / " + escapeHtml(p.billing_period) : "Custom";
 }
 
-export function renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling = canManage, checkoutStatus, selectedPlanId = null, billingProfile = null, access = null, usage = null, aiCredits = null }) {
+export function renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling = canManage, checkoutStatus, selectedPlanId = null, billingProfile = null, access = null, usage = null, aiCredits = null, cardRequiredTrial = false }) {
   const isPaid = !!(subscription && subscription.provider);
   const isTrialNoCard = !!(subscription && !subscription.provider);
 
@@ -73,7 +73,7 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
     : `
       <div class="card">
         <h2>No plan yet</h2>
-        <p style="color:var(--text-dim);font-size:14px;">Choose a plan below. A free trial needs no card; subscribing takes you to Stripe's secure payment page.</p>
+        <p style="color:var(--text-dim);font-size:14px;">${cardRequiredTrial ? "Choose a plan below. Your free trial starts on Stripe's secure payment page, where you add a card; you are not charged until the trial ends, and you can cancel before then." : "Choose a plan below. A free trial needs no card; subscribing takes you to Stripe's secure payment page."}</p>
       </div>`;
 
   const profileCard = canManageBilling ? `
@@ -98,7 +98,13 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
       </div>
     </div>` : "";
 
+  // CARD_REQUIRED_TRIAL: a new customer is only offered plans that can be bought online (a trial starts in Stripe Checkout).
+  if (cardRequiredTrial && !subscription) availablePlans = availablePlans.filter((p) => p.active_price_id);
   const showPlans = canManage && availablePlans.length > 0;
+  // A customer who arrives with a chosen, buyable plan goes straight to Checkout (not again after they cancel out of it).
+  const autoCheckoutPlan = cardRequiredTrial && canManage && !subscription && !checkoutStatus && selectedPlanId
+    && availablePlans.some((p) => p.id === selectedPlanId && p.active_price_id) ? selectedPlanId : null;
+  const clearIntent = cardRequiredTrial && (!!subscription || !!checkoutStatus || !!autoCheckoutPlan);
   const selectedPlanBanner = selectedPlanId && availablePlans.some((p) => p.id === selectedPlanId)
     ? `<div class="flash" role="status">Your selected plan is ready. Review its terms and choose Continue below when you are ready.</div>` : "";
   const couponBox = showPlans && !isPaid
@@ -115,9 +121,9 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
     if (!canManage) return "";
     if (isPaid) return `<button class="btn"${onClick("lummetChangePlan", [p.id])}>Switch to this plan</button>`;
     const buy = p.active_price_id
-      ? `<button class="btn"${onClick("lummetCheckout", [p.id])}>${p.id === selectedPlanId ? "Continue with selected plan" : "Subscribe"}</button>`
+      ? `<button class="btn"${onClick("lummetCheckout", [p.id])}>${p.id === selectedPlanId ? "Continue with selected plan" : (cardRequiredTrial && !subscription && p.trial_days ? "Start " + escapeHtml(String(p.trial_days)) + "-day trial" : "Subscribe")}</button>`
       : `<span style="color:var(--text-dim);font-size:13px;">Not available online</span>`;
-    const trial = !subscription && p.trial_days ? `<button class="btn btn-secondary"${onClick("lummetStartTrial", [p.id])}>Start ${escapeHtml(String(p.trial_days))}-day trial</button> ` : "";
+    const trial = !cardRequiredTrial && !subscription && p.trial_days ? `<button class="btn btn-secondary"${onClick("lummetStartTrial", [p.id])}>Start ${escapeHtml(String(p.trial_days))}-day trial</button> ` : "";
     return trial + buy;
   };
 
@@ -248,6 +254,8 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
           } else { msg.style.color = 'var(--danger, red)'; msg.textContent = COUPON_ERRORS[data.error] || 'That code could not be used.'; }
         });
       });
+      ${clearIntent ? "try { localStorage.removeItem('lummetSignupIntent'); } catch (_) {}" : ""}
+      ${autoCheckoutPlan ? `lummetCheckout(${JSON.stringify(autoCheckoutPlan).replace(/</g, "\\u003c")});` : ""}
     </script>
   `;
 }

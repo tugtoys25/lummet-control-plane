@@ -5,7 +5,7 @@ import { nonceToken, onClick } from "../../csp.js";
 // (both already built and tested in Phase 1) rather than a server-side
 // form POST — no new server-side parsing/adapter code needed, and the
 // exact same validated path every JSON API consumer already uses.
-export function renderCustomerLoginPage({ turnstileSiteKey = "" } = {}) {
+export function renderCustomerLoginPage({ turnstileSiteKey = "", initialView = "login" } = {}) {
   return renderAuthShell({
     title: "Log in",
     bodyHtml: `
@@ -111,6 +111,7 @@ export function renderCustomerLoginPage({ turnstileSiteKey = "" } = {}) {
             })
             .catch(function () { flash('Could not reach the server.', 'error'); });
         });
+        ${initialView === "signup" ? "showSignup();" : ""}
       </script>
     `
   });

@@ -234,6 +234,8 @@
 		"CF_ACCESS_AUD": "",
 		"REVENUE_REPORTING_CURRENCY": "USD",
 		"STRIPE_API_VERSION": "2024-06-20",
+		// Checkout Sessions only: the Stripe account has Managed Payments on, which needs 2025-03-31.basil or newer.
+		"STRIPE_CHECKOUT_API_VERSION": "2025-03-31.basil",
 		"BILLING_TRIAL_DAYS_DEFAULT": "7",
 		"BILLING_GRACE_DAYS": "14",
 		"BILLING_RESTRICTED_DAYS": "7",

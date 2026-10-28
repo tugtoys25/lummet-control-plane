@@ -9,19 +9,18 @@
       <span class="brand-name">{{site.name}}</span>
     </a>
 
-    <nav class="nav-main" aria-label="{{ui.nav_primary_label}}">
-      {{#each site.nav_main}}
-      <a href="{{href}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>
-      {{/each}}
-    </nav>
-
     <div class="header-actions">
+      <nav class="bar-links" aria-label="{{ui.nav_primary_label}}">
+        {{#each site.nav_main}}{{#if on_bar}}
+        <a href="{{href}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>
+        {{/if}}{{/each}}
+        {{#each site.nav_cta}}{{#if on_bar}}
+        <a class="btn btn-sm btn-ghost" href="{{href}}">{{label}}</a>
+        {{/if}}{{/each}}
+      </nav>
       <button class="icon-btn" type="button" data-theme-toggle aria-label="{{ui.theme_toggle}}">
         <span class="icon-sun">{{{icons.sun}}}</span><span class="icon-moon">{{{icons.moon}}}</span>
       </button>
-      {{#each site.nav_cta}}
-      <a class="btn btn-sm {{#if is_primary}}btn-primary{{else}}btn-ghost{{/if}} hide-mobile" href="{{href}}">{{label}}</a>
-      {{/each}}
       <button class="icon-btn nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="{{ui.menu_open}}" data-label-open="{{ui.menu_open}}" data-label-close="{{ui.menu_close}}" data-nav-toggle>
         <span class="icon-open">{{{icons.menu}}}</span><span class="icon-close">{{{icons.close}}}</span>
       </button>
@@ -31,11 +30,11 @@
   <div class="mobile-menu" id="mobile-menu" data-mobile-menu hidden>
     <nav class="container" aria-label="{{ui.nav_mobile_label}}">
       {{#each site.nav_main}}
-      <a href="{{href}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>
+      <a{{#if on_bar}} class="on-bar"{{/if}} href="{{href}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>
       {{/each}}
       <div class="mobile-menu-cta">
         {{#each site.nav_cta}}
-        <a class="btn btn-lg {{#if is_primary}}btn-primary{{else}}btn-secondary{{/if}}" href="{{href}}">{{label}}</a>
+        <a class="btn btn-lg {{#if is_primary}}btn-primary{{else}}btn-secondary{{/if}}{{#if on_bar}} on-bar{{/if}}" href="{{href}}">{{label}}</a>
         {{/each}}
       </div>
     </nav>

@@ -51,9 +51,9 @@ main { flex: 1 0 auto; width: 100%; }
 .brand-mark { width: 26px; height: 26px; border-radius: 9px; background: conic-gradient(from 210deg, var(--accent), var(--accent-2), var(--accent)); box-shadow: 0 0 18px var(--accent-glow); position: relative; }
 .brand-mark::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--bg); }
 .brand-logo { border-radius: 8px; object-fit: contain; }
-.nav-main { display: none; align-items: center; gap: var(--space-1); margin-left: var(--space-3); }
-.nav-main a { color: var(--ink-dim); font-weight: 550; font-size: var(--fs-sm); padding: 8px 12px; border-radius: var(--radius-pill); transition: color 0.15s, background 0.15s; }
-.nav-main a:hover, .nav-main a[aria-current="page"] { color: var(--ink); background: var(--accent-soft); text-decoration: none; }
+.bar-links { display: none; align-items: center; gap: var(--space-1); }
+.bar-links a:not(.btn) { color: var(--ink-dim); font-weight: 550; font-size: var(--fs-sm); padding: 8px 12px; border-radius: var(--radius-pill); transition: color 0.15s, background 0.15s; }
+.bar-links a:not(.btn):hover, .bar-links a[aria-current="page"] { color: var(--ink); background: var(--accent-soft); text-decoration: none; }
 .header-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
 .icon-btn { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); cursor: pointer; transition: border-color 0.15s, background 0.15s; }
 .icon-btn:hover { border-color: var(--border-strong); background: var(--bg-soft); }
@@ -65,9 +65,13 @@ main { flex: 1 0 auto; width: 100%; }
 .mobile-menu nav { display: flex; flex-direction: column; padding-block: var(--space-4); }
 .mobile-menu nav > a:not(.btn) { color: var(--ink); font-weight: 600; font-size: 1.1rem; padding: 14px 4px; border-bottom: 1px solid var(--border); }
 .mobile-menu-cta { display: grid; gap: var(--space-3); margin-top: var(--space-5); padding-bottom: env(safe-area-inset-bottom); }
+/* Desktop: the same menu button as on mobile, opening a panel under the button. Pricing and sign-in stay on the bar. */
 @media (min-width: 900px) {
-  .nav-main { display: flex; }
-  .nav-toggle, .mobile-menu { display: none !important; }
+  .bar-links { display: flex; margin-right: var(--space-2); }
+  .mobile-menu { position: absolute; top: calc(100% + 6px); right: max(clamp(1rem, 4vw, 2rem), calc((100vw - var(--container)) / 2 + clamp(1rem, 4vw, 2rem)));
+    width: min(380px, calc(100vw - 2rem)); max-height: calc(100vh - var(--header-h) - 24px); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18); }
+  .mobile-menu nav.container { padding-inline: var(--space-4); }
+  .mobile-menu .on-bar { display: none; }
 }
 
 /* ---- Footer ---- */

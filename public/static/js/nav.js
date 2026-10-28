@@ -10,7 +10,8 @@
     toggle.setAttribute("aria-expanded", String(open));
     toggle.setAttribute("aria-label", (open ? toggle.getAttribute("data-label-close") : toggle.getAttribute("data-label-open")) || "");
     menu.hidden = !open;
-    document.body.style.overflow = open ? "hidden" : "";
+    // Only the full-screen mobile sheet locks page scrolling; the desktop panel is a small popover.
+    document.body.style.overflow = open && !window.matchMedia("(min-width: 900px)").matches ? "hidden" : "";
   }
 
   if (toggle && menu) {
@@ -21,10 +22,13 @@
       if (e.target.closest("a")) setMenu(false);
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape") setMenu(false);
+      if (e.key === "Escape" && toggle.getAttribute("aria-expanded") === "true") { setMenu(false); toggle.focus(); }
     });
-    window.matchMedia("(min-width: 900px)").addEventListener("change", function (m) {
-      if (m.matches) setMenu(false);
+    document.addEventListener("click", function (e) {
+      if (toggle.getAttribute("aria-expanded") === "true" && !menu.contains(e.target) && !toggle.contains(e.target)) setMenu(false);
+    });
+    window.matchMedia("(min-width: 900px)").addEventListener("change", function () {
+      if (toggle.getAttribute("aria-expanded") === "true") setMenu(true);
     });
   }
 

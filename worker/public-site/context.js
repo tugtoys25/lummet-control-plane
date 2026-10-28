@@ -106,8 +106,10 @@ export async function loadSite(env, url) {
       .map((l) => ({ label: l.label, href: safeUrl(l.href) }))
       .filter((l) => l.href);
 
-  const navMain = byPlacement("header").map((l) => ({ ...l, active: isActive(l.href, path) }));
-  const navCta = byPlacement("header_cta").map((l, i, arr) => ({ ...l, is_primary: i === arr.length - 1 }));
+  // Links that stay visible on the desktop bar (everything else lives in the menu). Matched by destination so renaming a label never breaks it.
+  const onBar = (href) => { const p = String(href || "").split(/[?#]/)[0]; return p === "/pricing" || p === "/login"; };
+  const navMain = byPlacement("header").map((l) => ({ ...l, active: isActive(l.href, path), on_bar: onBar(l.href) }));
+  const navCta = byPlacement("header_cta").map((l, i, arr) => ({ ...l, is_primary: i === arr.length - 1, on_bar: onBar(l.href) }));
   const footerColumns = FOOTER_COLUMNS.map((c) => ({ title: ui[c.titleKey] || "", links: byPlacement(c.placement) })).filter(
     (c) => c.links.length
   );

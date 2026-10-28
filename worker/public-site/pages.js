@@ -6,6 +6,7 @@
 // =====================================================
 
 import * as pricingRepo from "../repositories/pricing.js";
+import { cardRequiredTrial } from "../billing-config.js";
 import * as data from "./data.js";
 import { brandModel, updateModel, publicationModel, partnerModel, authorModel, typeLabel } from "./models.js";
 import { PAGE_ALIASES } from "./links.js";
@@ -408,7 +409,7 @@ export function pricingGroups(plans, period, ui = {}) {
 
 export async function pricingPage(ctx) {
   const { site, settings, ui } = ctx.siteCtx;
-  const plans = await pricingRepo.listPricing(ctx.env);
+  const plans = await pricingRepo.listPricing(ctx.env, { requirePrice: cardRequiredTrial(ctx.env) });
   const hasAnnual = plans.some((p) => p.billing_period === "annual");
   const period = hasAnnual && ctx.url.searchParams.get("billing") === "annual" ? "annual" : "monthly";
   const groups = pricingGroups(plans, period, ui);

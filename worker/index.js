@@ -93,7 +93,7 @@ import { roleAtLeast } from "./customer-rbac.js";
 import { billing } from "./billing.js";
 import * as billingLifecycle from "./billing-lifecycle.js";
 import { evaluateWriteGate, evaluateServeGate, refusalFor, resolveAccess } from "./access.js";
-import { effectiveNow } from "./billing-config.js";
+import { effectiveNow, cardRequiredTrial } from "./billing-config.js";
 import * as scheduler from "./scheduler.js";
 import { reconcileSubscriptions, resolveDrift, listDrift } from "./phase3-source-of-truth.js";
 import { stripeRequest } from "./billing-stripe.js";
@@ -106,6 +106,7 @@ import { deployments } from "./deployments.js";
 import { tenantPortal } from "./tenant-portal.js";
 import { getUsageSnapshot } from "./usage.js";
 import * as commercial from "./commercial.js";
+import * as commercialRepo from "./repositories/commercial.js";
 import { renderCustomerShell } from "./views/customer-layout.js";
 import { renderCustomerLoginPage } from "./views/customer-pages/login.js";
 import { renderOverviewPage } from "./views/customer-pages/overview.js";
@@ -1463,6 +1464,16 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const guard = await requireOrgRole(organizationId, "admin");
             if (guard) return guard;
 
+            // CARD_REQUIRED_TRIAL=on: a trial starts only through Stripe Checkout, which collects the card up front.
+            if (cardRequiredTrial(env)) {
+              await logAudit(env, {
+                actorType: "customer_user", customerUserId: customer.id, organizationId,
+                endpoint: path, method, resource: "subscription", action: "start_trial",
+                success: false, statusCode: 409, errorMessage: "card_required_for_trial", requestId, ipHash: customerIpHash
+              });
+              return json({ success: false, error: "card_required_for_trial" }, 409);
+            }
+
             const body = await request.json().catch(() => ({}));
             const result = await plans.startTrialSubscription(env, organizationId, body.planId);
             await logAudit(env, {
@@ -1588,6 +1599,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
             });
             if (!result.ok) return json({ success: false, error: result.error }, result.status);
+            // The pricing-page choice has done its job once checkout exists; stop sending later logins back to it.
+            if (cardRequiredTrial(env)) { try { await commercialRepo.clearCustomerSignupIntent(env, customer.id); } catch (_) {} }
             return json({ success: true, checkoutUrl: result.checkoutUrl });
           }
 
@@ -3111,7 +3124,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             shell({
               title: "Billing", activeKey: "billing", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling, checkoutStatus, selectedPlanId: url.searchParams.get("plan") || null, billingProfile, access, usage, aiCredits })
+              bodyHtml: renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling, checkoutStatus, selectedPlanId: url.searchParams.get("plan") || null, billingProfile, access, usage, aiCredits, cardRequiredTrial: cardRequiredTrial(env) })
             })
           );
         }

@@ -26,6 +26,16 @@ export function billingMode(env) {
   return ENFORCE_MODES.includes(v) ? v : "off";
 }
 
+/**
+ * CARD_REQUIRED_TRIAL: off (default, nothing changes) | on. When on, a trial can only be started through Stripe Checkout (card
+ * collected up front, 7-day trial applied by Stripe); the no-card POST /trial is refused, the billing page hides that button and
+ * sends a customer who arrives with a chosen plan straight to Checkout, the saved plan choice is cleared once checkout starts,
+ * and the pricing page lists only plans that can actually be bought online.
+ */
+export function cardRequiredTrial(env) {
+  return String((env && env.CARD_REQUIRED_TRIAL) || "off").trim().toLowerCase() === "on";
+}
+
 export const EMAIL_MODES = ["off", "shadow", "on"];
 
 /** BILLING_EMAILS: off (default, inert), shadow (decide and log, send nothing), on (queue the emails). */

@@ -86,7 +86,7 @@ const backoffMs = (env, attempt) => Math.floor(Math.random() * Number(env.STRIPE
  * so a retry can never create a second customer, session or charge. Retries happen on network errors, timeouts and
  * 5xx only, NEVER on a 4xx, with jittered backoff. A GET or DELETE is retried the same way (both are safe to repeat).
  */
-export async function stripeRequest(env, method, path, params, { idempotencyKey } = {}) {
+export async function stripeRequest(env, method, path, params, { idempotencyKey, apiVersion } = {}) {
   if (!env.STRIPE_SECRET_KEY) {
     throw new Error("STRIPE_SECRET_KEY is not configured on this Worker");
   }
@@ -104,7 +104,7 @@ export async function stripeRequest(env, method, path, params, { idempotencyKey 
   const headers = {
     Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
     "Content-Type": "application/x-www-form-urlencoded",
-    "Stripe-Version": stripeApiVersion(env),
+    "Stripe-Version": apiVersion || stripeApiVersion(env),
     ...(method === "POST" ? { "Idempotency-Key": idempotencyKey } : {})
   };
 
@@ -200,7 +200,12 @@ export async function createCheckoutSession(
   if (expiresAt) params.expires_at = expiresAt;
 
   const key = `checkout:${organizationId}:${planId}:${couponProviderId || ""}:${trialEnd || trialDays || 0}:${Math.floor(Date.now() / 60000)}`;
-  const session = await stripeRequest(env, "POST", "/checkout/sessions", params, { idempotencyKey: key });
+  // Checkout Sessions may use a newer API version than the rest of the integration (STRIPE_CHECKOUT_API_VERSION, unset = the
+  // pinned version). Needed when the Stripe account has Managed Payments on, which 2024-06-20 refuses. The session only
+  // returns a url and id, so the newer version cannot change how subscriptions or webhooks are read.
+  const checkoutVersion = String((env && env.STRIPE_CHECKOUT_API_VERSION) || "").trim();
+  const apiVersion = /^\d{4}-\d{2}-\d{2}(\.[a-z_]+)?$/.test(checkoutVersion) ? checkoutVersion : undefined;
+  const session = await stripeRequest(env, "POST", "/checkout/sessions", params, { idempotencyKey: key, apiVersion });
   return { checkoutUrl: session.url, providerSessionId: session.id };
 }
 

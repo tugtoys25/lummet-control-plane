@@ -181,10 +181,11 @@
 	"queues": { "producers": [{ "binding": "JOB_QUEUE", "queue": "lummet-jobs" }], "consumers": [{ "queue": "lummet-jobs", "max_batch_size": 1, "max_retries": 5, "dead_letter_queue": "lummet-jobs-dlq" }] },
 	"triggers": { "crons": ["*/5 * * * *", "0 2 * * *", "0 7 * * 1"] },
 	"vars": {
-		"ENVIRONMENT": "production",
+		"ENVIRONMENT": "test",
+		"OUTBOUND_DNS_CHECK": "on",
 		// Billing lifecycle (docs/CHANGES_PHASE_1.md). BILLING_ENFORCE is the rollout flag: off, then shadow, then enforce.
-		"BILLING_ENFORCE": "enforce",
-		"BILLING_SUSPEND_SITES": "enforce",
+		"BILLING_ENFORCE": "shadow",
+		"BILLING_SUSPEND_SITES": "shadow",
 		"BILLING_EMAILS": "on",
 		"REVENUE_METRICS": "on",
 		"REVENUE_ANALYTICS": "on",

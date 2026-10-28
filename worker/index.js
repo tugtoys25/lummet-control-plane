@@ -63,7 +63,7 @@ import * as automationSweep from "./automation-sweep.js";
 import * as tenantAdmin from "./tenant-admin.js";
 import * as notificationsRepo from "./repositories/notifications.js";
 import { renderInsightAnalytics, renderInsightReports, renderInsightCampaigns, renderInsightAlerts, renderInsightNotifications, renderInsightSearch, renderInsightContent } from "./views/customer-pages/insights.js";
-import { finalizeResponse, handleCspReport } from "./csp.js";
+import { finalizeResponse, handleCspReport, nonceToken } from "./csp.js";
 import { hstsHeaderValue } from "./hsts.js";
 import { installConsoleRedaction } from "./redact.js";
 import { captureException } from "./error-tracking.js";

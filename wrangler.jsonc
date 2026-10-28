@@ -188,7 +188,7 @@
 		"CARD_REQUIRED_TRIAL": "on",
 		// Plans listed under the /demo form: off | on (worker/public-site/demo-plans.js). DEMO_PLANS_PRODUCT (optional product id) picks the family shown.
 		"DEMO_PAGE_PLANS": "on",
-		"BILLING_ENFORCE": "shadow",
+		"BILLING_ENFORCE": "enforce",
 		"BILLING_SUSPEND_SITES": "shadow",
 		"BILLING_EMAILS": "on",
 		"REVENUE_METRICS": "on",

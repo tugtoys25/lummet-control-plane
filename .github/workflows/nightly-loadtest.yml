@@ -28,7 +28,7 @@ jobs:
           LOADTEST_PASSWORD: ${{ secrets.LOADTEST_PASSWORD }}
           ALERT_CHECK_TOKEN: ${{ secrets.LOADTEST_ALERT_CHECK_TOKEN }}
         run: node scripts/loadtest.mjs --nightly --thresholds config/loadtest-thresholds.v1.json --base "${{ secrets.LOADTEST_BASE_URL }}" --allow-host "${{ secrets.LOADTEST_ALLOW_HOST }}" --report loadtest-report.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: nightly-loadtest-report

@@ -13,14 +13,18 @@ const ENTRYPOINTS = [
   ['AI gateway','write','/api/ai'], ['API key create','write','/api/api-keys'],
   ['API key delete','write','/api/api-keys/delete'], ['invitations','write','/api/invitations']
 ];
-const now = Date.parse('2026-10-23T12:00:00Z');
+// Anchored to the real clock: the "actual service" tests below read Date.now() inside the services, so fixed calendar dates
+// silently expire (trial_ends_at + BILLING_RESTRICTED_DAYS rolled over on 2026-10-29 12:00Z and flipped trial_expired to restricted).
+const now = Date.now();
+const H = 3600000, D = 24 * H;
+const at = (offsetMs) => new Date(now + offsetMs).toISOString();
 function subFor(state) {
   if (state === 'closed') return null;
-  if (state === 'trial_expired') return {id:'sub',status:'expired',trial_ends_at:'2026-10-22T12:00:00Z',updated_at:'2026-10-22T12:00:00Z'};
-  if (state === 'suspended') return {id:'sub',status:'suspended',suspended_at:'2026-10-23T11:00:00Z',updated_at:'2026-10-23T11:00:00Z'};
-  if (state === 'restricted') return {id:'sub',status:'restricted',restricted_at:'2026-10-23T11:00:00Z',updated_at:'2026-10-23T11:00:00Z'};
-  if (state === 'past_due') return {id:'sub',status:'past_due',grace_ends_at:'2026-10-30T12:00:00Z',updated_at:'2026-10-23T11:00:00Z'};
-  return {id:'sub',status:state,updated_at:'2026-10-23T11:00:00Z'};
+  if (state === 'trial_expired') return {id:'sub',status:'expired',trial_ends_at:at(-D),updated_at:at(-D)};
+  if (state === 'suspended') return {id:'sub',status:'suspended',suspended_at:at(-H),updated_at:at(-H)};
+  if (state === 'restricted') return {id:'sub',status:'restricted',restricted_at:at(-H),updated_at:at(-H)};
+  if (state === 'past_due') return {id:'sub',status:'past_due',grace_ends_at:at(7 * D),updated_at:at(-H)};
+  return {id:'sub',status:state,updated_at:at(-H)};
 }
 function fakeEnv(state, mode) {
   const shadows=[]; const org={id:'org',status:state==='closed'?'closed':'active'}; const sub=subFor(state);

@@ -52,7 +52,7 @@ export function withD1Session(env, request) {
   }
   const base = env.LUMMET_DB;
   const db = {
-    prepare: (sql) => session.prepare(sql),
+    prepare: session.prepare.bind(session),
     batch: (statements) => session.batch(statements),
     exec: (sql) => base.exec(sql),
     dump: () => base.dump(),

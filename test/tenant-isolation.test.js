@@ -133,7 +133,7 @@ describe('structural regression: content dispatcher gates on session state, not 
     const authSrc = readFileSync(join(__dirname, '..', 'worker', 'auth.js'), 'utf-8');
     assert.match(
       authSrc,
-      /activeTenantId:\s*session\.active_tenant_id\s*\|\|\s*null/,
+      /activeTenantId:\s*(?:session\.active_tenant_id|row\.session_active_tenant_id)\s*\|\|\s*null/,
       'expected getCurrentAdmin to derive activeTenantId only from the stored session row'
     );
   });

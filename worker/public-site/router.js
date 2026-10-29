@@ -222,13 +222,20 @@ export async function handlePublicRoute({ request, env, ctx: execCtx }) {
     }
   }
 
+  // A render reads many D1 rows in parallel; one transient read error (overloaded / connection lost, most likely on a
+  // freshly deployed isolate) used to fail the whole page. Render again once after a short pause before giving up.
+  // Nothing is cached or sent until a render succeeds, so a retry cannot leave a partial page behind.
   let response;
-  try {
-    const siteCtx = await loadSite(env, url);
-    response = await resolve({ env, request, url, siteCtx, execCtx });
-  } catch (err) {
-    console.error("public-site render failed:", err?.message || err);
-    return unavailable();
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const siteCtx = await loadSite(env, url);
+      response = await resolve({ env, request, url, siteCtx, execCtx });
+      break;
+    } catch (err) {
+      console.error(`public-site render failed (attempt ${attempt}/2) ${path}:`, err?.name || "", err?.message || err);
+      if (attempt === 2) return unavailable();
+      await new Promise((r) => setTimeout(r, 200));
+    }
   }
   if (!response) return null;
 

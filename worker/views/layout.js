@@ -16,6 +16,7 @@ import { nonceToken, onChange } from "../csp.js";
 import { isSuperAdmin, loadPermissionMap, getAdminTenantIds } from "../rbac.js";
 import { ICONS, BOOT_SCRIPT } from "./shell-assets.js";
 import { SHELL_CSS_URL, SHELL_JS_URL } from "../perf/shell-bundle.js";
+import { renderCustomerAuthShell } from "./customer-auth-shell.js";
 
 // Every item below (besides Overview/AI Chat, always visible) can
 // declare `area` + `resource` to be gated by rbac.js's permission
@@ -362,6 +363,8 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
   <meta name="color-scheme" content="dark light" />
   <title>${escapeHtml(title)} · Lummet</title>
   <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
+  <link rel="preload" href="/static/fonts/instrument-400-v1.woff" as="font" type="font/woff" crossorigin />
+  <link rel="preload" href="/static/fonts/bricolage-700-v1.woff" as="font" type="font/woff" crossorigin />
   <link rel="stylesheet" href="${SHELL_CSS_URL}" />
   <script nonce="${nonceToken()}" src="${SHELL_JS_URL}" defer></script>
 </head>
@@ -417,38 +420,11 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
 }
 
 /**
- * Minimal unauthenticated page shell (login/bootstrap) — no
- * sidebar, since there's no admin session yet.
+ * Minimal unauthenticated page shell (login/bootstrap and the emailed-link pages). Since 2.6.0.24 it renders the same
+ * auth shell as the customer login (public-site look); audience "staff" adds the "Are you a customer?" link.
  */
-export function renderAuthShell({ title, bodyHtml }) {
-  return `<!DOCTYPE html>
-<html lang="en" data-theme="dark">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="color-scheme" content="dark light" />
-  <title>${escapeHtml(title)} · Lummet</title>
-  <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
-  <link rel="stylesheet" href="${SHELL_CSS_URL}" />
-  <script nonce="${nonceToken()}" src="${SHELL_JS_URL}" defer></script>
-  <style>
-    body { display: flex; align-items: center; justify-content: center; padding: 20px 16px; background: radial-gradient(900px 500px at 50% -10%, var(--accent-soft), transparent 70%), var(--bg); }
-    .auth-card { width: 100%; max-width: 400px; }
-    .brand-lg { font-size: 26px; font-weight: 700; margin-bottom: 4px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 10px; }
-    .brand-lg .dot { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, var(--accent), #4cc3ff); display: inline-block; }
-    .auth-subtitle { text-align: center; color: var(--text-dim); font-size: 14px; margin-bottom: 24px; }
-  </style>
-</head>
-<body>
-  <main class="auth-card">
-    <div class="brand-lg"><span class="dot"></span> Lummet</div>
-    <div class="auth-subtitle">Central control plane</div>
-    <div class="card">
-      ${bodyHtml}
-    </div>
-  </main>
-</body>
-</html>`;
+export function renderAuthShell({ title, bodyHtml, audience = "customer" }) {
+  return renderCustomerAuthShell({ title, bodyHtml, audience });
 }
 
 export { escapeHtml, NAV };

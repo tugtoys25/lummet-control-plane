@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.6.0 — 2026-10-29 (release 2.6.0.24)
+- Staff console and customer portal dashboards (including the CMS Features page) restyled to the public-site look: new palette, Instrument Sans / Bricolage Grotesque, gradient pill buttons. Layout and behavior unchanged.
+- Staff login now uses the public-site auth shell and shows "Are you a customer? Log in here" (links to /app/login).
+- Forgot password, reset password, verify email, invitation, 2FA enroll, 2FA-required and IP-denied pages moved to the same auth shell; their scripts write messages with textContent.
+- No migration and no static file changes (asset-version lock unchanged).
+
 ## 2.3.5 — 2026-10-23
 - Added Sprint 1.6 enforcement cutover/rollback runbook and unexplained-shadow-difference reporting script.
 - Added Sprint 4.1 Stripe setup checklist, guarded test-clock preparation harness and go-live record template; these are preparation artifacts, not execution evidence.

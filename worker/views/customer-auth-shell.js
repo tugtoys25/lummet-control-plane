@@ -1,19 +1,24 @@
 // =====================================================
-// CUSTOMER AUTH SHELL (release 2.6.0.23)
+// AUTH SHELL (release 2.6.0.23, extended in 2.6.0.24)
 //
 // Log in / Create account for the customer portal, in the same look as the public site (2.6.0.20). It loads the public
 // design tokens (colors, Bricolage Grotesque + Instrument Sans, radii) from /static/css/tokens.css and adds a small inline
-// stylesheet for the auth card only. The staff console login keeps renderAuthShell (layout.js) and is not touched.
+// stylesheet for the auth card only. Since 2.6.0.24 every sign-in style page uses it: customer login/signup, forgot/reset/verify/invitation, 2FA enroll, IP-denied and the
+// staff console login (renderAuthShell in layout.js delegates here with audience "staff").
 //
 // Security is unchanged: the theme boot script and the shell script keep their nonces, and there are no inline handlers.
 // tokens.css is a same-origin stylesheet under /static, versioned with ASSET_VERSION like the public pages, so no
 // public/static file changes in this release and the asset-version lock stays as it is.
 // =====================================================
 import { nonceToken } from "../csp.js";
-import { escapeHtml } from "./layout.js";
 import { BOOT_SCRIPT } from "./shell-assets.js";
 import { SHELL_JS_URL } from "../perf/shell-bundle.js";
 import { ASSET_VERSION } from "../perf/asset-version.js";
+
+// Local copy so this module does not import layout.js (layout.js delegates renderAuthShell here; no import cycle).
+function escapeHtml(v) {
+  return String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 
 const AUTH_CSS = `
   *, *::before, *::after { box-sizing: border-box; }
@@ -46,6 +51,25 @@ const AUTH_CSS = `
   .auth-flash > div { margin-bottom: 16px; padding: 11px 14px; border-radius: var(--radius-sm); font-size: var(--fs-sm); border: 1px solid transparent; }
   .auth-flash .flash-error { color: var(--danger); background: var(--danger-soft); border-color: var(--danger); }
   .auth-flash .flash-success { color: var(--ok); background: var(--ok-soft); border-color: var(--ok); }
+  .auth-card .btn { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 48px; margin-top: 22px; padding: 12px 18px; font: inherit; font-weight: 700; color: #fff; cursor: pointer; text-decoration: none;
+    border: 0; border-radius: var(--radius-pill); background: var(--grad); box-shadow: 0 10px 24px -10px var(--accent-glow); }
+  .auth-card .btn:hover { filter: brightness(1.06); text-decoration: none; }
+  .auth-card .btn:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+  .auth-card .btn[disabled], .auth-card .btn:disabled { opacity: .65; cursor: progress; }
+  .auth-card .flash { margin-bottom: 16px; padding: 11px 14px; border-radius: var(--radius-sm); font-size: var(--fs-sm); border: 1px solid transparent; }
+  .auth-card .flash-error { color: var(--danger); background: var(--danger-soft); border-color: var(--danger); }
+  .auth-card .flash-success { color: var(--ok); background: var(--ok-soft); border-color: var(--ok); }
+  #flash:empty { display: none; }
+  .auth-card p { margin: 0 0 14px; color: var(--ink-dim); font-size: var(--fs-sm); }
+  .auth-card code { font-family: var(--font-mono); font-size: .85em; background: var(--bg-tint); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; word-break: break-all; }
+  .auth-card ul { padding-left: 20px; color: var(--ink-dim); font-size: var(--fs-sm); }
+  .auth-card [hidden] { display: none !important; }
+  .auth-card a:not(.btn) { color: var(--accent-ink); font-weight: 700; }
+  .auth-badge { display: inline-block; margin: 0 0 12px; padding: 3px 11px; border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: 700; letter-spacing: .02em; color: var(--accent-ink); background: var(--accent-soft); }
+  .auth-switch { width: 100%; max-width: 420px; margin: 16px 0 0; padding: 13px 16px; text-align: center; font-size: var(--fs-sm); color: var(--ink-dim);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
+  .auth-switch a { color: var(--accent-ink); font-weight: 700; text-decoration: none; }
+  .auth-switch a:hover { text-decoration: underline; }
   .auth-turnstile { margin-top: 4px; }
   .auth-back { margin-top: 18px; font-size: var(--fs-xs); }
   .auth-back a { color: var(--ink-faint); text-decoration: none; }
@@ -54,7 +78,12 @@ const AUTH_CSS = `
   @media (prefers-reduced-motion: reduce) { .auth-btn, .auth-card input { transition: none; } .auth-btn:hover { transform: none; } }
 `;
 
-export function renderCustomerAuthShell({ title, bodyHtml }) {
+/**
+ * audience "customer" (default) shows a plain back link; "staff" marks the page as the staff console and adds the
+ * "Are you a customer? Log in here" switch that points to the customer portal login.
+ */
+export function renderCustomerAuthShell({ title, bodyHtml, audience = "customer" }) {
+  const staff = audience === "staff";
   return `<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
@@ -74,8 +103,10 @@ export function renderCustomerAuthShell({ title, bodyHtml }) {
 <body>
   <a class="auth-brand" href="/" aria-label="Lummet home"><span class="dot"></span>Lummet</a>
   <main class="auth-card">
+    ${staff ? '<span class="auth-badge">Staff console</span>' : ""}
     ${bodyHtml}
   </main>
+  ${staff ? '<p class="auth-switch">Are you a customer? <a href="/app/login">Log in here</a></p>' : ""}
   <p class="auth-back"><a href="/">&larr; Back to home</a></p>
 </body>
 </html>`;

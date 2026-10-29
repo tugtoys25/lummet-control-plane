@@ -1,4 +1,5 @@
-import { renderAuthShell, escapeHtml } from "../layout.js";
+import { escapeHtml } from "../layout.js";
+import { renderCustomerAuthShell } from "../customer-auth-shell.js";
 import { nonceToken, onClick } from "../../csp.js";
 
 // Client-side fetch against /api/customer/signup and /api/customer/login
@@ -6,37 +7,41 @@ import { nonceToken, onClick } from "../../csp.js";
 // form POST — no new server-side parsing/adapter code needed, and the
 // exact same validated path every JSON API consumer already uses.
 export function renderCustomerLoginPage({ turnstileSiteKey = "", initialView = "login" } = {}) {
-  return renderAuthShell({
+  return renderCustomerAuthShell({
     title: "Log in",
     bodyHtml: `
-      <div id="flash"></div>
-      ${turnstileSiteKey ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="${escapeHtml(turnstileSiteKey)}" data-callback="lummetTurnstileSuccess"></div>` : ""}
+      <div id="flash" class="auth-flash" role="status" aria-live="polite"></div>
+      ${turnstileSiteKey ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile auth-turnstile" data-sitekey="${escapeHtml(turnstileSiteKey)}" data-callback="lummetTurnstileSuccess"></div>` : ""}
       <input type="hidden" id="turnstile-token" value="" />
 
       <div id="login-view">
+        <h1>Welcome back</h1>
+        <p class="auth-sub">Log in to your Lummet account.</p>
         <form id="login-form">
           <label for="login-email">Email</label>
-          <input type="email" id="login-email" required autofocus />
+          <input type="email" id="login-email" autocomplete="email" required autofocus />
           <label for="login-password">Password</label>
-          <input type="password" id="login-password" required />
-          <button class="btn" type="submit" style="width:100%;">Log in</button>
+          <input type="password" id="login-password" autocomplete="current-password" required />
+          <button class="auth-btn" type="submit">Log in</button>
         </form>
-        <p style="font-size:13px;color:var(--text-dim);text-align:center;margin-top:16px;">
-          New here? <a href="#"${onClick("showSignup", [], {prevent: true})}>Create an account</a> &middot; <a href="/app/forgot-password">Forgot password?</a>
+        <p class="auth-alt">
+          New here? <a href="#"${onClick("showSignup", [], {prevent: true})}>Create an account</a><span class="sep" aria-hidden="true">&middot;</span><a href="/app/forgot-password">Forgot password?</a>
         </p>
       </div>
 
       <div id="signup-view" style="display:none;">
+        <h1>Create your account</h1>
+        <p class="auth-sub">Set up your organization in a minute.</p>
         <form id="signup-form">
           <label for="signup-org">Organization name</label>
-          <input type="text" id="signup-org" required />
+          <input type="text" id="signup-org" autocomplete="organization" required />
           <label for="signup-email">Email</label>
-          <input type="email" id="signup-email" required />
+          <input type="email" id="signup-email" autocomplete="email" required />
           <label for="signup-password">Password (12+ characters)</label>
-          <input type="password" id="signup-password" minlength="12" required />
-          <button class="btn" type="submit" style="width:100%;">Create account</button>
+          <input type="password" id="signup-password" autocomplete="new-password" minlength="12" required />
+          <button class="auth-btn" type="submit">Create account</button>
         </form>
-        <p style="font-size:13px;color:var(--text-dim);text-align:center;margin-top:16px;">
+        <p class="auth-alt">
           Already have an account? <a href="#"${onClick("showLogin", [], {prevent: true})}>Log in</a>
         </p>
       </div>
@@ -57,8 +62,17 @@ export function renderCustomerLoginPage({ turnstileSiteKey = "", initialView = "
         }
         function lummetTurnstileSuccess(token) { var field = document.getElementById('turnstile-token'); if (field) field.value = token || ''; }
         function flash(message, kind) {
-          document.getElementById('flash').innerHTML = message
-            ? '<div class="flash flash-' + kind + '">' + message + '</div>' : '';
+          var box = document.getElementById('flash');
+          box.textContent = '';
+          if (!message) return;
+          var d = document.createElement('div');
+          d.className = 'flash flash-' + kind;
+          d.textContent = message;
+          box.appendChild(d);
+        }
+        function busy(form, on) {
+          var b = form.querySelector('button[type=submit]');
+          if (b) b.disabled = !!on;
         }
         function showSignup() {
           document.getElementById('login-view').style.display = 'none';
@@ -73,6 +87,7 @@ export function renderCustomerLoginPage({ turnstileSiteKey = "", initialView = "
 
         document.getElementById('login-form').addEventListener('submit', function (e) {
           e.preventDefault();
+          var form = e.target; busy(form, true);
           fetch('/api/customer/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -85,13 +100,14 @@ export function renderCustomerLoginPage({ turnstileSiteKey = "", initialView = "
             .then(function (r) { return r.json(); })
             .then(function (data) {
               if (data.success) { location.href = intentDestination(); }
-              else { flash('Could not log in — check your email and password.', 'error'); }
+              else { busy(form, false); flash('Could not log in — check your email and password.', 'error'); }
             })
-            .catch(function () { flash('Could not reach the server.', 'error'); });
+            .catch(function () { busy(form, false); flash('Could not reach the server.', 'error'); });
         });
 
         document.getElementById('signup-form').addEventListener('submit', function (e) {
           e.preventDefault();
+          var form = e.target; busy(form, true);
           fetch('/api/customer/signup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -107,9 +123,9 @@ export function renderCustomerLoginPage({ turnstileSiteKey = "", initialView = "
             .then(function (r) { return r.json(); })
             .then(function (data) {
               if (data.success) { location.href = intentDestination(); }
-              else { flash('Could not create your account — ' + (data.error || 'please check your details') + '.', 'error'); }
+              else { busy(form, false); flash('Could not create your account — ' + (data.error || 'please check your details') + '.', 'error'); }
             })
-            .catch(function () { flash('Could not reach the server.', 'error'); });
+            .catch(function () { busy(form, false); flash('Could not reach the server.', 'error'); });
         });
         ${initialView === "signup" ? "showSignup();" : ""}
       </script>

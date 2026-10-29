@@ -1,4 +1,4 @@
-import { renderAuthShell } from "../layout.js";
+import { renderCustomerAuthShell } from "../customer-auth-shell.js";
 import { nonceToken } from "../../csp.js";
 
 // Round 2fa-enroll: authenticator enrollment for a signed-in customer. It calls the existing /api/customer/2fa/* routes.
@@ -36,23 +36,24 @@ const SCRIPT = () => `
 
 /** GET /app/security/2fa (flag CUSTOMER_2FA_ENROLL_PAGE=on). Static HTML, safe to serve to a policy-restricted session. */
 export function renderCustomer2faEnrollPage() {
-  return renderAuthShell({
+  return renderCustomerAuthShell({
     title: "Set up two-factor authentication",
-    bodyHtml: `<div id="flash"></div>
-      <p>Use an authenticator app (any app that supports time-based codes) to protect your account.</p>
-      <button class="btn" id="start" style="width:100%;">Start setup</button>
+    bodyHtml: `<h1>Two-factor authentication</h1>
+      <p class="auth-sub">Use an authenticator app (any app that supports time-based codes) to protect your account.</p>
+      <div id="flash" role="status" aria-live="polite"></div>
+      <button class="auth-btn" id="start" type="button">Start setup</button>
       <div id="step2" hidden>
         <p>Add this key to your authenticator app, then enter the 6-digit code it shows.</p>
-        <p style="font-size:13px;">Setup key: <code id="secret"></code></p>
-        <p style="font-size:12px;word-break:break-all;">App link: <code id="otpauth"></code></p>
+        <p>Setup key: <code id="secret"></code></p>
+        <p>App link: <code id="otpauth"></code></p>
         <label for="code">6-digit code</label>
         <input type="text" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" />
-        <button class="btn" id="confirm" style="width:100%;margin-top:12px;">Confirm and turn on</button>
+        <button class="auth-btn" id="confirm" type="button">Confirm and turn on</button>
       </div>
       <div id="step3" hidden>
         <p><strong>Save these backup codes now.</strong> Each works once if you lose your device. They are not shown again.</p>
         <ul id="codes"></ul>
       </div>
-      <p id="done" hidden style="font-size:13px;text-align:center;margin-top:16px;"><a href="/app/overview">Continue to your account</a></p>` + SCRIPT()
+      <p id="done" class="auth-alt" hidden><a href="/app/overview">Continue to your account</a></p>` + SCRIPT()
   });
 }

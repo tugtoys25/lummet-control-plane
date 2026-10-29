@@ -192,27 +192,33 @@ export const CLIENT_SCRIPT = `
 `;
 
 export const STYLES = `
+  @font-face { font-family: "Bricolage Grotesque"; font-style: normal; font-weight: 700; font-display: swap; src: url("/static/fonts/bricolage-700-v1.woff") format("woff"); }
+  @font-face { font-family: "Instrument Sans"; font-style: normal; font-weight: 400; font-display: swap; src: url("/static/fonts/instrument-400-v1.woff") format("woff"); }
+  @font-face { font-family: "Instrument Sans"; font-style: normal; font-weight: 700; font-display: swap; src: url("/static/fonts/instrument-700-v1.woff") format("woff"); }
   :root {
     color-scheme: dark;
-    --bg: #0b0e14;
-    --surface: #10141d;
-    --panel: #151a26;
-    --panel-2: #1a2030;
-    --panel-border: #252c3d;
-    --text: #e8ebf3;
-    --text-dim: #93a0b9;
-    --accent: #7c6cf6;
-    --accent-strong: #6a59ee;
+    --font-display: "Bricolage Grotesque", "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --font-sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --bg: #080914;
+    --surface: #0e1020;
+    --panel: #12142a;
+    --panel-2: #191c3a;
+    --panel-border: #22254a;
+    --text: #eef0fb;
+    --text-dim: #b0b6d0;
+    --accent: #8b7bff;
+    --accent-strong: #6a55f0;
     --accent-ink: #ffffff;
-    --accent-soft: rgba(124, 108, 246, 0.15);
-    --ok: #3ecf8e;
-    --warn: #f5a623;
+    --accent-soft: rgba(139, 123, 255, 0.15);
+    --grad: linear-gradient(135deg, #6a55f0 0%, #7a4df0 50%, #1fa5c4 140%);
+    --ok: #3ddba0;
+    --warn: #f5b23a;
     --danger: #f0526b;
     --danger-text: #ff8fa3;
-    --overlay: rgba(4, 6, 12, 0.62);
-    --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-    --radius: 12px;
-    --radius-sm: 8px;
+    --overlay: rgba(4, 5, 14, 0.66);
+    --shadow: 0 12px 34px -12px rgba(0, 0, 0, 0.65);
+    --radius: 16px;
+    --radius-sm: 10px;
     --sidebar-w: 276px;
     --topbar-h: 60px;
     --success: var(--ok);
@@ -221,29 +227,30 @@ export const STYLES = `
   }
   :root[data-theme="light"] {
     color-scheme: light;
-    --bg: #f3f5fa;
+    --bg: #f5f6fb;
     --surface: #ffffff;
     --panel: #ffffff;
-    --panel-2: #f7f8fc;
-    --panel-border: #dfe4ee;
-    --text: #151a26;
-    --text-dim: #586178;
-    --accent: #5b4ae0;
-    --accent-strong: #4a3acb;
-    --accent-soft: rgba(91, 74, 224, 0.1);
+    --panel-2: #eef0fb;
+    --panel-border: #e5e8f3;
+    --text: #0b0d1c;
+    --text-dim: #454b66;
+    --accent: #5b47f5;
+    --accent-strong: #4535d6;
+    --accent-soft: rgba(91, 71, 245, 0.09);
+    --grad: linear-gradient(135deg, #5b47f5 0%, #7a4df0 45%, #14a9c8 130%);
     --ok: #0f7a55;
-    --warn: #a35f00;
-    --danger: #d12c48;
+    --warn: #96560a;
+    --danger: #c4264a;
     --danger-text: #b3203a;
-    --overlay: rgba(15, 20, 35, 0.45);
-    --shadow: 0 10px 30px rgba(20, 30, 60, 0.14);
+    --overlay: rgba(11, 13, 28, 0.45);
+    --shadow: 0 10px 30px -12px rgba(11, 13, 28, 0.16), 0 2px 6px rgba(11, 13, 28, 0.04);
   }
 
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    font-family: var(--font-sans);
     font-size: 15px;
     line-height: 1.5;
     background: var(--bg);
@@ -279,7 +286,7 @@ export const STYLES = `
   .sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px 8px; flex-shrink: 0; }
   .brand { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; display: flex; align-items: center; gap: 9px; color: var(--text); }
   .brand:hover { text-decoration: none; }
-  .brand .dot { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), #4cc3ff); display: inline-block; box-shadow: 0 4px 14px var(--accent-soft); }
+  .brand .dot { width: 26px; height: 26px; border-radius: 8px; background: var(--grad); display: inline-block; box-shadow: 0 4px 14px var(--accent-soft); }
   .sidebar .nav-close { display: none; }
   .nav-filter-wrap { padding: 6px 16px 10px; flex-shrink: 0; }
   .nav-filter-wrap input { margin: 0; padding: 8px 12px; font-size: 13px; background: var(--bg); }
@@ -469,6 +476,25 @@ export const STYLES = `
     .sidebar, .topbar, .nav-backdrop { display: none !important; }
     .app { display: block; }
   }
+
+  /* 2.6.0.24: public-site look for the dashboards (staff console and customer portal): display font for headings,
+     gradient pill buttons, softer cards. Colors come from the palette above; nothing here changes layout or behavior. */
+  h1, h2, h3, .brand, .stat .num, .stat .value, .card h2 { font-family: var(--font-display); }
+  h1 { letter-spacing: -0.025em; }
+  .brand { font-size: 20px; }
+  .card, .stat { box-shadow: var(--shadow); }
+  .card { border-radius: var(--radius); }
+  .btn, .btn-primary { background: var(--grad); color: #fff; border-radius: 999px; padding: 9px 18px; box-shadow: 0 8px 20px -10px var(--accent-soft); transition: filter .15s ease, transform .15s ease; }
+  .btn:hover, .btn-primary:hover { background: var(--grad); filter: brightness(1.08); }
+  .btn-secondary { background: transparent; color: var(--text); border-color: var(--panel-border); box-shadow: none; }
+  .btn-secondary:hover { background: var(--accent-soft); filter: none; }
+  .btn-danger, .btn-danger:hover { background: var(--danger); color: #fff; box-shadow: none; }
+  .stat::before { background: var(--grad); opacity: 1; }
+  .nav-links a.active { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+  .badge { letter-spacing: 0.01em; }
+  input, textarea, select { border-color: var(--panel-border); }
+  th { font-family: var(--font-sans); }
+  @media (prefers-reduced-motion: reduce) { .btn, .btn-primary { transition: none; } }
 `;
 
 // Extra rules for the customer portal (customer-layout.js). Everything above is shared with the staff

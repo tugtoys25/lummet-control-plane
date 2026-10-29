@@ -71,9 +71,9 @@ test('0072 is safe to run twice, starts empty, rejects bad values and cascades w
   await assert.rejects(() => run(env, `INSERT INTO organization_security_policies (organization_id) VALUES (?)`, organizationId), 'one row per organization');
 });
 
-test('migration numbering stays consecutive and 0072 is the newest; it is additive only', () => {
+test('migration numbering stays consecutive and 0073 (public copy) is the newest after 0072; 0072 is additive only', () => {
   const files = readdirSync(new URL('../migrations/', import.meta.url)).filter((f) => f.endsWith('.sql')).sort();
-  assert.equal(files.at(-1), '0072_org_security_policy.sql'); assert.equal(files.at(-2), '0071_revenue.sql');
+  assert.equal(files.at(-1), '0073_public_conversion_copy.sql'); assert.equal(files.at(-2), '0072_org_security_policy.sql'); assert.equal(files.at(-3), '0071_revenue.sql');
   assert.doesNotMatch(MIGRATION, /\b(DROP|DELETE\s+FROM|ALTER\s+TABLE|UPDATE\s)/i);
 });
 

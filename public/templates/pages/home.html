@@ -4,15 +4,21 @@
   <div class="container hero-grid">
     <div class="hero-copy">
       {{#if hero.eyebrow}}<span class="eyebrow eyebrow-pill">{{hero.eyebrow}}</span>{{/if}}
-      <h1>{{hero.title}}</h1>
+      <h1>{{#if hero.has_accent}}{{hero.title_lead}} <span class="grad">{{hero.title_accent}}</span>{{else}}{{hero.title}}{{/if}}</h1>
       {{#if hero.subtitle}}<p class="lede">{{hero.subtitle}}</p>{{/if}}
       <div class="hero-actions">
         {{#if hero.has_primary}}<a class="btn btn-primary btn-lg" href="{{hero.primary_href}}">{{hero.primary_label}}</a>{{/if}}
         {{#if hero.has_secondary}}<a class="btn btn-secondary btn-lg" href="{{hero.secondary_href}}">{{hero.secondary_label}}</a>{{/if}}
       </div>
+      {{#if hero.has_notes}}<ul class="hero-note">{{#each hero.notes}}<li>{{this}}</li>{{/each}}</ul>{{/if}}
     </div>
     {{#if hero.graph_svg}}
-    <div class="hero-visual">{{{hero.graph_svg}}}</div>
+    <div class="hero-visual">
+      <div class="hero-card" aria-hidden="false">
+        <div class="hero-card-bar" aria-hidden="true"><i></i><i></i><i></i><span>{{site.name}}</span></div>
+        {{{hero.graph_svg}}}
+      </div>
+    </div>
     {{/if}}
   </div>
 </section>
@@ -36,6 +42,7 @@
   {{#if is_updates}}{{> components/section-updates}}{{/if}}
   {{#if is_insights}}{{> components/section-insights}}{{/if}}
   {{#if is_partners}}{{> components/section-partners}}{{/if}}
+  {{#if is_plans}}{{> components/section-plans}}{{/if}}
   {{#if is_faq}}{{> components/section-faq}}{{/if}}
   {{#if is_cta}}{{> components/section-cta}}{{/if}}
   {{#if is_contact}}{{> components/section-contact}}{{/if}}

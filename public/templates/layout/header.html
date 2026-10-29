@@ -15,9 +15,10 @@
         <a href="{{href}}"{{#if active}} aria-current="page"{{/if}}>{{label}}</a>
         {{/if}}{{/each}}
         {{#each site.nav_cta}}{{#if on_bar}}
-        <a class="btn btn-sm btn-ghost" href="{{href}}">{{label}}</a>
+        <a class="btn btn-sm {{#if is_primary}}btn-primary{{else}}btn-ghost{{/if}}" href="{{href}}">{{label}}</a>
         {{/if}}{{/each}}
       </nav>
+      {{#each site.nav_cta}}{{#if is_primary}}<span class="header-cta-m"><a class="btn btn-sm btn-primary" href="{{href}}">{{label}}</a></span>{{/if}}{{/each}}
       <button class="icon-btn" type="button" data-theme-toggle aria-label="{{ui.theme_toggle}}">
         <span class="icon-sun">{{{icons.sun}}}</span><span class="icon-moon">{{{icons.moon}}}</span>
       </button>

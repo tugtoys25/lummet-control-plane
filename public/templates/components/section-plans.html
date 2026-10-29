@@ -1,0 +1,18 @@
+<section class="section plans-teaser" id="{{key}}" aria-labelledby="{{key}}-title">
+  <div class="container">
+    <header class="section-head reveal">
+      {{#if eyebrow}}<span class="eyebrow">{{eyebrow}}</span>{{/if}}
+      <h2 id="{{key}}-title">{{title}}</h2>
+      {{#if ui.home_plans_intro}}<div class="lede"><p>{{ui.home_plans_intro}}</p></div>{{/if}}
+    </header>
+    <div class="plan-grid">
+      {{#each plans.plans}}
+      {{> components/plan-card}}
+      {{/each}}
+    </div>
+    <div class="teaser-foot">
+      <p>{{plans.family}}{{#if plans.trial_note}} · {{plans.trial_note}}{{/if}}</p>
+      <a class="btn btn-secondary" href="/pricing">{{ui.home_plans_all}} {{{icons.arrow}}}</a>
+    </div>
+  </div>
+</section>

@@ -3,23 +3,32 @@
    ===================================================== */
 
 /* ---- Homepage hero ---- */
-.hero { position: relative; overflow: hidden; padding-block: clamp(3rem, 8vw, 6.5rem) clamp(2.5rem, 6vw, 5rem); }
+.hero { position: relative; overflow: hidden; padding-block: clamp(3rem, 8vw, 7rem) clamp(3rem, 7vw, 6rem); }
 .hero-bg { position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(60% 55% at 85% 10%, var(--accent-glow), transparent 70%),
-    radial-gradient(45% 45% at 5% 90%, color-mix(in srgb, var(--accent-2) 22%, transparent), transparent 70%);
-  -webkit-mask-image: linear-gradient(#000 70%, transparent);
-  mask-image: linear-gradient(#000 70%, transparent); }
+    radial-gradient(55% 60% at 88% 0%, var(--accent-glow), transparent 70%),
+    radial-gradient(45% 50% at 0% 100%, color-mix(in srgb, var(--accent-2) 24%, transparent), transparent 70%),
+    radial-gradient(30% 40% at 55% 0%, color-mix(in srgb, var(--accent-3) 14%, transparent), transparent 70%);
+  -webkit-mask-image: linear-gradient(#000 75%, transparent); mask-image: linear-gradient(#000 75%, transparent); }
 .hero-bg::after { content: ""; position: absolute; inset: 0;
   background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
-  background-size: 56px 56px; opacity: 0.45;
-  -webkit-mask-image: radial-gradient(70% 70% at 50% 30%, #000, transparent);
-  mask-image: radial-gradient(70% 70% at 50% 30%, #000, transparent); }
+  background-size: 60px 60px; opacity: 0.5;
+  -webkit-mask-image: radial-gradient(70% 70% at 50% 25%, #000, transparent); mask-image: radial-gradient(70% 70% at 50% 25%, #000, transparent); }
 .hero-grid { position: relative; display: grid; gap: var(--space-7); align-items: center; }
-.hero-copy h1 { background: linear-gradient(180deg, var(--ink) 30%, color-mix(in srgb, var(--ink) 60%, var(--accent))); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.hero-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-5); }
+.hero-copy h1 { margin-bottom: var(--space-4); }
+.hero-copy h1 em, .hero-copy h1 .grad { font-style: normal; background: var(--grad-text); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero-copy .lede { font-size: clamp(1.1rem, 1rem + 0.5vw, 1.35rem); max-width: 54ch; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); }
+.hero-note { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: var(--space-5) 0 0; padding: 0; list-style: none; color: var(--ink-dim); font-size: var(--fs-sm); font-weight: 700; }
+.hero-note li { display: inline-flex; align-items: center; gap: 8px; }
+.hero-note li::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px var(--ok-soft); }
 .hero-visual { display: grid; place-items: center; }
-@media (min-width: 960px) { .hero-grid { grid-template-columns: 1.1fr 0.9fr; } }
+.hero-card { position: relative; width: 100%; max-width: 540px; padding: clamp(0.9rem, 2.4vw, 1.4rem); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--surface) 82%, transparent); border: 1px solid var(--border); box-shadow: var(--shadow-lg); backdrop-filter: blur(10px); }
+.hero-card::before { content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 60%, transparent), transparent 40%, color-mix(in srgb, var(--accent-2) 55%, transparent)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
+.hero-card-bar { display: flex; align-items: center; gap: 6px; margin-bottom: var(--space-3); }
+.hero-card-bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--border-strong); }
+.hero-card-bar span { margin-left: auto; font-size: var(--fs-xs); font-weight: 700; color: var(--ink-faint); letter-spacing: 0.04em; }
+@media (min-width: 960px) { .hero-grid { grid-template-columns: 1.15fr 0.85fr; } }
 @media (max-width: 520px) { .hero-actions .btn { width: 100%; } }
 
 /* ---- Hero network graph (inline SVG) ---- */
@@ -32,7 +41,7 @@
 .hg-hub-label { fill: #fff; font: 700 11px var(--font-sans); letter-spacing: 0.02em; }
 .hg-halo { fill: var(--accent-soft); }
 .hg-dot { fill: var(--surface); stroke: var(--accent-2); stroke-width: 2.5; }
-.hg-label { fill: var(--ink-dim); font: 600 11px var(--font-sans); }
+.hg-label { fill: var(--ink-dim); font: 700 11px var(--font-sans); }
 @keyframes hg-flow { to { stroke-dashoffset: -22; } }
 @keyframes hg-pulse { 0%, 100% { transform: scale(1); opacity: 0.55; } 50% { transform: scale(1.14); opacity: 0.3; } }
 
@@ -40,12 +49,14 @@
 .banner-ad img { border-radius: var(--radius-md); }
 
 /* ---- Inner page header ---- */
-.page-hero { padding-block: clamp(2.25rem, 6vw, 4.5rem) clamp(1rem, 3vw, 2rem); position: relative; }
-.page-hero h1 { font-size: clamp(1.9rem, 1.3rem + 2.8vw, 3.1rem); }
+.page-hero { padding-block: clamp(2.5rem, 7vw, 5rem) clamp(1.25rem, 3vw, 2.25rem); position: relative; overflow: hidden; }
+.page-hero::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 100%; background: radial-gradient(50% 90% at 85% 0%, var(--accent-soft), transparent 70%), radial-gradient(40% 70% at 5% 0%, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 70%); pointer-events: none; }
+.page-hero > .container { position: relative; }
+.page-hero h1 { font-size: clamp(2.2rem, 1.4rem + 3.6vw, 3.9rem); }
 .page-hero .lede { margin-top: var(--space-3); }
 .brand-hero { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; margin-bottom: var(--space-4); }
 .brand-hero h1 { margin: var(--space-2) 0 var(--space-2); }
-.brand-hero-logo { width: 88px; height: 88px; border-radius: 22px; object-fit: contain; background: var(--bg-soft); border: 1px solid var(--border); padding: 8px; }
+.brand-hero-logo { width: 88px; height: 88px; border-radius: 24px; object-fit: contain; background: var(--bg-soft); border: 1px solid var(--border); padding: 8px; }
 .brand-hero-logo.avatar { object-fit: cover; padding: 0; border-radius: 50%; }
 .author-bio { max-width: 62ch; color: var(--ink-dim); font-size: var(--fs-lg); }
 .social-links { display: flex; gap: var(--space-4); flex-wrap: wrap; }
@@ -61,7 +72,7 @@
 .article-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-7); padding-top: var(--space-5); border-top: 1px solid var(--border); }
 .source-note { padding: 12px 16px; border-radius: var(--radius-md); background: var(--bg-soft); border: 1px solid var(--border); font-size: var(--fs-sm); }
 .updated-note { margin-top: var(--space-7); color: var(--ink-faint); font-size: var(--fs-xs); }
-.post-card h3 { font-size: 1.15rem; }
+.post-card h3 { font-size: 1.2rem; }
 
 /* ---- Updates timeline ---- */
 .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-5); }

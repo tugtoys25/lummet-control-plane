@@ -1,5 +1,17 @@
 <footer class="site-footer">
   <div class="container">
+    {{#if site.footer_cta}}
+    <section class="footer-cta" aria-labelledby="footer-cta-title">
+      <div>
+        <h2 id="footer-cta-title">{{site.footer_cta.title}}</h2>
+        <p>{{site.footer_cta.body}}</p>
+      </div>
+      <div class="footer-cta-actions">
+        <a class="btn btn-light btn-lg" href="{{site.footer_cta.primary_href}}">{{site.footer_cta.primary_label}} {{{icons.arrow}}}</a>
+        {{#if site.footer_cta.has_secondary}}<a class="btn btn-outline-light btn-lg" href="{{site.footer_cta.secondary_href}}">{{site.footer_cta.secondary_label}}</a>{{/if}}
+      </div>
+    </section>
+    {{/if}}
     <div class="footer-grid">
       <div class="footer-brand">
         <a class="brand" href="/" aria-label="{{site.name}}">

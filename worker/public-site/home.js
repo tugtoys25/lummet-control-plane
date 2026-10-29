@@ -15,6 +15,7 @@ import { sanitizeHtml } from "./sanitize.js";
 import { safeUrl, isExternal, formatDate } from "./format.js";
 import { heroGraphSvg } from "./hero-graph.js";
 import { isLiveHref } from "./links.js";
+import { plansTeaser } from "./plans-teaser.js";
 
 const KINDS = new Set([
   "text", "features", "steps", "checklist", "panel", "brands", "stats",
@@ -54,7 +55,7 @@ export async function buildHome(ctx) {
   const { env, siteCtx } = ctx;
   const { site, settings, counts, ui } = siteCtx;
 
-  const [rows, features, faqs, brands, updates, publications, partners, banner] = await Promise.all([
+  const [rows, features, faqs, brands, updates, publications, partners, banner, plans] = await Promise.all([
     listHomepageSections(env),
     listFeatures(env),
     listFaqs(env),
@@ -62,7 +63,8 @@ export async function buildHome(ctx) {
     listUpdates(env, { limit: 3 }),
     listPublications(env, { limit: 3 }),
     listPartners(env, 8),
-    getBannerAd(env)
+    getBannerAd(env),
+    plansTeaser(ctx)
   ]);
 
   const featuresByGroup = groupBy(features, "group_key");
@@ -137,6 +139,15 @@ export async function buildHome(ctx) {
     else if (sec.is_contact && !sec.cta_label && !site.has_contact) sections.splice(i, 1);
     else if (sec.is_panel && !sec.cta_label && !sec.body_html && !(sec.items || []).length) sections.splice(i, 1);
   }
+  // Plans block: built-in (not a DB row), shown only when there are plans to sell. It sits after the capabilities section,
+  // otherwise before the FAQ, otherwise at the end, so the visitor meets the price right after learning what the product does.
+  if (plans) {
+    const block = { key: "plans", kind: "plans", is_plans: true, bg: "default", eyebrow: ui.home_plans_eyebrow || "", title: ui.home_plans_title || "", body_html: "", plans };
+    let at = sections.findIndex((s) => s.key === "capabilities") + 1;
+    if (at <= 0) at = sections.findIndex((s) => s.is_faq || s.is_cta);
+    if (at < 0) at = sections.length;
+    if (block.title) sections.splice(at, 0, block);
+  }
   const liveKeys = new Set(sections.map((s) => s.key));
 
   const heroTitle = (settings.hero_title || "").trim();
@@ -149,9 +160,18 @@ export async function buildHome(ctx) {
         primary_href: safeUrl(settings.hero_cta_primary_href),
         secondary_label: settings.hero_cta_secondary_label || "",
         secondary_href: safeUrl(settings.hero_cta_secondary_href),
-        graph_svg: heroGraphSvg(site.name, brandCards, ui)
+        graph_svg: heroGraphSvg(site.name, brandCards, ui),
+        notes: plans ? [plans.from_note, plans.trial_note, ui.hero_note_cancel || ""].filter(Boolean) : []
       }
     : null;
+  if (hero) {
+    // "One platform. Many brands." -> lead "One platform." + accent "Many brands." (a single sentence has no accent).
+    const parts = hero.title.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [hero.title];
+    hero.title_accent = parts.length > 1 ? parts.pop().trim() : "";
+    hero.title_lead = parts.join(" ").trim();
+    hero.has_accent = Boolean(hero.title_accent);
+    hero.has_notes = hero.notes.length > 0;
+  }
   if (hero) {
     const live = (href) => isLiveHref(href, { counts, anchors: liveKeys });
     hero.has_primary = Boolean(hero.primary_label && hero.primary_href && live(hero.primary_href));

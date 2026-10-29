@@ -1,80 +1,100 @@
 /* =====================================================
    LUMMET PUBLIC SITE — DESIGN TOKENS
-   Colours, type, spacing, radii, shadows. Light is the default;
-   dark applies via [data-theme="dark"] (set by /static/js/theme.js,
-   which follows the OS setting until the visitor picks one).
-   Fonts are the system stack: nothing is downloaded, nothing blocks
-   first paint, and there is no third-party font request.
+   Light is the default; dark applies via [data-theme="dark"]
+   (set by /static/js/theme.js, which follows the OS setting until the
+   visitor picks one). Fonts are SELF-HOSTED subsets under /static/fonts
+   (no third-party request; CSP font-src 'self' is unchanged):
+     display  Bricolage Grotesque 700     body  Instrument Sans 400 / 700
    ===================================================== */
+@font-face { font-family: "Bricolage Grotesque"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("/static/fonts/bricolage-700-v1.woff") format("woff"); }
+@font-face { font-family: "Instrument Sans"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("/static/fonts/instrument-400-v1.woff") format("woff"); }
+@font-face { font-family: "Instrument Sans"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("/static/fonts/instrument-700-v1.woff") format("woff"); }
+
 :root,
 :root[data-theme="light"] {
-  --accent: #6d5bf6;
-  --accent-2: #22d3ee;
-  --accent-ink: #4b3fd1;
-  --accent-soft: rgba(109, 91, 246, 0.1);
-  --accent-glow: rgba(109, 91, 246, 0.35);
+  --accent: #5b47f5;
+  --accent-2: #14b8d4;
+  --accent-3: #e879f9;
+  --accent-ink: #4535d6;
+  --accent-soft: rgba(91, 71, 245, 0.09);
+  --accent-glow: rgba(91, 71, 245, 0.32);
+  --grad: linear-gradient(135deg, #5b47f5 0%, #7a4df0 45%, #14b8d4 130%);
+  --grad-text: linear-gradient(100deg, #5b47f5 5%, #9a4df0 45%, #14b8d4 100%);
 
   --bg: #ffffff;
-  --bg-soft: #f6f7fb;
+  --bg-soft: #f5f6fb;
+  --bg-tint: #eef0fb;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  --ink: #0f1222;
-  --ink-dim: #4a5068;
-  --ink-faint: #7a809a;
-  --border: #e4e7f1;
-  --border-strong: #cfd4e6;
-  --header-bg: rgba(255, 255, 255, 0.78);
+  --ink: #0b0d1c;
+  --ink-dim: #454b66;
+  --ink-faint: #6b7290;
+  --border: #e5e8f3;
+  --border-strong: #ced3e8;
+  --header-bg: rgba(255, 255, 255, 0.82);
+  --ok: #0f9d6b;
+  --ok-soft: rgba(15, 157, 107, 0.12);
 
-  --dark-1: #0d0e1a;
-  --dark-2: #1a1638;
+  --dark-1: #0a0b19;
+  --dark-2: #16123a;
   --on-dark: #ffffff;
-  --on-dark-dim: rgba(255, 255, 255, 0.74);
+  --on-dark-dim: rgba(255, 255, 255, 0.76);
   --danger: #c4264a;
   --danger-soft: rgba(196, 38, 74, 0.08);
 
-  --shadow-sm: 0 1px 2px rgba(15, 18, 34, 0.06);
-  --shadow-md: 0 8px 24px -8px rgba(15, 18, 34, 0.14);
-  --shadow-lg: 0 24px 60px -20px rgba(45, 35, 120, 0.28);
+  --shadow-sm: 0 1px 2px rgba(11, 13, 28, 0.05), 0 1px 1px rgba(11, 13, 28, 0.03);
+  --shadow-md: 0 10px 30px -12px rgba(11, 13, 28, 0.16), 0 2px 6px rgba(11, 13, 28, 0.04);
+  --shadow-lg: 0 30px 70px -28px rgba(50, 35, 150, 0.35), 0 8px 20px -12px rgba(11, 13, 28, 0.1);
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
   --accent: #8b7bff;
   --accent-2: #38e1f5;
-  --accent-ink: #b3a8ff;
-  --accent-soft: rgba(139, 123, 255, 0.14);
-  --accent-glow: rgba(139, 123, 255, 0.4);
+  --accent-3: #f0a3ff;
+  --accent-ink: #b8adff;
+  --accent-soft: rgba(139, 123, 255, 0.15);
+  --accent-glow: rgba(139, 123, 255, 0.42);
+  --grad: linear-gradient(135deg, #7c69ff 0%, #8f5cff 45%, #22c7e4 130%);
+  --grad-text: linear-gradient(100deg, #a99cff 5%, #d08bff 50%, #4fe3f7 100%);
 
-  --bg: #0a0b14;
-  --bg-soft: #10121f;
+  --bg: #080914;
+  --bg-soft: #0e1020;
+  --bg-tint: #131530;
   --surface: #12142a;
-  --surface-raised: #191c38;
+  --surface-raised: #191c3a;
   --ink: #eef0fb;
-  --ink-dim: #a9afca;
-  --ink-faint: #7d84a3;
-  --border: #23264a;
+  --ink-dim: #b0b6d0;
+  --ink-faint: #8087a6;
+  --border: #22254a;
   --border-strong: #33376a;
-  --header-bg: rgba(10, 11, 20, 0.72);
+  --header-bg: rgba(8, 9, 20, 0.78);
+  --ok: #3ddba0;
+  --ok-soft: rgba(61, 219, 160, 0.14);
   --danger: #ff7a93;
   --danger-soft: rgba(255, 122, 147, 0.12);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 24px 70px -20px rgba(0, 0, 0, 0.7);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 12px 34px -12px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 30px 80px -24px rgba(0, 0, 0, 0.75);
   color-scheme: dark;
 }
 
 :root {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-display: "Bricolage Grotesque", "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
   --fs-xs: 0.8125rem;
-  --fs-sm: 0.9rem;
-  --fs-base: 1rem;
-  --fs-lg: clamp(1.05rem, 0.98rem + 0.35vw, 1.25rem);
-  --fs-h3: clamp(1.1rem, 1.02rem + 0.4vw, 1.3rem);
-  --fs-h2: clamp(1.65rem, 1.3rem + 1.7vw, 2.5rem);
-  --fs-h1: clamp(2.1rem, 1.4rem + 3.4vw, 3.9rem);
+  --fs-sm: 0.925rem;
+  --fs-base: 1.0625rem;
+  --fs-lg: clamp(1.1rem, 1.02rem + 0.4vw, 1.3rem);
+  --fs-h3: clamp(1.15rem, 1.05rem + 0.4vw, 1.35rem);
+  --fs-h2: clamp(1.9rem, 1.35rem + 2.2vw, 3rem);
+  --fs-h1: clamp(2.5rem, 1.5rem + 4.4vw, 4.9rem);
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -86,13 +106,13 @@
   --space-8: 4.5rem;
   --space-9: 6.5rem;
 
-  --radius-sm: 8px;
-  --radius-md: 14px;
-  --radius-lg: 22px;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 26px;
   --radius-pill: 999px;
 
-  --container: 1160px;
+  --container: 1200px;
   --narrow: 760px;
-  --header-h: 68px;
+  --header-h: 72px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }

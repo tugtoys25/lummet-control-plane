@@ -107,7 +107,7 @@ export async function loadSite(env, url) {
       .filter((l) => l.href);
 
   // Links that stay visible on the desktop bar (everything else lives in the menu). Matched by destination so renaming a label never breaks it.
-  const onBar = (href) => { const p = String(href || "").split(/[?#]/)[0]; return p === "/pricing" || p === "/login"; };
+  const onBar = (href) => { const p = String(href || "").split(/[?#]/)[0]; return p === "/pricing" || p === "/login" || p === "/app/signup"; };
   const navMain = byPlacement("header").map((l) => ({ ...l, active: isActive(l.href, path), on_bar: onBar(l.href) }));
   const navCta = byPlacement("header_cta").map((l, i, arr) => ({ ...l, is_primary: i === arr.length - 1, on_bar: onBar(l.href) }));
   const footerColumns = FOOTER_COLUMNS.map((c) => ({ title: ui[c.titleKey] || "", links: byPlacement(c.placement) })).filter(
@@ -120,6 +120,21 @@ export async function loadSite(env, url) {
   // Where "talk to us" links should go: the contact form if one is published,
   // otherwise a mailto link if an address is configured, otherwise nowhere.
   const contactUrl = counts.formKeys.has("contact") ? "/contact" : hasContact ? `mailto:${contactEmail}` : "";
+
+  // Closing call to action in the footer (every page). Text comes from lummet_ui_strings, so it is content, not markup;
+  // it is omitted until those strings exist. The demo button only appears when the demo form is published.
+  const hasDemo = counts.formKeys.has("demo");
+  const footerCta = ui.footer_cta_title && ui.footer_cta_primary
+    ? {
+        title: ui.footer_cta_title,
+        body: ui.footer_cta_body || "",
+        primary_label: ui.footer_cta_primary,
+        primary_href: "/pricing",
+        has_secondary: Boolean(hasDemo && ui.footer_cta_secondary),
+        secondary_label: ui.footer_cta_secondary || "",
+        secondary_href: "/demo"
+      }
+    : null;
 
   return {
     settings,
@@ -144,6 +159,7 @@ export async function loadSite(env, url) {
       nav_main: navMain,
       nav_cta: navCta,
       nav_mobile_all: [...navMain, ...navCta],
+      footer_cta: footerCta,
       footer_columns: footerColumns,
       has_footer_columns: footerColumns.length > 0
     },

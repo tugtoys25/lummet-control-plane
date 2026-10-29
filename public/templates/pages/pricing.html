@@ -1,35 +1,37 @@
-<section class="page-hero">
+<section class="page-hero pricing-hero">
   <div class="container">
     {{> components/breadcrumbs}}
+    {{#if ui.pricing_eyebrow}}<span class="eyebrow eyebrow-pill">{{ui.pricing_eyebrow}}</span>{{/if}}
     <h1>{{title}}</h1>
     {{#if intro}}<p class="lede">{{intro}}</p>{{/if}}
+    {{#if has_groups}}{{#if ui.pricing_assure_1}}
+    <ul class="pricing-assure">
+      <li>{{ui.pricing_assure_1}}</li>
+      {{#if ui.pricing_assure_2}}<li>{{ui.pricing_assure_2}}</li>{{/if}}
+    </ul>
+    {{/if}}{{/if}}
   </div>
 </section>
 <section class="section section-tight">
   <div class="container">
     {{#if has_groups}}
-      {{#if has_annual}}
-      <div class="filter-bar" role="group" aria-label="{{ui.pricing_billing_label}}">
-        <a class="chip{{#if monthly}} is-active{{/if}}" href="/pricing">{{ui.pricing_monthly}}</a>
-        <a class="chip{{#if annual}} is-active{{/if}}" href="/pricing?billing=annual">{{ui.pricing_annual}}</a>
+      <div class="pricing-toolbar">
+        {{#if has_annual}}
+        <div class="filter-bar" role="group" aria-label="{{ui.pricing_billing_label}}">
+          <a{{#if monthly}} aria-current="true"{{/if}} class="chip{{#if monthly}} is-active{{/if}}" href="/pricing">{{ui.pricing_monthly}}</a>
+          <a{{#if annual}} aria-current="true"{{/if}} class="chip{{#if annual}} is-active{{/if}}" href="/pricing?billing=annual">{{ui.pricing_annual}}</a>
+        </div>
+        {{/if}}
+        <div class="field pricing-family-filter"><label for="pricing-family">{{ui.pricing_family_label}}</label><select id="pricing-family"><option value="all">{{ui.pricing_family_all}}</option>{{#each families}}<option value="{{id}}">{{name}}</option>{{/each}}</select></div>
       </div>
-      {{/if}}
-      <div class="field pricing-family-filter"><label for="pricing-family">{{ui.pricing_family_label}}</label><select id="pricing-family"><option value="all">{{ui.pricing_family_all}}</option>{{#each families}}<option value="{{id}}">{{name}}</option>{{/each}}</select></div>
       {{#each groups}}
       <section class="pricing-family" data-pricing-family="{{id}}" aria-labelledby="pricing-family-title-{{id}}">
-      <h2 class="pricing-product" id="pricing-family-title-{{id}}">{{name}}</h2>
-      <div class="grid grid-3">
-        {{#each plans}}
-        <article class="card pricing-plan">
-          <h3>{{name}}</h3>
-          <p class="pricing-price"><strong>{{price}}</strong> {{period}}</p>
-          {{#if saving}}<p class="pricing-saving">{{saving}}</p>{{/if}}
-          {{#if trial}}<p>{{trial}}</p>{{/if}}
-          <ul>{{#each features}}<li>{{this}}</li>{{/each}}</ul>
-          <a class="btn btn-primary" href="/app/signup?plan={{planId}}&amp;period={{signupPeriod}}">{{ui.pricing_cta}}</a>
-        </article>
-        {{/each}}
-      </div>
+        <h2 class="pricing-product" id="pricing-family-title-{{id}}">{{name}}</h2>
+        <div class="plan-grid">
+          {{#each plans}}
+          {{> components/plan-card}}
+          {{/each}}
+        </div>
       </section>
       {{/each}}
       <section class="pricing-comparison" aria-labelledby="pricing-comparison-title">
@@ -48,6 +50,13 @@
         <details><summary>{{ui.pricing_faq_tax_q}}</summary><p>{{ui.pricing_faq_tax_a}}</p></details>
         <details><summary>{{ui.pricing_faq_business_q}}</summary><p>{{ui.pricing_faq_business_a}}</p></details>
       </section>
+      {{#if site.has_contact_url}}{{#if ui.pricing_help_title}}
+      <div class="cta-band pricing-cta">
+        <h2>{{ui.pricing_help_title}}</h2>
+        <div class="lede"><p>{{ui.pricing_help_body}}</p></div>
+        <div class="cta-actions"><a class="btn btn-light btn-lg" href="{{site.contact_url}}">{{ui.pricing_help_cta}} {{{icons.arrow}}}</a></div>
+      </div>
+      {{/if}}{{/if}}
       <script src="/static/js/pricing.js" defer></script>
     {{else}}
       <div class="empty-state"><p>{{ui.pricing_empty}} <a href="/contact">{{ui.pricing_contact}}</a></p></div>

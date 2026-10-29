@@ -445,7 +445,7 @@ test('state reuses alert_state: no new table, no new migration, probe rows are h
   const { listAlertState } = await import('../worker/alerts.js');
   assert.equal((await listAlertState(e)).some((r) => r.key.startsWith('probe:')), false);
   const migrations = (await readdir(new URL('../migrations/', import.meta.url))).filter((f) => f.endsWith('.sql')).sort();
-  assert.equal(migrations[migrations.length - 1].slice(0, 4), '0072', 'Round 6.5A adds no migration');
+  assert.ok(migrations.includes('0072_org_security_policy.sql') && migrations.every((m) => m.slice(0, 4) <= '0073'), 'Round 6.5A adds no migration of its own (0073 is the public copy refresh)');
 });
 
 test('a streak keeps its start time and counts up; recovery clears it and records the last ok time', async () => {

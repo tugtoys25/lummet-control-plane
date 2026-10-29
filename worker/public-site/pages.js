@@ -354,7 +354,7 @@ export async function notFoundPage(ctx) {
 
 // -------------------------------------------------------------- pricing (v7G)
 
-const MONEY = (cents, currency) => {
+export const MONEY = (cents, currency) => {
   const amount = cents / 100;
   try {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", minimumFractionDigits: Number.isInteger(amount) ? 0 : 2 }).format(amount);
@@ -401,9 +401,13 @@ export function pricingGroups(plans, period, ui = {}) {
       planId: p.id,
       signupPeriod: period,
       productId: String(p.product_id),
-      featuresText: pricingFeatures(p.entitlements).join(", ") || "Core platform"
+      featuresText: pricingFeatures(p.entitlements).join(", ") || "Core platform",
+      featured: false,
+      href: `/app/signup?plan=${encodeURIComponent(p.id)}&period=${period}`
     });
   }
+  // A three-tier family highlights its middle plan as the recommended one (layout only; the price is unchanged).
+  for (const g of groups.values()) if (g.plans.length === 3) g.plans[1].featured = true;
   return [...groups.values()];
 }
 

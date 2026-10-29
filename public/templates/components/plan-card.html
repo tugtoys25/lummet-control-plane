@@ -1,0 +1,9 @@
+<article class="card pricing-plan{{#if featured}} is-featured{{/if}}">
+  {{#if featured}}<span class="plan-flag">{{ui.pricing_recommended}}</span>{{/if}}
+  <h3>{{name}}</h3>
+  <p class="pricing-price"><strong>{{price}}</strong> {{period}}</p>
+  {{#if saving}}<p class="pricing-saving">{{saving}}</p>{{/if}}
+  {{#if trial}}<p class="plan-trial">{{trial}}</p>{{/if}}
+  <ul class="plan-features">{{#each features}}<li>{{this}}</li>{{/each}}</ul>
+  <a class="btn btn-primary btn-lg" href="{{href}}">{{ui.pricing_cta}}</a>
+</article>

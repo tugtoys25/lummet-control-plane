@@ -976,10 +976,12 @@ export async function renderResourceForm(env, admin, resourceKey, config, id, fo
   // referenced by this config's fields once, up front.
   const optionResourceKeys = [...new Set(config.fields.filter((f) => f.optionsResource).map((f) => f.optionsResource))];
   const fieldOptions = {};
-  for (const key of optionResourceKeys) {
-    const optResult = await getFromTenant(env, tenant, `${BASE_PATH}/${key}`);
+  // Each is a network call to the tenant's Super API, so they run together rather than one after another.
+  const optResults = await Promise.all(optionResourceKeys.map((key) => getFromTenant(env, tenant, `${BASE_PATH}/${key}`)));
+  optionResourceKeys.forEach((key, i) => {
+    const optResult = optResults[i];
     fieldOptions[key] = optResult.ok ? (optResult.data.data || []) : [];
-  }
+  });
 
   const body = `
     <h1>${isEdit ? `Edit ${escapeHtml(config.label.replace(/s$/, ""))}` : `New ${escapeHtml(config.label.replace(/s$/, ""))}`}</h1>

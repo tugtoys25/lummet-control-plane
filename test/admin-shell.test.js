@@ -2,6 +2,11 @@ import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { createTestDb, applyMigrations } from "./support/d1-shim.js";
 import { renderShell, NAV } from "../worker/views/layout.js";
+import { STYLES, CLIENT_SCRIPT } from "../worker/views/shell-assets.js";
+
+// Since 2.6.0.18 the shell CSS/JS is a cached external file (worker/perf/shell-bundle.js), not inlined in each page.
+// These tests still pin what the shell contains, so they look at page + bundle together.
+const withBundle = (html) => html + "\n" + STYLES + "\n" + CLIENT_SCRIPT;
 
 // Every link the sidebar offered before the grouped redesign. The redesign
 // moves links between groups; it must never drop or add one.
@@ -153,7 +158,7 @@ describe("renderShell", () => {
     assert.match(html, /<details class="nav-group"/);
     assert.match(html, /class="skip-link" href="#main-content"/);
     assert.match(html, /<main class="content" id="main-content">/);
-    assert.match(html, /@media \(max-width: 900px\)/);
+    assert.match(withBundle(html), /@media \(max-width: 900px\)/);
   });
 
   test("the active page is marked, its group is open and flagged", async () => {
@@ -186,9 +191,9 @@ describe("renderShell", () => {
 
   test("supports light and dark themes without a flash and remembers the choice safely", async () => {
     const html = await renderShell({ title: "Overview", activeKey: "dashboard", admin: superAdmin, bodyHtml: "", env });
-    assert.match(html, /:root\[data-theme="light"\]/);
+    assert.match(withBundle(html), /:root\[data-theme="light"\]/);
     assert.match(html, /id="theme-toggle"/);
-    assert.match(html, /prefers-color-scheme: light/);
+    assert.match(html, /prefers-color-scheme: light/);   // the pre-paint boot script stays inline: no theme flash
     assert.match(html, /try \{[\s\S]*localStorage/);
   });
 
@@ -197,6 +202,6 @@ describe("renderShell", () => {
     const html = await renderShell({ title: "<script>alert(1)</script>", activeKey: "dashboard", admin: evil, bodyHtml: "", env });
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
     assert.doesNotMatch(html, /<img src=x onerror=1>/);
-    assert.match(html, /table-wrap/);
+    assert.match(withBundle(html), /table-wrap/);
   });
 });

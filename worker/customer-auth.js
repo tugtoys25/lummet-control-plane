@@ -377,26 +377,32 @@ export async function getCustomerSession(request, env) {
   const sessionId = getSessionIdFromRequest(request);
   if (!sessionId) return none;
 
-  const session = await env.LUMMET_DB.prepare(`SELECT * FROM customer_sessions WHERE id = ?`)
+  // One round trip for session + user (was two). Same rules as before: unknown session, expired session, missing or
+  // disabled user all end in "no customer", and the last two also delete the session row.
+  const row = await env.LUMMET_DB.prepare(
+    `SELECT s.expires_at AS session_expires_at, s.active_organization_id AS session_active_organization_id,
+            u.id AS user_id, u.email AS user_email, u.full_name AS user_full_name, u.status AS user_status,
+            u.email_verified_at AS user_email_verified_at
+     FROM customer_sessions s
+     LEFT JOIN customer_users u ON u.id = s.user_id
+     WHERE s.id = ?`
+  )
     .bind(sessionId)
     .first();
-  if (!session) return none;
+  if (!row) return none;
 
-  if (new Date(session.expires_at).getTime() < Date.now()) {
+  if (new Date(row.session_expires_at).getTime() < Date.now()) {
     await env.LUMMET_DB.prepare(`DELETE FROM customer_sessions WHERE id = ?`).bind(sessionId).run();
     return none;
   }
 
-  const user = await env.LUMMET_DB.prepare(
-    `SELECT id, email, full_name, status, email_verified_at FROM customer_users WHERE id = ?`
-  )
-    .bind(session.user_id)
-    .first();
-
-  if (!user || user.status === "disabled") {
+  if (row.user_id == null || row.user_status === "disabled") {
     await env.LUMMET_DB.prepare(`DELETE FROM customer_sessions WHERE id = ?`).bind(sessionId).run();
     return none;
   }
+
+  const user = { id: row.user_id, email: row.user_email, full_name: row.user_full_name, status: row.user_status, email_verified_at: row.user_email_verified_at };
+  const session = { active_organization_id: row.session_active_organization_id };
 
   const policy = await evaluateSessionUse(env, user.id);
   return { customer: { ...user, sessionId, activeOrganizationId: session.active_organization_id || null }, policy };

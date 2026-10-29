@@ -4,18 +4,20 @@
 	"main": "worker/index.js",
   "preview_urls": false,
 	"compatibility_date": "2026-01-01",
+	"placement": { "mode": "smart" },
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
 	// Public website assets: templates (public/templates/**) are read by the
 	// Worker through this binding; only /static/* is ever served to visitors
 	// (worker/public-site/router.js), so templates are never exposed as URLs.
-	// run_worker_first keeps every request going through the Worker, which is
+	// run_worker_first sends every request through the Worker EXCEPT /static/* (css/js/images, served straight by the
+	// assets layer with the cache policy in public/_headers: no Worker hop). Everything else goes through the Worker, which is
 	// required because the SaaS portal, staff console and APIs share this origin.
 	"assets": {
 		"binding": "ASSETS",
 		"directory": "./public",
-		"run_worker_first": true
+		"run_worker_first": ["/*", "!/static/*"]
 	},
 	// Bind this Worker's own, independent D1 database.
 	// This database holds ONLY control-plane metadata:

@@ -314,7 +314,7 @@ test('the real public site is served with its own policy and its scripts are not
     const header = res.headers.get('Content-Security-Policy');
     assert.match(header, /script-src 'self'/, path);
     assert.doesNotMatch(header, /nonce-/, path);
-    assert.match(text, /<script src="\/static\/js\/nav\.js"/, path);
+    assert.match(text, /<script src="\/static\/js\/nav\.js\?v=[\w-]+"/, path);
     assert.doesNotMatch(text, /\son(click|submit|change|input)=/, path);
   }
 });

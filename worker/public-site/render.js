@@ -13,6 +13,7 @@
 // =====================================================
 
 import { renderTemplate } from "./template.js";
+import { ASSET_VERSION } from "../perf/asset-version.js";
 
 const CSP = [
   "default-src 'self'",
@@ -37,6 +38,11 @@ export const SECURITY_HEADERS = {
 // Short shared-cache lifetime: a dashboard edit is live within about a minute.
 export const PAGE_CACHE_CONTROL = "public, max-age=30, s-maxage=60, stale-while-revalidate=300";
 
+/** /static/css|js/x.ext -> /static/css|js/x.ext?v=TOKEN, so those files can be cached forever (see asset-version.js). */
+export function versionStaticUrls(html) {
+  return String(html).replace(/((?:href|src)=")(\/static\/(?:css|js)\/[^"?#]+)(")/g, `$1$2?v=${ASSET_VERSION}$3`);
+}
+
 export function textResponse(body, contentType, { status = 200, cacheControl = PAGE_CACHE_CONTROL } = {}) {
   return new Response(body, {
     status,
@@ -48,7 +54,7 @@ export async function renderPage(ctx, { template, data = {}, head = "", status =
   const { env, siteCtx, url } = ctx;
   const view = { ...data, site: siteCtx.site, icons: siteCtx.icons, ui: siteCtx.ui };
   const content = await renderTemplate(env, `pages/${template}`, view);
-  const html = await renderTemplate(env, "layout/base", {
+  const rendered = await renderTemplate(env, "layout/base", {
     site: siteCtx.site,
     icons: siteCtx.icons,
     ui: siteCtx.ui,
@@ -57,6 +63,7 @@ export async function renderPage(ctx, { template, data = {}, head = "", status =
     body_class: bodyClass,
     current_path: url.pathname
   });
+  const html = versionStaticUrls(rendered);
   const response = textResponse(html, "text/html; charset=utf-8", {
     status,
     cacheControl: cacheControl || (status === 200 ? PAGE_CACHE_CONTROL : "public, max-age=30")

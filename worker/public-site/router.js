@@ -108,8 +108,16 @@ async function serveStatic(request, env) {
   if (!res.ok) return res;
   const headers = new Headers(res.headers);
   headers.set("x-content-type-options", "nosniff");
-  // Assets revalidate by ETag on every load, so a deploy is visible immediately.
-  if (!headers.has("cache-control")) headers.set("cache-control", "public, max-age=0, must-revalidate");
+  // Normally static files are served straight from the assets layer (wrangler.jsonc run_worker_first excludes /static/*,
+  // and public/_headers sets the same policy). This path is the fallback (workers.dev, tests, a rollback to
+  // run_worker_first: true) and applies the identical policy:
+  //   css/js are referenced with ?v=<token> (asset-version.js), so they are cached for a year;
+  //   everything else is cached briefly and revalidated in the background.
+  const url = new URL(request.url);
+  const versioned = /^\/static\/(css|js)\//.test(url.pathname) && url.searchParams.has("v");
+  if (!headers.has("cache-control") || /max-age=0/.test(headers.get("cache-control"))) {
+    headers.set("cache-control", versioned ? "public, max-age=31536000, immutable" : "public, max-age=3600, stale-while-revalidate=86400");
+  }
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 

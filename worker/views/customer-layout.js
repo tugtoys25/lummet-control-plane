@@ -19,7 +19,8 @@
 
 import { nonceToken, onClick, onChange } from "../csp.js";
 import { escapeHtml } from "./layout.js";
-import { ICONS, STYLES, CUSTOMER_STYLES, BOOT_SCRIPT, CLIENT_SCRIPT } from "./shell-assets.js";
+import { ICONS, BOOT_SCRIPT } from "./shell-assets.js";
+import { PORTAL_CSS_URL, SHELL_JS_URL } from "../perf/shell-bundle.js";
 
 // Grouping follows the staff console: a workspace group first, then what the customer measures, earns,
 // runs, automates and administers. Every group is collapsible and the one holding the current page is open.
@@ -203,7 +204,8 @@ export function renderCustomerShell({ title, activeKey, customer, organizations 
   <meta name="color-scheme" content="dark light" />
   <title>${escapeHtml(title)} · Lummet</title>
   <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
-  <style>${STYLES}${CUSTOMER_STYLES}</style>
+  <link rel="stylesheet" href="${PORTAL_CSS_URL}" />
+  <script nonce="${nonceToken()}" src="${SHELL_JS_URL}" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -249,7 +251,6 @@ export function renderCustomerShell({ title, activeKey, customer, organizations 
         .catch(function () { alert('Could not switch organization.'); });
     }
   </script>
-  <script nonce="${nonceToken()}">${CLIENT_SCRIPT}</script>
 </body>
 </html>`;
 }

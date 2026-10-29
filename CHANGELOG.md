@@ -88,3 +88,10 @@
 ## 2.6.0 — release 2.6.0.17
 - Removed the dead hardcoded brand list, replaced brand examples in AI help, added a tenant wrangler template and a hardcoding gate.
 - Added versioned password hashes with rehash on login behind `PASSWORD_HASH_FORMAT` (default `legacy`). No migration.
+
+## 2.6.0 — release 2.6.0.19 (performance)
+- Staff console and customer portal: shell CSS/JS moved out of every page into content-hashed, immutable files under `/_s/` (nonce-bearing external script; CSP unchanged).
+- Staff and customer session lookups are one query each (was two). The page-chrome reads start right after the session is proven and overlap the page's own queries; dashboard and CRUD form option lookups run in parallel.
+- Public site: `/static/css|js` referenced with `?v=` and cached immutably; `/static/*` is served by the assets layer without invoking the Worker (`run_worker_first` array, `public/_headers`). `check:asset-version` guards the token.
+- D1 Sessions wrapper (`D1_READ_SESSIONS`, default `on`; a plain pass-through unless read replication is enabled) with a `lm_bm` bookmark cookie. Smart Placement enabled in wrangler config.
+- No migration. Rollback: `run_worker_first: true`, remove `placement`, `D1_READ_SESSIONS=off`.

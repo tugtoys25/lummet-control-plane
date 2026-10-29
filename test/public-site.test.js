@@ -67,7 +67,7 @@ test('every public route renders 200 HTML through the shared layout', async () =
     assert.equal(res.status, 200, path);
     assert.match(res.headers.get('content-type'), /text\/html/);
     const html = await text(res);
-    assert.match(html, /<link rel="stylesheet" href="\/static\/css\/tokens\.css">/, path);
+    assert.match(html, /<link rel="stylesheet" href="\/static\/css\/tokens\.css\?v=[\w-]+">/, path);
     assert.match(html, /<header class="site-header"/, path);
     assert.match(html, /<footer class="site-footer"/, path);
     assert.match(html, /<link rel="canonical" href="https:\/\/lummet\.com/, path);

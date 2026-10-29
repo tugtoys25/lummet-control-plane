@@ -271,26 +271,28 @@ export async function getCurrentAdmin(request, env) {
   const sessionId = getSessionIdFromRequest(request);
   if (!sessionId) return null;
 
-  const session = await env.LUMMET_DB.prepare(
-    `SELECT * FROM lummet_sessions WHERE id = ?`
+  // One round trip instead of two (session, then admin): the admin columns ride along on the session row. Every rule
+  // below is the one that used to run on the two separate reads.
+  const row = await env.LUMMET_DB.prepare(
+    `SELECT s.admin_id AS session_admin_id, s.expires_at AS session_expires_at, s.active_tenant_id AS session_active_tenant_id,
+            a.id AS admin_id, a.email AS admin_email, a.role AS admin_role, a.status AS admin_status,
+            a.must_change_password AS admin_must_change_password,
+            EXISTS(SELECT 1 FROM lummet_admin_totp t WHERE t.admin_id = a.id AND t.status = 'active') AS admin_two_factor_enabled
+     FROM lummet_sessions s
+     LEFT JOIN lummet_admins a ON a.id = s.admin_id
+     WHERE s.id = ?`
   ).bind(sessionId).first();
 
-  if (!session) return null;
+  if (!row) return null;
 
-  if (new Date(session.expires_at).getTime() < Date.now()) {
+  if (new Date(row.session_expires_at).getTime() < Date.now()) {
     await env.LUMMET_DB.prepare(`DELETE FROM lummet_sessions WHERE id = ?`)
       .bind(sessionId)
       .run();
     return null;
   }
 
-  const admin = await env.LUMMET_DB.prepare(
-    `SELECT id, email, role, status, must_change_password,
-            EXISTS(SELECT 1 FROM lummet_admin_totp t WHERE t.admin_id = lummet_admins.id AND t.status = 'active') AS two_factor_enabled
-     FROM lummet_admins WHERE id = ?`
-  ).bind(session.admin_id).first();
-
-  if (!admin || admin.status === "disabled") {
+  if (row.admin_id == null || row.admin_status === "disabled") {
     // A disabled admin's existing sessions are cut immediately, not
     // just blocked at the next login.
     await env.LUMMET_DB.prepare(`DELETE FROM lummet_sessions WHERE id = ?`)
@@ -299,7 +301,16 @@ export async function getCurrentAdmin(request, env) {
     return null;
   }
 
-  return { ...admin, sessionId, activeTenantId: session.active_tenant_id || null };
+  return {
+    id: row.admin_id,
+    email: row.admin_email,
+    role: row.admin_role,
+    status: row.admin_status,
+    must_change_password: row.admin_must_change_password,
+    two_factor_enabled: row.admin_two_factor_enabled,
+    sessionId,
+    activeTenantId: row.session_active_tenant_id || null
+  };
 }
 
 export async function setActiveTenant(env, sessionId, tenantId) {

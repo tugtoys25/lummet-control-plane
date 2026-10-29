@@ -13,8 +13,9 @@
 // =====================================================
 
 import { nonceToken, onChange } from "../csp.js";
-import { isSuperAdmin, loadPermissionMap, listAccessibleTenants } from "../rbac.js";
-import { ICONS, STYLES, BOOT_SCRIPT, CLIENT_SCRIPT } from "./shell-assets.js";
+import { isSuperAdmin, loadPermissionMap, getAdminTenantIds } from "../rbac.js";
+import { ICONS, BOOT_SCRIPT } from "./shell-assets.js";
+import { SHELL_CSS_URL, SHELL_JS_URL } from "../perf/shell-bundle.js";
 
 // Every item below (besides Overview/AI Chat, always visible) can
 // declare `area` + `resource` to be gated by rbac.js's permission
@@ -273,6 +274,28 @@ function renderNav(activeKey, permMap, isSuper) {
   }).filter(Boolean).join("");
 }
 
+const SHELL_PREFETCH = new WeakMap();
+
+function loadShellData(env, admin, isSuper = isSuperAdmin(admin)) {
+  return Promise.all([
+    env ? getSwitcherTenants(env) : [],
+    env && admin ? loadPermissionMap(env, admin) : null,
+    env && admin && !isSuper ? getAdminTenantIds(env, admin.id) : null
+  ]);
+}
+
+/**
+ * Starts the reads renderShell needs, without waiting for them. Called by the router right after the session is proven,
+ * so they overlap with the page's own queries. Never throws and is harmless if the page never renders a shell
+ * (JSON routes, redirects): a failed read is swallowed here and simply re-run by renderShell.
+ */
+export function prefetchShellData(env, admin) {
+  if (!env || !admin || SHELL_PREFETCH.has(admin)) return;
+  const p = loadShellData(env, admin);
+  p.catch(() => SHELL_PREFETCH.delete(admin));
+  SHELL_PREFETCH.set(admin, p);
+}
+
 async function getSwitcherTenants(env) {
   const result = await env.LUMMET_DB.prepare(
     `SELECT id, name, status FROM tenants ORDER BY name`
@@ -324,10 +347,12 @@ function renderUserMenu(admin, isSuper) {
  * without D1 access (there currently are none).
  */
 export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
-  const allTenants = env ? await getSwitcherTenants(env) : [];
   const isSuper = isSuperAdmin(admin);
-  const permMap = env && admin ? await loadPermissionMap(env, admin) : null;
-  const tenants = env && admin ? await listAccessibleTenants(env, admin, allTenants) : allTenants;
+  // The three reads that build the chrome are independent, so they run together; and when the router started them as
+  // soon as the session was known (prefetchShellData), they have been running while the page itself was being built.
+  const [allTenants, permMap, accessibleIds] = await ((admin && SHELL_PREFETCH.get(admin)) || loadShellData(env, admin, isSuper));
+  const accessible = accessibleIds ? new Set(accessibleIds) : null;
+  const tenants = accessible ? allTenants.filter((t) => accessible.has(t.id)) : allTenants;
 
   return `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -337,7 +362,8 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
   <meta name="color-scheme" content="dark light" />
   <title>${escapeHtml(title)} · Lummet</title>
   <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
-  <style>${STYLES}</style>
+  <link rel="stylesheet" href="${SHELL_CSS_URL}" />
+  <script nonce="${nonceToken()}" src="${SHELL_JS_URL}" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -386,7 +412,6 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
         .catch(() => alert('Could not switch tenant.'));
     }
   </script>
-  <script nonce="${nonceToken()}">${CLIENT_SCRIPT}</script>
 </body>
 </html>`;
 }
@@ -404,8 +429,9 @@ export function renderAuthShell({ title, bodyHtml }) {
   <meta name="color-scheme" content="dark light" />
   <title>${escapeHtml(title)} · Lummet</title>
   <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
+  <link rel="stylesheet" href="${SHELL_CSS_URL}" />
+  <script nonce="${nonceToken()}" src="${SHELL_JS_URL}" defer></script>
   <style>
-    ${STYLES}
     body { display: flex; align-items: center; justify-content: center; padding: 20px 16px; background: radial-gradient(900px 500px at 50% -10%, var(--accent-soft), transparent 70%), var(--bg); }
     .auth-card { width: 100%; max-width: 400px; }
     .brand-lg { font-size: 26px; font-weight: 700; margin-bottom: 4px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 10px; }
@@ -421,7 +447,6 @@ export function renderAuthShell({ title, bodyHtml }) {
       ${bodyHtml}
     </div>
   </main>
-  <script nonce="${nonceToken()}">${CLIENT_SCRIPT}</script>
 </body>
 </html>`;
 }

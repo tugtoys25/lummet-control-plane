@@ -14,10 +14,19 @@ function healthBadge(status) {
 }
 
 export async function renderDashboardHome(env, admin) {
-  const tenants = await env.LUMMET_DB.prepare(
-    `SELECT t.id, t.name, t.status, h.status AS health_status
-     FROM tenants t LEFT JOIN tenant_health h ON h.tenant_id = t.id`
-  ).all();
+  // Independent reads, issued together.
+  const [tenants, recentAudit] = await Promise.all([
+    env.LUMMET_DB.prepare(
+      `SELECT t.id, t.name, t.status, h.status AS health_status
+       FROM tenants t LEFT JOIN tenant_health h ON h.tenant_id = t.id`
+    ).all(),
+    env.LUMMET_DB.prepare(
+      `SELECT a.*, t.name AS tenant_name
+       FROM lummet_audit_logs a
+       LEFT JOIN tenants t ON t.id = a.tenant_id
+       ORDER BY a.created_at DESC LIMIT 10`
+    ).all()
+  ]);
 
   const rows = tenants.results || [];
   const total = rows.length;
@@ -26,13 +35,6 @@ export async function renderDashboardHome(env, admin) {
   const attention = rows.filter(
     (t) => t.status === "active" && t.health_status && t.health_status !== "Online"
   ).length;
-
-  const recentAudit = await env.LUMMET_DB.prepare(
-    `SELECT a.*, t.name AS tenant_name
-     FROM lummet_audit_logs a
-     LEFT JOIN tenants t ON t.id = a.tenant_id
-     ORDER BY a.created_at DESC LIMIT 10`
-  ).all();
 
   const auditRows = (recentAudit.results || [])
     .map(

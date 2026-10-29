@@ -21,7 +21,8 @@
     "check:phase5": "node scripts/phase5-gate.mjs",
     "check:lockfiles": "node scripts/lockfile-check.mjs",
     "regen:lockfiles": "node scripts/regenerate-lockfiles.mjs",
-    "check:release-owner": "node scripts/check-release-owner.mjs"
+    "check:release-owner": "node scripts/check-release-owner.mjs",
+    "check:asset-version": "node scripts/check-asset-version.mjs"
   },
   "version": "2.6.0",
   "devDependencies": {

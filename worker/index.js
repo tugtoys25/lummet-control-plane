@@ -64,6 +64,8 @@ import * as tenantAdmin from "./tenant-admin.js";
 import * as notificationsRepo from "./repositories/notifications.js";
 import { renderInsightAnalytics, renderInsightReports, renderInsightCampaigns, renderInsightAlerts, renderInsightNotifications, renderInsightSearch, renderInsightContent } from "./views/customer-pages/insights.js";
 import { finalizeResponse, handleCspReport, nonceToken } from "./csp.js";
+import { isShellAssetPath, serveShellAsset } from "./perf/shell-bundle.js";
+import { withD1Session, applyD1Bookmark } from "./perf/d1-session.js";
 import { hstsHeaderValue } from "./hsts.js";
 import { installConsoleRedaction } from "./redact.js";
 import { captureException } from "./error-tracking.js";
@@ -135,7 +137,7 @@ import { getSiteHealthReport } from "./site-health.js";
 import * as webauthn from "./webauthn.js";
 import * as sso from "./sso.js";
 import * as ssoDomains from "./sso-domains.js";
-import { escapeHtml } from "./views/layout.js";
+import { escapeHtml, prefetchShellData } from "./views/layout.js";
 import { getBalance as getAiBalance, listLedger as listAiLedger } from "./ai-credits.js";
 import { runAiTask, workersAiProvider, TASKS as AI_TASKS } from "./ai-gateway.js";
 import { getMonthlyUsage, checkUsageLimit, recordUsage } from "./usage.js";
@@ -424,12 +426,20 @@ async function renderPhase5StaffPage(env, admin, kind) {
 }
 
 export default {
-  async fetch(request, env, ctx) {
-    installConsoleRedaction(env);     // LOG_REDACTION=on only; a no-op by default
+  async fetch(request, rawEnv, ctx) {
+    // Hashed, immutable shell CSS/JS (perf/shell-bundle.js): answered before anything else. No database, no session,
+    // no logging: it is static content shared by every user.
+    if (isShellAssetPath(new URL(request.url).pathname)) return serveShellAsset(request);
+    installConsoleRedaction(rawEnv);     // LOG_REDACTION=on only; a no-op by default
     const requestId = crypto.randomUUID();
     const startedAt = Date.now();
     const holder = { error: null };
+    // D1 Sessions (perf/d1-session.js): reads may be served by the nearest replica when read replication is enabled on
+    // the database, with sequential consistency per browser through a bookmark cookie. A plain pass-through otherwise.
+    const d1 = withD1Session(rawEnv, request);
+    const env = d1.env;
     let response = await handleRequest(request, env, ctx, requestId, holder);
+    response = applyD1Bookmark(response, d1);
     response = withRetryAfter(response, request, env);
     const seen = await observe(env, ctx, { requestId, method: request.method.toUpperCase(), pathname: new URL(request.url).pathname, status: response.status, startedAt, error: holder.error });
     response = withSecurityHeaders(await finalizeResponse(response, env), env);
@@ -3196,6 +3206,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (isApiRoute) return json({ success: false, error: "unauthorized" }, 401);
         return redirect("/login");
       }
+
+      // Page navigations: start the reads the page chrome needs now, so they overlap with the page's own queries.
+      if (method === "GET" && !isApiRoute) prefetchShellData(env, admin);
 
       const ipHash = await hashIP(request);
       const adminIsSuper = isSuperAdmin(admin);

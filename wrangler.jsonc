@@ -187,7 +187,7 @@
 		"OUTBOUND_DNS_CHECK": "on",
 		// Billing lifecycle (docs/CHANGES_PHASE_1.md). BILLING_ENFORCE is the rollout flag: off, then shadow, then enforce.
 		// Card-required trial: off | on. See worker/billing-config.js (cardRequiredTrial).
-		"CARD_REQUIRED_TRIAL": "on",
+		"CARD_REQUIRED_TRIAL": "off",
 		// Plans listed under the /demo form: off | on (worker/public-site/demo-plans.js). DEMO_PLANS_PRODUCT (optional product id) picks the family shown.
 		"DEMO_PAGE_PLANS": "on",
 		"BILLING_ENFORCE": "enforce",
@@ -250,6 +250,7 @@
 		"PLATFORM_DOMAIN_SUFFIX": "genteelisms.com",
 		"CONTACT_EMAIL": "elijul@proton.me",
 		"PORTAL_BASE_URL": "https://luminousagents.com",
+		"PAYMENT_GATEWAYS": "stripe,nowpayments",
 		"CF_WORKERS_DEV_SUBDOMAIN": "tugtoys25",
 		"WEBAUTHN_RP_ID": "luminousagents.com",
 		"WEBAUTHN_ORIGIN": "https://luminousagents.com"

@@ -51,6 +51,15 @@ function sectionShell(row, extra = {}) {
   };
 }
 
+/** A secondary read (updates, insights, partners, banner, plans): if D1 hiccups it is logged and the section is left out, so the
+ *  page itself still renders. The primary reads (sections, features, FAQs, brands) stay strict. */
+const soft = (label, promise, fallback, ms = 4000) => {
+  let timer;
+  const budget = new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms); });
+  return Promise.race([Promise.resolve(promise).catch((err) => { console.error(`homepage ${label} skipped:`, err?.message || err); return fallback; }), budget])
+    .finally(() => clearTimeout(timer));
+};
+
 export async function buildHome(ctx) {
   const { env, siteCtx } = ctx;
   const { site, settings, counts, ui } = siteCtx;
@@ -60,11 +69,11 @@ export async function buildHome(ctx) {
     listFeatures(env),
     listFaqs(env),
     listBrands(env, 12),
-    listUpdates(env, { limit: 3 }),
-    listPublications(env, { limit: 3 }),
-    listPartners(env, 8),
-    getBannerAd(env),
-    plansTeaser(ctx)
+    soft("updates", listUpdates(env, { limit: 3 }), []),
+    soft("insights", listPublications(env, { limit: 3 }), []),
+    soft("partners", listPartners(env, 8), []),
+    soft("banner", getBannerAd(env), null),
+    soft("plans", plansTeaser(ctx), null, 2500)
   ]);
 
   const featuresByGroup = groupBy(features, "group_key");

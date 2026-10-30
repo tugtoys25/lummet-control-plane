@@ -92,6 +92,8 @@
   //                             returns a clear "billing not
   //                             configured" error rather than a fake
   //                             success (rule #5 — no fake billing).
+  //   NOWPAYMENTS_API_KEY / NOWPAYMENTS_IPN_SECRET — optional crypto gateway (release 2.6.1.0). Set with
+  //                           `wrangler secret put`. Never put them in this file. The gateway stays off until staff enable it.
   //   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret
   //                             (whsec_...), from the endpoint you
   //                             create for POST

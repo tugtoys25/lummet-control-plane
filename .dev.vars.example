@@ -33,6 +33,16 @@ STRIPE_WEBHOOK_SECRET=
 # During a webhook secret rollover only:
 # STRIPE_WEBHOOK_SECRET_PREVIOUS=
 
+# ---------------------------------------------------------------- billing (NOWPayments, crypto gateway; optional)
+# The gateway stays OFF until staff switch it on (Platform > payment gateways API) AND both secrets below are set.
+# IPN URL to register in NOWPayments: <PORTAL_BASE_URL>/api/billing/webhook/nowpayments
+NOWPAYMENTS_API_KEY=
+NOWPAYMENTS_IPN_SECRET=
+# During an IPN secret rollover only:
+# NOWPAYMENTS_IPN_SECRET_PREVIOUS=
+# Use NOWPayments' sandbox API (api-sandbox.nowpayments.io) while testing:
+# NOWPAYMENTS_SANDBOX=true
+
 # ---------------------------------------------------------------- email (Resend)
 RESEND_API_KEY=
 # Svix signing secret of the Resend webhook (whsec_...). Needed once BILLING_EMAILS=on. Webhook URL: <PORTAL_BASE_URL>/api/email/webhook/resend

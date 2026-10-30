@@ -93,6 +93,8 @@ import { roleAtLeast } from "./customer-rbac.js";
 // docs/SAAS_MERGE_NOTES.md for what changed vs. the original phase
 // branches.
 import { billing } from "./billing.js";
+import { cryptoBilling } from "./billing-nowpayments-service.js";
+import * as billingGateways from "./billing-gateways.js";
 import * as billingLifecycle from "./billing-lifecycle.js";
 import { evaluateWriteGate, evaluateServeGate, refusalFor, resolveAccess } from "./access.js";
 import { effectiveNow, cardRequiredTrial } from "./billing-config.js";
@@ -612,6 +614,22 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           requestId, ipHash: await hashIP(request)
         });
 
+        if (!result.ok) return json({ success: false, error: result.error }, result.status);
+        return json({ success: true });
+      }
+
+      // NOWPayments IPN (crypto gateway). Unauthenticated like the Stripe one: cryptoBilling.handleWebhook() authenticates it by
+      // HMAC-SHA512 over the key-sorted body, and re-reads the payment from NOWPayments before granting anything. It is NEVER
+      // gated by the gateway switch: payments already in flight must still land after a gateway is switched off.
+      if (method === "POST" && path === "/api/billing/webhook/nowpayments") {
+        const result = await cryptoBilling.handleWebhook(request, env);
+        await logAudit(env, {
+          actorType: "system",
+          endpoint: path, method, resource: "billing_webhook", action: "receive_nowpayments",
+          success: result.ok, statusCode: result.ok ? 200 : result.status,
+          errorMessage: result.ok ? (result.duplicate ? "duplicate_event_ignored" : null) : result.error,
+          requestId, ipHash: await hashIP(request)
+        });
         if (!result.ok) return json({ success: false, error: result.error }, result.status);
         return json({ success: true });
       }
@@ -1587,6 +1605,12 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return json({ success: true, coupon: checked.summary });
           }
 
+          if (method === "GET" && subPath === "/billing/gateways") {
+            const guard = await requireOrgRole(organizationId, "billing");
+            if (guard) return guard;
+            return json({ success: true, data: (await billingGateways.availableGateways(env)).map((g) => ({ gateway: g.gateway, label: g.label })) });
+          }
+
           if (method === "POST" && subPath === "/billing/checkout") {
             const guard = await requireOrgRole(organizationId, "admin");
             if (guard) return guard;
@@ -1596,12 +1620,19 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             // are built here and any value in the request body is ignored. Otherwise a caller
             // could point the post-payment redirect at a look-alike site.
             const portalOrigin = (env.PORTAL_BASE_URL || url.origin).replace(/\/$/, "");
-            const result = await billing.startCheckout(env, {
+            // Gateway switch (migration 0074): the customer may pick a gateway; with none named, the first enabled one by priority
+            // is used (Stripe unless staff changed it). A switched-off gateway is refused here, never at the webhook.
+            const gatewayChoice = await billingGateways.resolveGateway(env, body.gateway);
+            if (!gatewayChoice.ok) return json({ success: false, error: gatewayChoice.error, available: gatewayChoice.available }, gatewayChoice.status);
+            const checkoutArgs = {
               organizationId, planId: body.planId,
               successUrl: `${portalOrigin}/app/billing?checkout=success`,
               cancelUrl: `${portalOrigin}/app/billing?checkout=canceled`,
               couponCode: body.couponCode
-            });
+            };
+            const result = gatewayChoice.gateway === "nowpayments"
+              ? await cryptoBilling.startCryptoCheckout(env, { ...checkoutArgs, ipnUrl: `${portalOrigin}/api/billing/webhook/nowpayments` })
+              : await billing.startCheckout(env, checkoutArgs);
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
               endpoint: path, method, resource: "billing_checkout", action: "create",
@@ -1619,7 +1650,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             if (guard) return guard;
             // Built server-side like checkout URLs: the return target is never taken from the request.
             const portalOrigin = (env.PORTAL_BASE_URL || url.origin).replace(/\/$/, "");
-            const result = await billing.openBillingPortal(env, organizationId, { returnUrl: `${portalOrigin}/app/billing` });
+            const result = await (await billingGateways.billingServiceFor(env, organizationId)).openBillingPortal(env, organizationId, { returnUrl: `${portalOrigin}/app/billing` });
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
               endpoint: path, method, resource: "billing_portal", action: "open",
@@ -1635,7 +1666,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             if (guard) return guard;
 
             const body = await request.json().catch(() => ({}));
-            const result = await billing.cancelSubscription(env, organizationId, {
+            const result = await (await billingGateways.billingServiceFor(env, organizationId)).cancelSubscription(env, organizationId, {
               atPeriodEnd: true, actorUserId: customer.id
             });
             await logAudit(env, {
@@ -1652,14 +1683,14 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const guard = await requireOrgRole(organizationId, "admin");
             if (guard) return guard;
             const body = await request.json().catch(() => ({}));
-            const result = await billing.pauseSubscription(env, organizationId, { resumesAt: body.resumesAt, actorUserId: customer.id });
+            const result = await (await billingGateways.billingServiceFor(env, organizationId)).pauseSubscription(env, organizationId, { resumesAt: body.resumesAt, actorUserId: customer.id });
             await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "subscription", action: "pause", success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
             return result.ok ? json({ success: true, resumesAt: result.resumesAt }) : json({ success: false, error: result.error }, result.status);
           }
           if (method === "POST" && subPath === "/billing/pause/resume") {
             const guard = await requireOrgRole(organizationId, "admin");
             if (guard) return guard;
-            const result = await billing.resumePausedSubscription(env, organizationId, { actorUserId: customer.id });
+            const result = await (await billingGateways.billingServiceFor(env, organizationId)).resumePausedSubscription(env, organizationId, { actorUserId: customer.id });
             await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "subscription", action: "resume_pause", success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
             return result.ok ? json({ success: true }) : json({ success: false, error: result.error }, result.status);
           }
@@ -1668,7 +1699,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const guard = await requireOrgRole(organizationId, "admin");
             if (guard) return guard;
 
-            const result = await billing.resumeSubscription(env, organizationId);
+            const result = await (await billingGateways.billingServiceFor(env, organizationId)).resumeSubscription(env, organizationId);
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
               endpoint: path, method, resource: "subscription", action: "resume",
@@ -1684,7 +1715,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             if (guard) return guard;
 
             const body = await request.json().catch(() => ({}));
-            const result = await billing.changePlan(env, organizationId, body.planId, { actorUserId: customer.id });
+            const result = await (await billingGateways.billingServiceFor(env, organizationId)).changePlan(env, organizationId, body.planId, { actorUserId: customer.id });
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
               endpoint: path, method, resource: "subscription", action: "change_plan",
@@ -2676,7 +2707,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
         ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
         ctx.waitUntil(requestErrorsRepo.purgeOlderThanDays(env, 14).catch(() => {}));
-        ctx.waitUntil(billingLifecycle.sweep(env, Date.now(), { billingService: billing }).catch(logLifecycleFailure));
+        ctx.waitUntil(cryptoBilling.expireLapsedPeriods(env).catch(logLifecycleFailure).then(() => billingLifecycle.sweep(env, Date.now(), { billingService: billing })).catch(logLifecycleFailure));
         ctx.waitUntil(billingReminders.sweepReminders(env).then(() => billingNotifications.drain(env)).then(() => flushOutbox(env)).then(() => billingNotifications.drain(env)).catch(logNotificationFailure));
         // Round 6.5A: the monitors run in the background (their probes can take longer than a pinger waits), so this check reads the
         // result of the previous call. Off by default (SYNTHETIC_MONITORS), then inert.
@@ -4361,6 +4392,18 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             await logAudit(env, { adminId: admin.id, organizationId: result.organizationId || null, endpoint: path, method, resource: "subscription", resourceId: subscriptionId, action: "dunning_comp_requested", reason: String(body.reason).trim().slice(0, 500), success: result.ok, statusCode: result.ok ? 200 : (result.status || 400), errorMessage: result.ok ? null : result.error, requestId, ipHash });
             return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status || 400);
           }
+          // Payment gateway switch (migration 0074): list, and flip one on or off with a reason. Super-admin only (gate above).
+          if (method === "GET" && path === "/api/platform/saas/payment-gateways") {
+            return json({ success: true, data: await billingGateways.listGateways(env), events: await billingGateways.listGatewayEvents(env, { limit: 20 }) });
+          }
+          const gatewayToggle = path.match(/^\/api\/platform\/saas\/payment-gateways\/([a-z_]{1,40})$/);
+          if (method === "PUT" && gatewayToggle) {
+            const b = await staffBody();
+            const result = await billingGateways.setGatewayEnabled(env, { gateway: gatewayToggle[1], enabled: b.enabled, actorId: `staff:${admin.id}`, reason: b.reason });
+            await logAudit(env, { adminId: admin.id, endpoint: path, method, resource: "payment_gateway", resourceId: gatewayToggle[1], action: b.enabled === true ? "enable" : "disable", reason: String(b.reason || "").trim().slice(0, 1000), success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
+            return result.ok ? json({ success: true, unchanged: !!result.unchanged, data: result.gateways }) : json({ success: false, error: result.error }, result.status || 400);
+          }
+
           if (method === "GET" && path === "/api/platform/saas/webhooks/failed") {
             const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 50));
             const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
@@ -4442,7 +4485,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               if (!String(b.reason || "").trim()) return json({ success: false, error: "reason_required" }, 422);
               const owned = await env.LUMMET_DB.prepare(`SELECT id FROM subscriptions WHERE organization_id=? AND status NOT IN ('canceled','expired','incomplete_expired') ORDER BY created_at DESC LIMIT 1`).bind(staffPlanChange.id).first();
               if (!owned || owned.id !== String(b.subscriptionId || "")) return json({ success: false, error: "subscription_not_current" }, 404);
-              const result = await billing.changePlan(env, staffPlanChange.id, b.planId, { actorUserId: `staff:${admin.id}`, staffOverrideReason: String(b.reason).trim() });
+              const result = await (await billingGateways.billingServiceFor(env, staffPlanChange.id)).changePlan(env, staffPlanChange.id, b.planId, { actorUserId: `staff:${admin.id}`, staffOverrideReason: String(b.reason).trim() });
               await logAudit(env, { adminId: admin.id, organizationId: staffPlanChange.id, endpoint: path, method, resource: "subscription", resourceId: b.subscriptionId, action: "staff_change_plan", reason: String(b.reason).trim().slice(0,1000), success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
               return result.ok ? json({ success: true, pending: !!result.pending, scheduled: !!result.scheduled, effectiveAt: result.effectiveAt || null }) : json({ success: false, error: result.error, blockers: result.blockers || [] }, result.status || 400);
             }
@@ -5256,7 +5299,7 @@ async function runScheduled(event, env, ctx) {
   ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
   ctx.waitUntil(requestErrorsRepo.purgeOlderThanDays(env, 14).catch(() => {}));
   // Billing lifecycle (Phase 1.2). Failures are logged, never swallowed: this path decides who keeps access.
-  ctx.waitUntil(billingLifecycle.sweep(env, Date.now(), { billingService: billing }).catch(logLifecycleFailure));
+  ctx.waitUntil(cryptoBilling.expireLapsedPeriods(env).catch(logLifecycleFailure).then(() => billingLifecycle.sweep(env, Date.now(), { billingService: billing })).catch(logLifecycleFailure));
   // Billing emails (Phase 2.1): finish unqueued notifications, then deliver, then record what was delivered.
   ctx.waitUntil(billingReminders.sweepReminders(env).then(() => billingNotifications.drain(env)).then(() => flushOutbox(env)).then(() => billingNotifications.drain(env)).catch(logNotificationFailure));
 }

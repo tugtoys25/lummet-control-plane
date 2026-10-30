@@ -71,7 +71,7 @@ export const SITE_DELETE = [
 ];
 
 /** Kept for FINANCIAL_RETENTION_YEARS after erasure, then removed by the retention sweep. */
-export const FINANCIAL_RETAINED = ["subscriptions", "subscription_status_events", "subscription_movements", "subscription_revenue_state", "plan_change_intents", "invoices", "payments", "refunds", "disputes", "credit_notes", "organization_billing_profiles", "billing_customers", "usage_monthly", "ai_credit_ledger", "credit_pack_grants", "credit_pack_reversals", "staff_approval_requests", "immediate_cancel_decisions", "founder_license_grants", "quote_entitlement_grants"];
+export const FINANCIAL_RETAINED = ["subscriptions", "subscription_status_events", "subscription_movements", "subscription_revenue_state", "plan_change_intents", "invoices", "payments", "refunds", "disputes", "credit_notes", "organization_billing_profiles", "billing_customers", "usage_monthly", "ai_credit_ledger", "credit_pack_grants", "credit_pack_reversals", "staff_approval_requests", "immediate_cancel_decisions", "founder_license_grants", "quote_entitlement_grants", "crypto_checkouts"];
 
 /** Retained tables that have no organization_id of their own: removed through their subscription when the retention period ends. */
 // v2.6.0.1: revenue movements and state are financial records kept with the subscription, then removed with it.

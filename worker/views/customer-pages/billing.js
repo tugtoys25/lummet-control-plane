@@ -17,7 +17,11 @@ const COUPON_ERRORS = {
   coupon_already_used: "Your organization has already used that code.",
   already_on_plan: "You are already on that plan.",
   plan_change_in_progress: "A plan change is already being processed. Please wait a minute and refresh.",
-  plan_change_rejected: "The payment provider did not accept that change. Nothing was charged; contact support if this repeats."
+  plan_change_rejected: "The payment provider did not accept that change. Nothing was charged; contact support if this repeats.",
+  gateway_unavailable: "That payment method is not available right now. Please choose another.",
+  coupon_not_supported_for_gateway: "Discount codes can't be used with crypto payments.",
+  use_crypto_checkout_to_change_plan: "To change plans on a crypto subscription, use Pay with crypto on the plan you want.",
+  not_available_for_crypto: "That option isn't available for crypto subscriptions."
 };
 
 function discountText(c) {
@@ -119,12 +123,13 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
 
   const rowActions = (p) => {
     if (!canManage) return "";
-    if (isPaid) return `<button class="btn"${onClick("lummetChangePlan", [p.id])}>Switch to this plan</button>`;
+    const crypto = `<button class="btn btn-secondary" data-crypto-plan style="display:none"${onClick("lummetCheckout", [p.id, "nowpayments"])}>Pay with crypto</button>`;
+    if (isPaid) return `<button class="btn"${onClick("lummetChangePlan", [p.id])}>Switch to this plan</button> ` + crypto;
     const buy = p.active_price_id
       ? `<button class="btn"${onClick("lummetCheckout", [p.id])}>${p.id === selectedPlanId ? "Continue with selected plan" : (cardRequiredTrial && !subscription && p.trial_days ? "Start " + escapeHtml(String(p.trial_days)) + "-day trial" : "Subscribe")}</button>`
       : `<span style="color:var(--text-dim);font-size:13px;">Not available online</span>`;
     const trial = !cardRequiredTrial && !subscription && p.trial_days ? `<button class="btn btn-secondary"${onClick("lummetStartTrial", [p.id])}>Start ${escapeHtml(String(p.trial_days))}-day trial</button> ` : "";
-    return trial + buy;
+    return trial + buy + (p.active_price_id ? " " + crypto : "");
   };
 
   const planOptions = showPlans
@@ -206,12 +211,19 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
           .then(function(r){ return r.json(); }).then(function(data){ if(!data.success){ message.textContent='Could not save: '+String(data.error||'unknown error').replace(/_/g,' '); return; } message.textContent='Saved to Stripe and Lummet.'; });
       }
       function lummetStartTrial(planId) { lummetBillingPost('/trial', { planId: planId }, 'Could not start trial'); }
-      function lummetCheckout(planId) {
+      function lummetCheckout(planId, gateway) {
         var code = (document.getElementById('coupon-code') || { value: '' }).value.trim();
-        lummetBillingPost('/billing/checkout', { planId: planId, couponCode: code || undefined }, 'Could not start checkout', function (data) {
+        lummetBillingPost('/billing/checkout', { planId: planId, couponCode: code || undefined, gateway: gateway || undefined }, 'Could not start checkout', function (data) {
           window.location.href = data.checkoutUrl;
         });
       }
+      // Crypto is offered only when staff have switched the gateway on (migration 0074); otherwise these buttons stay hidden.
+      try {
+        fetch('/api/organizations/' + lummetActiveOrgId() + '/billing/gateways').then(function (r) { return r.json(); }).then(function (d) {
+          if (!d || !d.success || !(d.data || []).some(function (g) { return g.gateway === 'nowpayments'; })) return;
+          document.querySelectorAll('[data-crypto-plan]').forEach(function (el) { el.style.display = ''; });
+        }).catch(function () {});
+      } catch (e) {}
       function lummetChangePlan(planId) {
         if (!confirm('Switch to this plan? Stripe adjusts the charge for the rest of the period.')) return;
         lummetBillingPost('/billing/change-plan', { planId: planId }, 'Could not change plan', function (data) {

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.6.1.0 - NOWPayments crypto gateway and payment gateway switch
+
+Additive release. Stripe code paths are unchanged.
+
+- Migration 0074: `payment_gateways` (Stripe seeded ON, NOWPayments seeded OFF), `payment_gateway_events`, `crypto_checkouts`.
+- New: `worker/billing-nowpayments.js`, `billing-nowpayments-service.js`, `billing-gateways.js`, repositories `payment-gateways.js` and `crypto-checkouts.js`.
+- Routes: `POST /api/billing/webhook/nowpayments` (never gated by the switch), `GET /api/organizations/:id/billing/gateways`, checkout accepts `gateway`, staff `GET` and `PUT /api/platform/saas/payment-gateways[/:gateway]`.
+- Crypto subscriptions are prepaid periods; a lapsed period goes past_due and follows the existing grace lifecycle. No coupons, trials, pause or in-place plan change.
+- `crypto_checkouts` added to the retained financial tables in the retention policy.
+- Test change: the migration-numbering pins in `test/org-security-policy.test.js` and `test/synthetic-monitors-6-5a.test.js` now allow 0074.
+- Not yet verified against a live or sandbox NOWPayments account.
+
 ## 2.6.0 — 2026-10-29 (release 2.6.0.24)
 - Staff console and customer portal dashboards (including the CMS Features page) restyled to the public-site look: new palette, Instrument Sans / Bricolage Grotesque, gradient pill buttons. Layout and behavior unchanged.
 - Staff login now uses the public-site auth shell and shows "Are you a customer? Log in here" (links to /app/login).

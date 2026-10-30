@@ -8,6 +8,11 @@
 // What the switch does NOT do (on purpose): it never blocks a WEBHOOK, and it never touches existing subscriptions. A gateway that is
 // switched off still delivers events for payments already in flight, and its existing customers can still be managed.
 // If the table is missing (migration not yet applied) or unreadable, the legacy behaviour holds: Stripe only.
+//
+// CONFIG OVERRIDE: set the Worker var PAYMENT_GATEWAYS in wrangler.jsonc to a comma list of the gateways that are ON, in the order
+// they are offered, for example "stripe", "stripe,nowpayments" or "nowpayments". When it holds at least one known gateway it is
+// the only authority: the database rows and the staff switch are ignored (the staff endpoint answers 409 controlled_by_config).
+// Empty, absent or unrecognised leaves the database switch in charge. A change needs a deploy, which makes it reviewable in git.
 // =====================================================
 import * as stripeProvider from "./billing-stripe.js";
 import { billing } from "./billing.js";
@@ -33,6 +38,14 @@ const FALLBACK_ROWS = [
   { gateway: "nowpayments", enabled: 0, priority: 20, updated_by: null, updated_at: null }
 ];
 
+/** The gateways PAYMENT_GATEWAYS turns on, in offer order, or null when the var is absent or holds nothing recognisable. */
+export function configOverride(env) {
+  const raw = String((env && env.PAYMENT_GATEWAYS) || "").trim().toLowerCase();
+  if (!raw) return null;
+  const order = [...new Set(raw.split(/[\s,;]+/).filter((key) => GATEWAYS[key]))];
+  return order.length ? order : null;
+}
+
 async function readRows(env) {
   try {
     const rows = await repo.listRows(env);
@@ -44,13 +57,17 @@ async function readRows(env) {
 
 /** Every known gateway with its switch, its configuration state, and whether customers can use it right now. */
 export async function listGateways(env) {
-  const rows = await readRows(env);
+  const override = configOverride(env);
+  const rows = override
+    ? GATEWAY_KEYS.map((key) => ({ gateway: key, enabled: override.includes(key) ? 1 : 0, priority: override.includes(key) ? override.indexOf(key) : 1000, updated_by: "wrangler.jsonc", updated_at: null }))
+        .sort((a, b) => a.priority - b.priority)
+    : await readRows(env);
   return rows
     .filter((r) => GATEWAYS[r.gateway])
     .map((r) => {
       const configured = GATEWAYS[r.gateway].configured(env);
       const enabled = Number(r.enabled) === 1;
-      return { gateway: r.gateway, label: GATEWAYS[r.gateway].label, enabled, configured, available: enabled && configured, priority: r.priority, updatedBy: r.updated_by || null, updatedAt: r.updated_at || null };
+      return { gateway: r.gateway, label: GATEWAYS[r.gateway].label, enabled, configured, available: enabled && configured, priority: r.priority, updatedBy: r.updated_by || null, updatedAt: r.updated_at || null, source: override ? "config" : "database" };
     });
 }
 
@@ -82,6 +99,7 @@ export async function resolveGateway(env, requested) {
 export async function setGatewayEnabled(env, { gateway, enabled, actorId, reason }) {
   const key = String(gateway || "").trim().toLowerCase();
   if (!GATEWAYS[key]) return { ok: false, status: 404, error: "unknown_gateway" };
+  if (configOverride(env)) return { ok: false, status: 409, error: "controlled_by_config" };
   if (typeof enabled !== "boolean") return { ok: false, status: 422, error: "enabled_boolean_required" };
   const cleanReason = String(reason || "").trim();
   if (!cleanReason) return { ok: false, status: 422, error: "reason_required" };

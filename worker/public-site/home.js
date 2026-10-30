@@ -6,10 +6,7 @@
 // (no placeholder copy, no invented numbers).
 // =====================================================
 
-import {
-  listHomepageSections, listFeatures, listFaqs, listBrands, listUpdates,
-  listPublications, listPartners, getBannerAd
-} from "./data.js";
+import { loadHomePrimary, loadHomeSecondary } from "./data.js";
 import { brandModel, updateModel, publicationModel, partnerModel, featureModel, faqModel } from "./models.js";
 import { sanitizeHtml } from "./sanitize.js";
 import { safeUrl, isExternal, formatDate } from "./format.js";
@@ -64,17 +61,15 @@ export async function buildHome(ctx) {
   const { env, siteCtx } = ctx;
   const { site, settings, counts, ui } = siteCtx;
 
-  const [rows, features, faqs, brands, updates, publications, partners, banner, plans] = await Promise.all([
-    listHomepageSections(env),
-    listFeatures(env),
-    listFaqs(env),
-    listBrands(env, 12),
-    soft("updates", listUpdates(env, { limit: 3 }), []),
-    soft("insights", listPublications(env, { limit: 3 }), []),
-    soft("partners", listPartners(env, 8), []),
-    soft("banner", getBannerAd(env), null),
+  // Two D1 round trips in parallel (was nine separate reads). The primary rows are strict; the optional ones (latest updates,
+  // insights, partners, banner) and the plans block are fail-soft: if they cannot be read the section is left out.
+  const [primary, secondary, plans] = await Promise.all([
+    loadHomePrimary(env, { brandLimit: 12 }),
+    soft("secondary", loadHomeSecondary(env), { updates: [], publications: [], partners: [], banner: null }),
     soft("plans", plansTeaser(ctx), null, 2500)
   ]);
+  const { rows, features, faqs, brands } = primary;
+  const { updates, publications, partners, banner } = secondary;
 
   const featuresByGroup = groupBy(features, "group_key");
   const faqsByGroup = groupBy(faqs, "group_key");

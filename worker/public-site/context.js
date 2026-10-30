@@ -6,7 +6,7 @@
 // footer are content, not markup.
 // =====================================================
 
-import { getSettings, getNavLinks, getSiteCounts, listHomepageAnchors, getUiStrings } from "./data.js";
+import { loadSiteData } from "./data.js";
 import { safeUrl, safeCssColor, initials } from "./format.js";
 import { iconSvg } from "./icons.js";
 import { isLiveHref } from "./links.js";
@@ -80,13 +80,8 @@ function anchorOf(href) {
 }
 
 export async function loadSite(env, url) {
-  const [settings, counts, links, anchorRows, ui] = await Promise.all([
-    getSettings(env),
-    getSiteCounts(env),
-    getNavLinks(env),
-    listHomepageAnchors(env),
-    getUiStrings(env)
-  ]);
+  // One D1 round trip for everything the layout needs (was seven parallel reads: seven chances to hit a transient error).
+  const { settings, counts, links, anchorRows, ui } = await loadSiteData(env);
 
   const contactEmail = (settings.contact_email && settings.contact_email.trim()) || env.CONTACT_EMAIL || "";
   const hasContact = Boolean(contactEmail);

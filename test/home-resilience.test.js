@@ -63,3 +63,65 @@ test('on production the error header appears only for a request carrying the sec
   const unset = await quiet(() => call(mk(), { 'x-debug-token': 'anything' }));
   assert.equal(unset.headers.get('x-public-error'), null, 'no token configured = feature off');
 });
+
+// ---- 2.6.1.4: per-read retry, batched reads, stale-if-error ----
+
+// Fails the first `times` database calls of any kind (prepare().all/first, batch), then behaves normally.
+function flaky(env, times) {
+  const real = env.LUMMET_DB; let left = times;
+  const boom = () => { if (left > 0) { left--; return true; } return false; };
+  const wrap = (st) => new Proxy(st, { get(t, k) {
+    if (k === '__raw') return t;
+    if (k === 'bind') return (...a) => wrap(t.bind(...a));
+    if (k === 'all' || k === 'first') return (...a) => (boom() ? Promise.reject(new Error('D1_ERROR: Network connection lost')) : t[k](...a));
+    const v = t[k]; return typeof v === 'function' ? v.bind(t) : v;
+  } });
+  env.LUMMET_DB = { prepare: (sql) => wrap(real.prepare(sql)), batch: (arr) => (boom() ? Promise.reject(new Error('D1_ERROR: Network connection lost')) : real.batch(arr.map((a) => a.__raw || a))) };
+  return env;
+}
+
+test('a cold homepage render reads the layout and the page in a handful of round trips, not a dozen queries', async () => {
+  const env = createPublicEnv(); env.HOME_PLANS = 'off';
+  const real = env.LUMMET_DB; let calls = 0;
+  env.LUMMET_DB = { prepare: (sql) => real.prepare(sql), batch: (arr) => { calls++; return real.batch(arr); } };
+  const res = await home(env);
+  assert.equal(res.status, 200);
+  assert.ok(calls <= 3, `expected at most 3 batched round trips, saw ${calls}`);
+});
+
+test('transient database errors are retried per read: three failures in a row still give a 200', async () => {
+  const res = await quiet(() => home(flaky(createPublicEnv(), 3)));
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /<h1>/);
+});
+
+test('a deterministic SQL error is not retried (no such table fails fast)', async () => {
+  const env = createPublicEnv(); let seen = 0;
+  const real = env.LUMMET_DB;
+  env.LUMMET_DB = { prepare: (sql) => real.prepare(sql), batch: () => { seen++; return Promise.reject(new Error('D1_ERROR: no such table: lummet_site_settings')); } };
+  const res = await quiet(() => home(env));
+  assert.equal(res.status, 503);
+  assert.equal(seen, 2, 'one attempt per render, two renders (router retry); the read itself is not retried');
+});
+
+test('when the database fails after a successful render, the last good copy is served instead of the 503 page', async () => {
+  const env = createPublicEnv();
+  const ok = await home(env);
+  assert.equal(ok.status, 200);
+  const goodHtml = await ok.text();
+  const real = env.LUMMET_DB;
+  env.LUMMET_DB = { prepare: (sql) => real.prepare(sql), batch: () => Promise.reject(new Error('D1_ERROR: Network connection lost')) };
+  const res = await quiet(() => home(env));
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('x-lm-cache'), 'stale-if-error-memory');
+  assert.equal(await res.text(), goodHtml);
+});
+
+test('a 503 carries Retry-After and is never cached', async () => {
+  const env = createPublicEnv(); const real = env.LUMMET_DB;
+  env.LUMMET_DB = { prepare: (sql) => real.prepare(sql), batch: () => Promise.reject(new Error('D1_ERROR: Network connection lost')) };
+  const res = await quiet(() => home(env));
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get('retry-after'), '3');
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+});

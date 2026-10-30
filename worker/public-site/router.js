@@ -23,7 +23,7 @@ import { loadSite } from "./context.js";
 import * as pages from "./pages.js";
 import * as forms from "./forms.js";
 import { sitemapXml, robotsTxt } from "./sitemap.js";
-import { textResponse } from "./render.js";
+import { textResponse, PAGE_CACHE_CONTROL } from "./render.js";
 
 function matchPath(pattern, path) {
   const a = pattern.split("/").filter(Boolean);
@@ -92,6 +92,7 @@ function unavailable(env, err, request) {
     "text/html; charset=utf-8",
     { status: 503, cacheControl: "no-store" }
   );
+  res.headers.set("retry-after", "3");
   // Say WHY in a response header so a failing page can be diagnosed with `curl -i` when Worker logs are out of reach (e.g.
   // wrangler tail does not run on Termux). Always on staging; on any other environment ONLY for a request that carries the
   // secret PUBLIC_DEBUG_TOKEN in an x-debug-token header (unset token = feature off). Error text only: cut, printable ASCII.
@@ -189,6 +190,91 @@ async function resolve(ctx) {
   return null;
 }
 
+const FRESH_MS = 60 * 1000; // matches PAGE_CACHE_CONTROL s-maxage: an edit is live within about a minute
+const SWR_MS = 10 * 60 * 1000; // up to this age a copy is served at once while a fresh render runs in the background
+const KEEP_MS = 24 * 60 * 60 * 1000; // the last good copy is kept this long as the answer of last resort
+const STORE_CONTROL = `public, max-age=${KEEP_MS / 1000}`;
+const MEMORY_PAGES = 40;
+
+// Last good HTML per page, in this isolate. Second line of defence when the Cache API is unavailable or has not seen the
+// page yet. Keyed by the assets binding (one per deployment; a fresh object per test env) so two environments never share.
+const memoryByAssets = new WeakMap();
+const memoryGlobal = new Map();
+function lastGoodFor(env) {
+  const owner = env && typeof env.ASSETS === "object" && env.ASSETS ? env.ASSETS : null;
+  if (!owner) return memoryGlobal;
+  let m = memoryByAssets.get(owner);
+  if (!m) { m = new Map(); memoryByAssets.set(owner, m); }
+  return m;
+}
+
+/** A cached or remembered copy, as sent to the visitor: normal page cache policy, internal stamp removed. */
+function outbound(source, method, state) {
+  const headers = new Headers(source.headers);
+  headers.delete("x-lm-rendered-at");
+  headers.set("cache-control", state === "fresh" ? PAGE_CACHE_CONTROL : "public, max-age=5");
+  if (state !== "fresh") headers.set("x-lm-cache", state);
+  const body = method === "HEAD" ? null : source.body;
+  return new Response(body, { status: source.status, statusText: source.statusText, headers });
+}
+
+function memoryHit(memory, memKey, method) {
+  const m = memory && memory.get(memKey);
+  if (!m || Date.now() - m.at > KEEP_MS) return null;
+  const headers = new Headers(m.headers);
+  headers.set("cache-control", "public, max-age=5");
+  headers.set("x-lm-cache", "stale-if-error-memory");
+  return new Response(method === "HEAD" ? null : m.body, { status: 200, headers });
+}
+
+async function remember({ cache, key, memory, memKey, response, execCtx }) {
+  try {
+    const body = await response.clone().text();
+    const headers = new Headers(response.headers);
+    if (memory) {
+      if (memory.size >= MEMORY_PAGES && !memory.has(memKey)) memory.delete(memory.keys().next().value);
+      memory.set(memKey, { body, headers: [...headers.entries()], at: Date.now() });
+    }
+    if (cache && execCtx?.waitUntil) {
+      const stored = new Headers(response.headers);
+      stored.set("cache-control", STORE_CONTROL);
+      stored.set("x-lm-rendered-at", String(Date.now()));
+      execCtx.waitUntil(cache.put(key, new Response(body, { status: 200, headers: stored })).catch(() => {}));
+    }
+  } catch {
+    // never let bookkeeping break a page that rendered fine
+  }
+}
+
+// One render with a pause and a second go; never throws. Each database read inside it has already been retried on its own.
+async function renderWithRetry({ env, request, url, execCtx, path }) {
+  let lastErr;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const siteCtx = await loadSite(env, url);
+      const response = await resolve({ env, request, url, siteCtx, execCtx });
+      return { response: response || null, error: null };
+    } catch (err) {
+      lastErr = err;
+      console.error(`public-site render failed (attempt ${attempt}/2) ${path}:`, err?.name || "", err?.message || err);
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+  return { response: null, error: lastErr };
+}
+
+const refreshing = new Set();
+async function refresh({ env, request, url, execCtx, cache, key, memory, memKey }) {
+  if (refreshing.has(memKey)) return; // one background render per page per isolate
+  refreshing.add(memKey);
+  try {
+    const rendered = await renderWithRetry({ env, request, url, execCtx, path: url.pathname });
+    if (rendered.response && rendered.response.status === 200) await remember({ cache, key, memory, memKey, response: rendered.response, execCtx });
+  } finally {
+    refreshing.delete(memKey);
+  }
+}
+
 /**
  * @param {{request: Request, env: object, ctx: object}} args
  */
@@ -225,38 +311,44 @@ export async function handlePublicRoute({ request, env, ctx: execCtx }) {
   const uncachedPath = path === "/legal" || path.startsWith("/legal/") || path === "/openapi.json";
   const cache = typeof caches !== "undefined" && !url.searchParams.has("sent") && !uncachedPath ? caches.default : null;
   const key = cacheKeyFor(url);
+  const shareable = !url.searchParams.has("sent") && !uncachedPath;
+  const memory = shareable ? lastGoodFor(env) : null;
+  const memKey = key.url;
+
+  // Stale-while-revalidate + stale-if-error. The edge copy is kept for a day (STORE_CONTROL) and stamped with the time it
+  // was rendered. Younger than FRESH_MS it is served as is; up to SWR_MS old it is served immediately while a fresh render
+  // runs in the background; older (or when the render fails) it is the fallback instead of an error page.
+  let stale = null;
   if (cache) {
     try {
       const hit = await cache.match(key);
-      if (hit) return method === "HEAD" ? new Response(null, hit) : hit;
+      if (hit) {
+        const age = Date.now() - Number(hit.headers.get("x-lm-rendered-at") || 0);
+        if (age < FRESH_MS) return outbound(hit, method, "fresh");
+        if (age < SWR_MS) {
+          if (execCtx?.waitUntil) execCtx.waitUntil(refresh({ env, request, url, execCtx, cache, key, memory, memKey }));
+          return outbound(hit, method, "stale-revalidating");
+        }
+        stale = hit;
+      }
     } catch {
       // cache unavailable (e.g. workers.dev) — render normally
     }
   }
 
-  // A render reads many D1 rows in parallel; one transient read error (overloaded / connection lost, most likely on a
-  // freshly deployed isolate) used to fail the whole page. Render again once after a short pause before giving up.
-  // Nothing is cached or sent until a render succeeds, so a retry cannot leave a partial page behind.
-  let response;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const siteCtx = await loadSite(env, url);
-      response = await resolve({ env, request, url, siteCtx, execCtx });
-      break;
-    } catch (err) {
-      console.error(`public-site render failed (attempt ${attempt}/2) ${path}:`, err?.name || "", err?.message || err);
-      if (attempt === 2) return unavailable(env, err, request);
-      await new Promise((r) => setTimeout(r, 200));
+  const rendered = await renderWithRetry({ env, request, url, execCtx, path });
+  if (rendered.error) {
+    // The render failed even after the per-read retries. Prefer ANY previously rendered copy over an error page.
+    const fallback = stale ? outbound(stale, method, "stale-if-error") : memoryHit(memory, memKey, method);
+    if (fallback) {
+      console.error(`public-site serving a stale copy of ${path}:`, rendered.error?.message || rendered.error);
+      return fallback;
     }
+    return unavailable(env, rendered.error, request);
   }
+  const response = rendered.response;
   if (!response) return null;
 
-  if (cache && response.status === 200 && execCtx?.waitUntil) {
-    try {
-      execCtx.waitUntil(cache.put(key, response.clone()));
-    } catch {
-      // ignore cache write failures
-    }
-  }
+  if (response.status === 200 && shareable) await remember({ cache, key, memory, memKey, response, execCtx });
   return method === "HEAD" ? new Response(null, response) : response;
 }

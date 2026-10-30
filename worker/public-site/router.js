@@ -86,15 +86,20 @@ export function isPublicPath(path) {
 
 // Last-resort page, used only when the database itself cannot be read, so by
 // definition it cannot come from the database. Kept deliberately minimal.
-function unavailable(env, err) {
+function unavailable(env, err, request) {
   const res = textResponse(
     "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Temporarily unavailable</title><body style='font-family:system-ui,sans-serif;padding:3rem;max-width:36rem;margin:auto'><h1>Temporarily unavailable</h1><p>Please try again in a moment.</p>",
     "text/html; charset=utf-8",
     { status: 503, cacheControl: "no-store" }
   );
-  // Staging only: say WHY in a response header, so a failing page can be diagnosed with `curl -i` when Worker logs are out of
-  // reach (e.g. wrangler tail does not run on Termux). Production never sets it. Error text only: cut, printable ASCII.
-  if (env && String(env.ENVIRONMENT || "").toLowerCase() === "staging" && err) {
+  // Say WHY in a response header so a failing page can be diagnosed with `curl -i` when Worker logs are out of reach (e.g.
+  // wrangler tail does not run on Termux). Always on staging; on any other environment ONLY for a request that carries the
+  // secret PUBLIC_DEBUG_TOKEN in an x-debug-token header (unset token = feature off). Error text only: cut, printable ASCII.
+  const staging = env && String(env.ENVIRONMENT || "").toLowerCase() === "staging";
+  const sent = request && request.headers && request.headers.get("x-debug-token");
+  const token = env && env.PUBLIC_DEBUG_TOKEN ? String(env.PUBLIC_DEBUG_TOKEN) : "";
+  const tokenOk = Boolean(token && sent && sent.length === token.length && [...sent].reduce((d, ch, k) => d | (ch.charCodeAt(0) ^ token.charCodeAt(k)), 0) === 0);
+  if ((staging || tokenOk) && err) {
     const msg = String((err && err.message) || err).replace(/[^\x20-\x7e]/g, "?").slice(0, 200);
     try { res.headers.set("x-public-error", msg); } catch { /* immutable headers: skip */ }
   }
@@ -106,7 +111,7 @@ async function notFoundFor({ env, request, url, execCtx }) {
     const siteCtx = await loadSite(env, url);
     return await pages.notFoundPage({ env, request, url, siteCtx, execCtx });
   } catch (err) {
-    return unavailable(env, err);
+    return unavailable(env, err, request);
   }
 }
 
@@ -204,7 +209,7 @@ export async function handlePublicRoute({ request, env, ctx: execCtx }) {
       response = await route[1]({ env, request, url, siteCtx, execCtx }, route[0]);
     } catch (err) {
       console.error("public-site form submit failed:", err?.message || err);
-      return unavailable(env, err);
+      return unavailable(env, err, request);
     }
     return response || (await notFoundFor({ env, request, url, execCtx }));
   }
@@ -240,7 +245,7 @@ export async function handlePublicRoute({ request, env, ctx: execCtx }) {
       break;
     } catch (err) {
       console.error(`public-site render failed (attempt ${attempt}/2) ${path}:`, err?.name || "", err?.message || err);
-      if (attempt === 2) return unavailable(env, err);
+      if (attempt === 2) return unavailable(env, err, request);
       await new Promise((r) => setTimeout(r, 200));
     }
   }

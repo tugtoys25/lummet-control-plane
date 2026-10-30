@@ -10,6 +10,9 @@ import { cardRequiredTrial } from "../billing-config.js";
 import { pricingGroups, MONEY } from "./pages.js";
 
 export async function plansTeaser(ctx) {
+  // Kill switch: HOME_PLANS=off removes the plans block and the hero price note, and with them this module's two database reads,
+  // restoring the homepage's pre-2.6.0.20 database profile. Default is on.
+  if (String(ctx.env.HOME_PLANS || "on").toLowerCase() === "off") return null;
   try {
     const ui = ctx.siteCtx.ui || {};
     const all = await pricingRepo.listPricing(ctx.env, { requirePrice: cardRequiredTrial(ctx.env) });

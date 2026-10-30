@@ -267,3 +267,31 @@ test('checkout guards: coupons refused, Stripe subscribers refused, custom plans
     assert.equal((await cryptoBilling.startCryptoCheckout(env, args)).error, 'organization_already_subscribed');
   } finally { globalThis.fetch = real; }
 });
+
+// ---------- wrangler.jsonc override (PAYMENT_GATEWAYS) ----------
+test('config override: PAYMENT_GATEWAYS decides which gateways are on and their order; the database switch and staff PUT stand down', async () => {
+  const env = makeEnv({ ...NP_ENV, PAYMENT_GATEWAYS: 'nowpayments' });
+  assert.deepEqual((await gateways.availableGateways(env)).map((g) => g.gateway), ['nowpayments']);
+  assert.equal((await gateways.listGateways(env)).every((g) => g.source === 'config'), true);
+  assert.equal((await gateways.resolveGateway(env)).gateway, 'nowpayments');
+  assert.equal((await gateways.resolveGateway(env, 'stripe')).error, 'gateway_unavailable');
+  assert.equal((await gateways.setGatewayEnabled(env, { gateway: 'stripe', enabled: true, actorId: 'staff:1', reason: 'r' })).error, 'controlled_by_config');
+
+  const both = { ...env, PAYMENT_GATEWAYS: ' NOWPayments , stripe ' };            // order = offer order; case and spaces tolerated
+  assert.deepEqual((await gateways.availableGateways(both)).map((g) => g.gateway), ['nowpayments', 'stripe']);
+  assert.equal((await gateways.resolveGateway(both)).gateway, 'nowpayments');
+  assert.equal((await gateways.resolveGateway({ ...env, PAYMENT_GATEWAYS: 'stripe,nowpayments' })).gateway, 'stripe');
+});
+
+test('config override: empty or unrecognised values leave the database switch in charge; a listed gateway without secrets is not offered', async () => {
+  const dbOnly = makeEnv({ ...NP_ENV });
+  for (const value of [undefined, '', '   ', 'paypal', 'bitcoin,card']) {
+    const env = { ...dbOnly, PAYMENT_GATEWAYS: value };
+    assert.equal(gateways.configOverride(env), null);
+    assert.deepEqual((await gateways.availableGateways(env)).map((g) => g.gateway), ['stripe']);
+    assert.equal((await gateways.listGateways(env))[0].source, 'database');
+  }
+  const noSecrets = makeEnv({ PAYMENT_GATEWAYS: 'nowpayments' });
+  assert.deepEqual(await gateways.availableGateways(noSecrets), []);
+  assert.deepEqual(await gateways.resolveGateway(noSecrets), { ok: false, status: 503, error: 'no_payment_gateway_available', available: [] });
+});

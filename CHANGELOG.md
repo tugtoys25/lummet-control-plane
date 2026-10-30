@@ -10,6 +10,7 @@ Additive release. Stripe code paths are unchanged.
 - Crypto subscriptions are prepaid periods; a lapsed period goes past_due and follows the existing grace lifecycle. No coupons, trials, pause or in-place plan change.
 - `crypto_checkouts` added to the retained financial tables in the retention policy.
 - Test change: the migration-numbering pins in `test/org-security-policy.test.js` and `test/synthetic-monitors-6-5a.test.js` now allow 0074.
+- Optional `PAYMENT_GATEWAYS` var in wrangler.jsonc (e.g. `"stripe,nowpayments"`) overrides the database switch; empty keeps the staff switch.
 - Not yet verified against a live or sandbox NOWPayments account.
 
 ## 2.6.0 — 2026-10-29 (release 2.6.0.24)

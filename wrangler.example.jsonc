@@ -240,6 +240,9 @@
     "BILLING_WINBACK_EMAILS": "off",
     "ENVIRONMENT": "production",
     "CONTACT_EMAIL": "<public contact address, or leave empty>",
+    // Payment gateways that are ON, in the order they are offered: "stripe", "stripe,nowpayments" or "nowpayments". When set it overrides
+    // the database switch (staff PUT answers 409 controlled_by_config); empty leaves the staff switch in charge. A change needs a deploy.
+    "PAYMENT_GATEWAYS": "",
     "PORTAL_BASE_URL": "https://<your customer portal host>",
     // Content-Security-Policy: leave unset (= report-only) on staging, watch the logs for "csp_violation",
     // then set "enforce" in production. See docs/CSP.md.

@@ -180,13 +180,35 @@ export function renderSource(source, data = {}) {
 const sourceCache = new Map();
 const MAX_PARTIAL_DEPTH = 8;
 
+const ASSET_ATTEMPTS = 3;
+const ASSET_TIMEOUT_MS = 4000;
+
+// A cold isolate fetches every template of a page (layout, page, ~a dozen components) from the assets binding at once.
+// One failed or slow fetch used to fail the page, so each fetch is retried on its own. A real 404 is not retried.
+async function fetchAssetText(env, name) {
+  let lastErr;
+  for (let attempt = 1; attempt <= ASSET_ATTEMPTS; attempt++) {
+    let timer;
+    try {
+      const limit = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Template fetch timed out: ${name}`)), ASSET_TIMEOUT_MS); });
+      const res = await Promise.race([env.ASSETS.fetch(new Request(`https://assets.local/templates/${name}.html`)), limit]);
+      if (res.status === 404) throw Object.assign(new Error(`Template not found: ${name}`), { permanent: true });
+      if (!res.ok) throw new Error(`Template fetch failed: ${name} (HTTP ${res.status})`);
+      return await Promise.race([res.text(), limit]);
+    } catch (err) {
+      lastErr = err;
+      if (err && err.permanent) break;
+      if (attempt < ASSET_ATTEMPTS) await new Promise((r) => setTimeout(r, 50 * attempt + Math.floor(Math.random() * 30)));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastErr;
+}
+
 async function fetchTemplateSource(env, name) {
   if (sourceCache.has(name)) return sourceCache.get(name);
-  const promise = (async () => {
-    const res = await env.ASSETS.fetch(new Request(`https://assets.local/templates/${name}.html`));
-    if (!res.ok) throw new Error(`Template not found: ${name}`);
-    return res.text();
-  })();
+  const promise = fetchAssetText(env, name);
   sourceCache.set(name, promise);
   try {
     return await promise;

@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.6.1.4 - Homepage hardening: "Temporarily unavailable" on a cold load
+
+A cold homepage render issued about 19 separate D1 queries and fetched about 15 templates, and any single transient failure
+among them turned the whole page into the 503 page (the router could only re-run the entire render once). With a small
+per-query error rate that is most requests failing, which is why several reloads were needed. No schema change, no new
+binding, no route change.
+
+- Reads are retried on their own: `readWithRetry` in `worker/repositories/public-site.js` (3 attempts, jittered back-off,
+  4 s limit per attempt; deterministic SQL errors such as a missing table are not retried). Writes never use it.
+- Fewer round trips: `loadSiteData` (layout: settings, nav, counts, anchors, UI strings) and `loadHomePrimary` /
+  `loadHomeSecondary` (homepage rows) each use ONE `db.batch()`. A cold homepage is now 2 to 3 round trips, not 19.
+  The secondary batch (updates, insights, partners, banner) and the plans block stay fail-soft.
+- Templates: each asset fetch is retried (3 attempts, 4 s limit); a real 404 is not. The error now names the HTTP status.
+- Router: stale-while-revalidate and stale-if-error. The edge copy is kept for a day and stamped with its render time:
+  under 60 s it is served as is, up to 10 min it is served at once while a fresh render runs in the background, and when a
+  render fails the last good copy (edge cache, then this isolate's memory) is served instead of the 503 page. Response
+  header `x-lm-cache` says when a stale copy was used. The 503 page now carries `Retry-After: 3`.
+- Test support: `test/support/d1-shim.js` batch returns rows for batched SELECTs, like D1.
+- Tests: five new cases in `test/home-resilience.test.js` (round trips, per-read retry, no retry of SQL errors,
+  stale-if-error, Retry-After).
+
 ## 2.6.1.0 - NOWPayments crypto gateway and payment gateway switch
 
 Additive release. Stripe code paths are unchanged.

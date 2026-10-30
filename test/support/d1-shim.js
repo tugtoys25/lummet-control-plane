@@ -43,6 +43,7 @@ function wrapStatement(sqliteDb, sql) {
       const stmt = sqliteDb.prepare(sql);
       const boundParams = params.map(p => (p === undefined ? null : p));
       return {
+        _sql: sql,
         async all() {
           const rows = stmt.all(...boundParams);
           return { results: rows, success: true };
@@ -81,7 +82,8 @@ export function createTestDb() {
     async batch(statements) {
       const results = [];
       for (const stmt of statements) {
-        results.push(await stmt.run());
+        // Like D1, a batched SELECT returns its rows ({ results }); anything else returns the write summary.
+        results.push(/^\s*(select|with)\b/i.test(stmt._sql || '') ? await stmt.all() : await stmt.run());
       }
       return results;
     },

@@ -81,6 +81,20 @@ jobs:
         run: |
           printf '%s' "$STAGING_STRIPE_SECRET_KEY" | npx wrangler secret put STRIPE_SECRET_KEY --env staging
           printf '%s' "$STAGING_STRIPE_WEBHOOK_SECRET" | npx wrangler secret put STRIPE_WEBHOOK_SECRET --env staging
+      - name: Configure NOWPayments sandbox secrets on staging Worker
+        env:
+          STAGING_NOWPAYMENTS_API_KEY: ${{ secrets.STAGING_NOWPAYMENTS_API_KEY }}
+          STAGING_NOWPAYMENTS_IPN_SECRET: ${{ secrets.STAGING_NOWPAYMENTS_IPN_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$STAGING_NOWPAYMENTS_API_KEY" ] && [ -n "$STAGING_NOWPAYMENTS_IPN_SECRET" ]; then
+            printf '%s' "$STAGING_NOWPAYMENTS_API_KEY" | npx wrangler secret put NOWPAYMENTS_API_KEY --env staging
+            printf '%s' "$STAGING_NOWPAYMENTS_IPN_SECRET" | npx wrangler secret put NOWPAYMENTS_IPN_SECRET --env staging
+            printf '%s' "true" | npx wrangler secret put NOWPAYMENTS_SANDBOX --env staging
+          else
+            echo "NOWPayments staging secrets not set; skipping (the gateway stays unavailable)"
+          fi
       - name: Deploy staging Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -150,6 +164,19 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: node scripts/migrate.mjs --db lummet-control-plane-db --remote
+      - name: Configure NOWPayments secrets on production Worker
+        env:
+          NOWPAYMENTS_API_KEY: ${{ secrets.NOWPAYMENTS_API_KEY }}
+          NOWPAYMENTS_IPN_SECRET: ${{ secrets.NOWPAYMENTS_IPN_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$NOWPAYMENTS_API_KEY" ] && [ -n "$NOWPAYMENTS_IPN_SECRET" ]; then
+            printf '%s' "$NOWPAYMENTS_API_KEY" | npx wrangler secret put NOWPAYMENTS_API_KEY
+            printf '%s' "$NOWPAYMENTS_IPN_SECRET" | npx wrangler secret put NOWPAYMENTS_IPN_SECRET
+          else
+            echo "NOWPayments production secrets not set; skipping (the gateway stays unavailable)"
+          fi
       - name: Deploy production Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

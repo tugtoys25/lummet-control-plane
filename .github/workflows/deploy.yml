@@ -25,7 +25,7 @@ jobs:
           TEST_FILE_TIMEOUT_MS: 120000
           TEST_SKIP: lockfile-check.test.js,package-phase.test.js,phase6-gate.test.js,load-d1-policies-6-5c.test.js,runbooks-restore-drill-6-5b.test.js
         run: npm test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: control-plane-per-file-test-timings-node-${{ matrix.node-version }}
@@ -124,7 +124,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: node scripts/record-d1-bookmark.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: staging-evidence
           path: d1-time-travel-bookmark.json

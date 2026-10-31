@@ -165,3 +165,11 @@ export async function otherOrgOwnedBySamePerson(env, organizationId, { startedOn
 export async function endLocalTrial(env, subscriptionId) {
   await env.LUMMET_DB.prepare(`UPDATE subscriptions SET trial_ends_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(subscriptionId).run();
 }
+
+/** A no-card (local) trial already running on this plan for the organization, or null. */
+export async function runningLocalTrial(env, organizationId, planId) {
+  const row = await env.LUMMET_DB.prepare(
+    `SELECT id, trial_ends_at FROM subscriptions WHERE organization_id = ? AND status = 'trialing' AND provider IS NULL AND plan_id = ? ORDER BY created_at DESC LIMIT 1`
+  ).bind(organizationId, planId).first();
+  return row ? { subscriptionId: row.id, trialEndsAt: row.trial_ends_at } : null;
+}

@@ -60,10 +60,7 @@ export async function getActiveSubscription(env, organizationId) {
  */
 /** A no-card trial already running on this plan (used by the route so a repeated click reports it as started). */
 export async function runningLocalTrial(env, organizationId, planId) {
-  const row = await env.LUMMET_DB.prepare(
-    `SELECT id, plan_id, trial_ends_at FROM subscriptions WHERE organization_id = ? AND status = 'trialing' AND provider IS NULL AND plan_id = ? ORDER BY created_at DESC LIMIT 1`
-  ).bind(organizationId, planId).first();
-  return row ? { subscriptionId: row.id, trialEndsAt: row.trial_ends_at } : null;
+  return repo.runningLocalTrial(env, organizationId, planId);
 }
 
 /**

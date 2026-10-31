@@ -58,6 +58,14 @@ export async function getActiveSubscription(env, organizationId) {
  * "trialing" subscription — never "active" (rule #5: don't fake
  * billing).
  */
+/** A no-card trial already running on this plan (used by the route so a repeated click reports it as started). */
+export async function runningLocalTrial(env, organizationId, planId) {
+  const row = await env.LUMMET_DB.prepare(
+    `SELECT id, plan_id, trial_ends_at FROM subscriptions WHERE organization_id = ? AND status = 'trialing' AND provider IS NULL AND plan_id = ? ORDER BY created_at DESC LIMIT 1`
+  ).bind(organizationId, planId).first();
+  return row ? { subscriptionId: row.id, trialEndsAt: row.trial_ends_at } : null;
+}
+
 /**
  * Trial-abuse mitigation, part 1: the same PERSON coming back (master prompt section 13; roadmap 1.6).
  *
@@ -82,14 +90,10 @@ export async function startTrialSubscription(env, organizationId, planId) {
   if (!plan) return { ok: false, status: 422, error: "invalid_plan" };
 
   const existing = await env.LUMMET_DB.prepare(
-    `SELECT id, plan_id, status, provider, trial_ends_at FROM subscriptions WHERE organization_id = ? AND status NOT IN ('canceled', 'expired', 'incomplete_expired')`
+    `SELECT id FROM subscriptions WHERE organization_id = ? AND status NOT IN ('canceled', 'expired', 'incomplete_expired')`
   )
     .bind(organizationId)
     .first();
-  // Clicking "Start trial" again on the plan whose no-card trial is already running is not an error: report it as started.
-  if (existing && existing.status === "trialing" && !existing.provider && existing.plan_id === planId) {
-    return { ok: true, subscriptionId: existing.id, trialEndsAt: existing.trial_ends_at, alreadyStarted: true };
-  }
   if (existing) return { ok: false, status: 409, error: "organization_already_subscribed" };
 
   const trialDays = plan.trial_days || 0;

@@ -95,6 +95,7 @@ import { roleAtLeast } from "./customer-rbac.js";
 import { billing } from "./billing.js";
 import { cryptoBilling } from "./billing-nowpayments-service.js";
 import * as billingGateways from "./billing-gateways.js";
+import * as platformSettings from "./platform-settings.js";
 import * as billingLifecycle from "./billing-lifecycle.js";
 import { evaluateWriteGate, evaluateServeGate, refusalFor, resolveAccess } from "./access.js";
 import { effectiveNow, cardRequiredTrial } from "./billing-config.js";
@@ -147,7 +148,7 @@ import * as staffSaas from "./staff-saas.js";
 import * as revenueAnalytics from "./revenue-analytics.js";
 import {
   renderSaasOverview, renderRevenueAnalyticsPage, renderOrganizationsPage, renderOrganizationDetailPage, renderSubscriptionsPage,
-  renderPlansPage, renderJobsPage, renderJobDetailPage, renderEmailPage, renderNotificationsPage, renderTenantTemplatePage, renderCouponsPage, renderOpsAlertsPage, renderServerErrorsPage, renderCpBackupsPage, renderKeyRotationPage, renderReconciliationPage, renderDomainsAdminPage, renderDeploymentsAdminPage, renderWebhooksAdminPage, renderApiKeysAdminPage, renderBackupsAdminPage
+  renderPlansPage, renderJobsPage, renderJobDetailPage, renderEmailPage, renderPlatformSettingsPage, renderNotificationsPage, renderTenantTemplatePage, renderCouponsPage, renderOpsAlertsPage, renderServerErrorsPage, renderCpBackupsPage, renderKeyRotationPage, renderReconciliationPage, renderDomainsAdminPage, renderDeploymentsAdminPage, renderWebhooksAdminPage, renderApiKeysAdminPage, renderBackupsAdminPage
 } from "./views/pages/saas-admin.js";
 import { backups } from "./backups.js";
 import * as tenantTemplate from "./tenant-template.js";
@@ -428,10 +429,12 @@ async function renderPhase5StaffPage(env, admin, kind) {
 }
 
 export default {
-  async fetch(request, rawEnv, ctx) {
+  async fetch(request, baseEnv, ctx) {
     // Hashed, immutable shell CSS/JS (perf/shell-bundle.js): answered before anything else. No database, no session,
     // no logging: it is static content shared by every user.
     if (isShellAssetPath(new URL(request.url).pathname)) return serveShellAsset(request);
+    // Staff-console settings first, wrangler.jsonc second (worker/platform-settings.js). Fail-soft: any problem leaves env as given.
+    const rawEnv = await platformSettings.withPlatformSettings(baseEnv);
     installConsoleRedaction(rawEnv);     // LOG_REDACTION=on only; a no-op by default
     const requestId = crypto.randomUUID();
     const startedAt = Date.now();
@@ -452,7 +455,8 @@ export default {
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   },
 
-  async scheduled(event, env, ctx) {
+  async scheduled(event, baseEnv, ctx) {
+    const env = await platformSettings.withPlatformSettings(baseEnv);
     installConsoleRedaction(env);
     try {
       return await runScheduled(event, env, ctx);
@@ -466,7 +470,8 @@ export default {
 
   // Cloudflare Queues consumer for background jobs. Only used when a JOB_QUEUE queue is bound
   // (see docs/DURABLE_JOBS.md); without it jobs run via ctx.waitUntil and the sweep.
-  async queue(batch, env) {
+  async queue(batch, baseEnv) {
+    const env = await platformSettings.withPlatformSettings(baseEnv);
     installConsoleRedaction(env);
     return jobRunner.handleQueueBatch(batch, env);
   }
@@ -4404,6 +4409,21 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return result.ok ? json({ success: true, unchanged: !!result.unchanged, data: result.gateways }) : json({ success: false, error: result.error }, result.status || 400);
           }
 
+          // Platform settings (migration 0075): staff console value > wrangler.jsonc var > built-in default. Super-admin only (gate above).
+          if (method === "GET" && path === "/api/platform/saas/settings") {
+            return json({ success: true, data: await platformSettings.listSettings(env), events: await platformSettings.listSettingEvents(env, { limit: 30 }) });
+          }
+          const settingMatch = path.match(/^\/api\/platform\/saas\/settings\/([A-Z][A-Z0-9_]{1,63})$/);
+          if ((method === "PUT" || method === "DELETE") && settingMatch) {
+            const b = await staffBody();
+            const key = settingMatch[1];
+            const result = method === "PUT"
+              ? await platformSettings.setSetting(env, { key, value: b.value, actorId: `staff:${admin.id}`, reason: b.reason })
+              : await platformSettings.clearSetting(env, { key, actorId: `staff:${admin.id}`, reason: b.reason });
+            await logAudit(env, { adminId: admin.id, endpoint: path, method, resource: "platform_setting", resourceId: key, action: method === "PUT" ? "set" : "clear", reason: String(b.reason || "").trim().slice(0, 1000), success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
+            return result.ok ? json({ success: true, unchanged: !!result.unchanged, data: result.setting }) : json({ success: false, error: result.error }, result.status || 400);
+          }
+
           if (method === "GET" && path === "/api/platform/saas/webhooks/failed") {
             const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 50));
             const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
@@ -5123,6 +5143,7 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas/plans") return html(await renderPlansPage(env, admin));
         if (path === "/platform/saas/jobs") return html(await renderJobsPage(env, admin, { status: url.searchParams.get("status") || "", type: url.searchParams.get("type") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/email") return html(await renderEmailPage(env, admin));
+        if (path === "/platform/saas/settings") return html(await renderPlatformSettingsPage(env, admin));
         if (path === "/platform/saas/notifications") return html(await renderNotificationsPage(env, admin, { organization: url.searchParams.get("organization") || "", kind: url.searchParams.get("kind") || "", state: url.searchParams.get("state") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/releases") return html(await renderTenantTemplatePage(env, admin));
         const opStatus = url.searchParams.get("status") || "";

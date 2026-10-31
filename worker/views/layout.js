@@ -205,6 +205,7 @@ const NAV = [
       { label: "Key rotation", href: "/platform/saas/key-rotation", key: "saas-keyrotation" },
       { label: "Jobs", href: "/platform/saas/jobs", key: "saas-jobs" },
       { label: "Email outbox", href: "/platform/saas/email", key: "saas-email" },
+      { label: "Platform settings", href: "/platform/saas/settings", key: "saas-settings" },
       { label: "Billing notifications", href: "/platform/saas/notifications", key: "saas-notifications" },
       { label: "Tenant releases", href: "/platform/saas/releases", key: "saas-releases" }
     ]

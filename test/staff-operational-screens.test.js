@@ -35,6 +35,10 @@ async function seed(e, orgId) {
   await db.prepare(`INSERT INTO site_backups (id, organization_id, site_id, status, size_bytes) VALUES ('bk1', ?, 'site1', 'complete', 2048)`).bind(orgId).run();
 }
 
+// The page carries a random CSP nonce; its base64 can contain any short string (it once contained "v7").
+// Match against the visible markup only, never the nonce or inline scripts.
+const visibleText = (t) => String(t).replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '').replace(/ nonce="[^"]*"/g, '');
+
 const PAGES = ['domains', 'deployments', 'webhooks', 'api-keys', 'backups'];
 
 test('all five staff screens render with cross-organization data and never leak secrets', async () => {
@@ -54,8 +58,8 @@ test('all five staff screens render with cross-organization data and never leak 
 
 test('status filters narrow the lists', async () => {
   const e = env(); const staff = await staffLogin(e); const c = await customer(e, 'f@example.com'); await seed(e, c.id);
-  assert.match((await call(e, 'GET', '/platform/saas/deployments?status=failed', null, staff)).text, /v7/);
-  assert.doesNotMatch((await call(e, 'GET', '/platform/saas/deployments?status=active', null, staff)).text, /v7/);
+  assert.match(visibleText((await call(e, 'GET', '/platform/saas/deployments?status=failed', null, staff)).text), /v7/);
+  assert.doesNotMatch(visibleText((await call(e, 'GET', '/platform/saas/deployments?status=active', null, staff)).text), /v7/);
 });
 
 test('screens and actions are closed to anonymous callers and customer sessions', async () => {

@@ -74,7 +74,7 @@ export async function getActiveSubscription(env, organizationId) {
  * configuration; this function stays the always-on, no-configuration part.
  */
 async function hasPriorTrialElsewhere(env, organizationId) {
-  return repo.otherOrgOwnedBySamePerson(env, organizationId);
+  return repo.otherOrgOwnedBySamePerson(env, organizationId, { startedOnly: true });
 }
 
 export async function startTrialSubscription(env, organizationId, planId) {
@@ -82,10 +82,14 @@ export async function startTrialSubscription(env, organizationId, planId) {
   if (!plan) return { ok: false, status: 422, error: "invalid_plan" };
 
   const existing = await env.LUMMET_DB.prepare(
-    `SELECT id FROM subscriptions WHERE organization_id = ? AND status NOT IN ('canceled', 'expired', 'incomplete_expired')`
+    `SELECT id, plan_id, status, provider, trial_ends_at FROM subscriptions WHERE organization_id = ? AND status NOT IN ('canceled', 'expired', 'incomplete_expired')`
   )
     .bind(organizationId)
     .first();
+  // Clicking "Start trial" again on the plan whose no-card trial is already running is not an error: report it as started.
+  if (existing && existing.status === "trialing" && !existing.provider && existing.plan_id === planId) {
+    return { ok: true, subscriptionId: existing.id, trialEndsAt: existing.trial_ends_at, alreadyStarted: true };
+  }
   if (existing) return { ok: false, status: 409, error: "organization_already_subscribed" };
 
   const trialDays = plan.trial_days || 0;

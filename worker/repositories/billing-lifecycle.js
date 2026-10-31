@@ -141,13 +141,17 @@ export async function ownerEmails(env, organizationId) {
   ).bind(organizationId).all()).results || [];
 }
 /** Another organization (not this one) owned by the same person that ever held a subscription. */
-export async function otherOrgOwnedBySamePerson(env, organizationId) {
+// startedOnly: ignore subscriptions that never really began (an abandoned checkout leaves an 'incomplete' row). Default
+// false keeps the original behaviour for the checkout path; the no-card trial path passes true.
+export async function otherOrgOwnedBySamePerson(env, organizationId, { startedOnly = false } = {}) {
   const row = await env.LUMMET_DB.prepare(
     `SELECT COUNT(*) c
      FROM subscriptions s
      JOIN organization_users ou ON ou.organization_id = s.organization_id AND ou.role = 'owner'
      JOIN customer_users u ON u.id = ou.user_id
      WHERE s.organization_id != ?
+       ${startedOnly ? "AND s.status NOT IN ('incomplete','incomplete_expired')" : ""}
+       AND u.email_key IS NOT NULL AND u.email_key != ''
        AND u.email_key IN (
          SELECT cu.email_key FROM organization_users mou
          JOIN customer_users cu ON cu.id = mou.user_id

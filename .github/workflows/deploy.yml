@@ -95,6 +95,15 @@ jobs:
           else
             echo "NOWPayments staging secrets not set; skipping (the gateway stays unavailable)"
           fi
+      - name: Configure Resend email secrets on staging Worker
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY --env staging
+          printf '%s' "$RESEND_WEBHOOK_SECRET" | npx wrangler secret put RESEND_WEBHOOK_SECRET --env staging
       - name: Deploy staging Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -177,6 +186,15 @@ jobs:
           else
             echo "NOWPayments production secrets not set; skipping (the gateway stays unavailable)"
           fi
+      - name: Configure Resend email secrets on production Worker
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY
+          printf '%s' "$RESEND_WEBHOOK_SECRET" | npx wrangler secret put RESEND_WEBHOOK_SECRET
       - name: Deploy production Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

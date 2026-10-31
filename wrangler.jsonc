@@ -250,6 +250,8 @@
 		"PLATFORM_DOMAIN_SUFFIX": "genteelisms.com",
 		"CONTACT_EMAIL": "elijul@proton.me",
 		"PORTAL_BASE_URL": "https://luminousagents.com",
+		"EMAIL_PROVIDER": "resend",
+		"EMAIL_FROM": "Lummet <no-reply@luminousagents.com>",
 		"PAYMENT_GATEWAYS": "nowpayments",
 		"CF_WORKERS_DEV_SUBDOMAIN": "tugtoys25",
 		"WEBAUTHN_RP_ID": "luminousagents.com",
@@ -275,7 +277,7 @@
       "r2_buckets": [{"binding":"BACKUPS","bucket_name":"lummet-backups-staging"},{"binding":"TENANT_TEMPLATES","bucket_name":"lummet-tenant-templates-staging"}],
       "queues": {"producers":[{"binding":"JOB_QUEUE","queue":"lummet-jobs-staging"}],"consumers":[{"queue":"lummet-jobs-staging","max_batch_size":1,"max_retries":5,"dead_letter_queue":"lummet-jobs-staging-dlq"}]},
       "triggers": {"crons":["*/5 * * * *"]},
-      "vars": {"ENVIRONMENT":"staging","BILLING_ENFORCE":"enforce","BILLING_EMAILS":"on","BILLING_SUSPEND_SITES":"enforce","STRIPE_TAX_ENABLED":"false","STRIPE_API_VERSION":"2024-06-20","REVENUE_METRICS":"on","REVENUE_ANALYTICS":"on","ORG_SECURITY_POLICY":"enforce","ORG_IP_ALLOWLIST":"shadow","ORG_SSO_REQUIREMENT":"shadow","CUSTOMER_SESSION_ADMIN":"on","CUSTOMER_AUDIT_CSV":"on","CUSTOMER_2FA_ENROLL_PAGE":"on","PASSWORD_HASH_FORMAT":"v2","SYNTHETIC_MONITORS":"shadow","PUBLIC_TRUST_PAGES":"on","PUBLIC_LEGAL_PAGES":"draft","RATE_LIMIT_RETRY_AFTER":"on","CSP_REPORT_MODE":"full","LOG_REDACTION":"on","AUDIT_LOG_STREAM":"on","ERROR_TRACKING":"shadow","PLATFORM_ACCESS_JWT_MODE":"shadow","BILLING_TRIAL_DAYS_DEFAULT":"7","BILLING_GRACE_DAYS":"14","BILLING_RESTRICTED_DAYS":"7","BILLING_SUSPENDED_DAYS":"30","BILLING_REMINDER_DAYS":"3,1","EMAIL_PROVIDER":"resend","PLATFORM_DOMAIN_SUFFIX":"staging.sites.lummet.app","PORTAL_BASE_URL":"https://staging.luminousagents.com","CF_WORKERS_DEV_SUBDOMAIN":"staging","WEBAUTHN_RP_ID":"staging.luminousagents.com","WEBAUTHN_ORIGIN":"https://staging.luminousagents.com"}
+      "vars": {"ENVIRONMENT":"staging","BILLING_ENFORCE":"enforce","BILLING_EMAILS":"on","BILLING_SUSPEND_SITES":"enforce","STRIPE_TAX_ENABLED":"false","STRIPE_API_VERSION":"2024-06-20","REVENUE_METRICS":"on","REVENUE_ANALYTICS":"on","ORG_SECURITY_POLICY":"enforce","ORG_IP_ALLOWLIST":"shadow","ORG_SSO_REQUIREMENT":"shadow","CUSTOMER_SESSION_ADMIN":"on","CUSTOMER_AUDIT_CSV":"on","CUSTOMER_2FA_ENROLL_PAGE":"on","PASSWORD_HASH_FORMAT":"v2","SYNTHETIC_MONITORS":"shadow","PUBLIC_TRUST_PAGES":"on","PUBLIC_LEGAL_PAGES":"draft","RATE_LIMIT_RETRY_AFTER":"on","CSP_REPORT_MODE":"full","LOG_REDACTION":"on","AUDIT_LOG_STREAM":"on","ERROR_TRACKING":"shadow","PLATFORM_ACCESS_JWT_MODE":"shadow","BILLING_TRIAL_DAYS_DEFAULT":"7","BILLING_GRACE_DAYS":"14","BILLING_RESTRICTED_DAYS":"7","BILLING_SUSPENDED_DAYS":"30","BILLING_REMINDER_DAYS":"3,1","EMAIL_PROVIDER":"resend","EMAIL_FROM":"Lummet <no-reply@luminousagents.com>","PLATFORM_DOMAIN_SUFFIX":"staging.sites.lummet.app","PORTAL_BASE_URL":"https://staging.luminousagents.com","CF_WORKERS_DEV_SUBDOMAIN":"staging","WEBAUTHN_RP_ID":"staging.luminousagents.com","WEBAUTHN_ORIGIN":"https://staging.luminousagents.com"}
     }
   }
 }

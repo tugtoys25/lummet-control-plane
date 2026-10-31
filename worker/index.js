@@ -432,9 +432,13 @@ export default {
   async fetch(request, baseEnv, ctx) {
     // Hashed, immutable shell CSS/JS (perf/shell-bundle.js): answered before anything else. No database, no session,
     // no logging: it is static content shared by every user.
-    if (isShellAssetPath(new URL(request.url).pathname)) return serveShellAsset(request);
+    const pathname = new URL(request.url).pathname;
+  if (isShellAssetPath(pathname)) return serveShellAsset(request);
     // Staff-console settings first, wrangler.jsonc second (worker/platform-settings.js). Fail-soft: any problem leaves env as given.
-    const rawEnv = await platformSettings.withPlatformSettings(baseEnv);
+    // Visitors with no session cookie get { signedIn: false } with no DB work, so skip the overlay.
+  const anonStatusCheck = pathname === "/session-status" &&
+    !/(?:^|;\s*)lummet_session=/.test(request.headers.get("cookie") || "");
+  const rawEnv = anonStatusCheck ? baseEnv : await platformSettings.withPlatformSettings(baseEnv);
     installConsoleRedaction(rawEnv);     // LOG_REDACTION=on only; a no-op by default
     const requestId = crypto.randomUUID();
     const startedAt = Date.now();

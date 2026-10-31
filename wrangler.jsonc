@@ -191,7 +191,7 @@
 		// Plans listed under the /demo form: off | on (worker/public-site/demo-plans.js). DEMO_PLANS_PRODUCT (optional product id) picks the family shown.
 		"DEMO_PAGE_PLANS": "on",
 		"BILLING_ENFORCE": "enforce",
-		"BILLING_SUSPEND_SITES": "enforce",
+		"BILLING_SUSPEND_SITES": "shadow",
 		"BILLING_EMAILS": "on",
 		"REVENUE_METRICS": "on",
 		"REVENUE_ANALYTICS": "on",
@@ -205,15 +205,15 @@
 		// Do not set v2 until 2.6.0.17 or later is the oldest build you could roll back to: older builds cannot verify v2 hashes.
 		"PASSWORD_HASH_FORMAT": "v2",
 		// Synthetic monitors (6.5A): off (default; nothing probed), shadow (probe and record, never page), on (a failing monitor pages through the alert channel). Needs the monitor account and canary settings in docs/SYNTHETIC_MONITORS.md; secrets (SYNTHETIC_SIGNIN_PASSWORD) are Worker secrets, never vars.
-		"SYNTHETIC_MONITORS": "enforce",
+		"SYNTHETIC_MONITORS": "shadow",
 		// IP allowlist (6.4C): off, shadow (log would-deny, nothing blocked), enforce. Also needs the plan entitlement security.ip_allowlist.enabled (granted to no plan). Stays off until OPEN_ITEMS_v2.6.0.11.md is answered.
-		"ORG_IP_ALLOWLIST": "on",
+		"ORG_IP_ALLOWLIST": "off",
 		// SSO requirement (6.4C): a stub. off or shadow only; never enforced because no identity provider is named.
 		"ORG_SSO_REQUIREMENT": "off",
 		// Public trust pages (6.2A): off, shadow (review, noindex), on. STATUS_PROVIDER_URL, SECURITY_CONTACT and SECURITY_TXT_EXPIRES are owner values, set per environment.
-		"PUBLIC_TRUST_PAGES": "on",
+		"PUBLIC_TRUST_PAGES": "shadow",
 		// Legal pages (6.2B): off, draft (watermarked DRAFT FOR COUNSEL, noindex), on (only with recorded counsel approval per market). See docs/CONFIGURATION.md.
-		"PUBLIC_LEGAL_PAGES": "on",
+		"PUBLIC_LEGAL_PAGES": "off",
 		// Edge rate limiting (6.3A). RATE_LIMIT_RETRY_AFTER: off|on. The CF_WAF_* values and WAF_THRESHOLDS_CONFIRMED are owner inputs [OPEN]; see docs/WAF_RATE_LIMITS.md.
 		"RATE_LIMIT_RETRY_AFTER": "on",
 		"CF_WAF_ZONE_ID": "",
@@ -242,15 +242,15 @@
 		"STRIPE_API_VERSION": "2024-06-20",
 		// Checkout Sessions only: the Stripe account has Managed Payments on, which needs 2025-03-31.basil or newer.
 		"STRIPE_CHECKOUT_API_VERSION": "2025-03-31.basil",
-		"BILLING_TRIAL_DAYS_DEFAULT": "4",
+		"BILLING_TRIAL_DAYS_DEFAULT": "7",
 		"BILLING_GRACE_DAYS": "14",
 		"BILLING_RESTRICTED_DAYS": "7",
 		"BILLING_SUSPENDED_DAYS": "30",
 		"BILLING_REMINDER_DAYS": "3,1",
 		"PLATFORM_DOMAIN_SUFFIX": "genteelisms.com",
-		"CONTACT_EMAIL": "hello@lummet.com",
+		"CONTACT_EMAIL": "elijul@proton.me",
 		"PORTAL_BASE_URL": "https://luminousagents.com",
-		"PAYMENT_GATEWAYS": "nowpayments",
+		"PAYMENT_GATEWAYS": "stripe,nowpayments",
 		"CF_WORKERS_DEV_SUBDOMAIN": "tugtoys25",
 		"WEBAUTHN_RP_ID": "luminousagents.com",
 		"WEBAUTHN_ORIGIN": "https://luminousagents.com"

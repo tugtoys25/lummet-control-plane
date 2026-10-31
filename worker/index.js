@@ -1512,6 +1512,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             }
 
             const body = await request.json().catch(() => ({}));
+            const running = await plans.runningLocalTrial(env, organizationId, body.planId);
+            if (running) return json({ success: true, subscriptionId: running.subscriptionId, trialEndsAt: running.trialEndsAt, alreadyStarted: true });
             const result = await plans.startTrialSubscription(env, organizationId, body.planId);
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,

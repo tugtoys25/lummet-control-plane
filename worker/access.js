@@ -137,7 +137,7 @@ export function refusalFor(access) {
     reason: access.state,
     message:
       access.state === "past_due" ? "A payment failed. Update your payment method to avoid interruption."
-      : access.state === "trial_expired" ? "Your trial has ended. Choose a plan to keep making changes."
+      : access.state === "trial_expired" ? (access.reason === "no subscription" ? "Start your free trial or choose a plan to begin making changes." : "Your trial has ended. Choose a plan to keep making changes.")
       : access.state === "restricted" ? "Your account is read-only until payment is resolved."
       : access.state === "suspended" ? "Your account is suspended for non-payment. Pay to restore it."
       : "This account is closed.",

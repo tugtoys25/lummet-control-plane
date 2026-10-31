@@ -1520,7 +1520,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
             });
             if (!result.ok) return json({ success: false, error: result.error }, result.status);
-            return json({ success: true, subscriptionId: result.subscriptionId, trialEndsAt: result.trialEndsAt });
+            return json({ success: true, subscriptionId: result.subscriptionId, trialEndsAt: result.trialEndsAt, alreadyStarted: !!result.alreadyStarted });
           }
 
           // -------------------------------------------

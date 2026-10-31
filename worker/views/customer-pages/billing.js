@@ -21,7 +21,10 @@ const COUPON_ERRORS = {
   gateway_unavailable: "That payment method is not available right now. Please choose another.",
   coupon_not_supported_for_gateway: "Discount codes can't be used with crypto payments.",
   use_crypto_checkout_to_change_plan: "To change plans on a crypto subscription, use Pay with crypto on the plan you want.",
-  not_available_for_crypto: "That option isn't available for crypto subscriptions."
+  not_available_for_crypto: "That option isn't available for crypto subscriptions.",
+  trial_already_used: "A free trial has already been used by the owner of this account on another organization. Choose a plan below to subscribe.",
+  card_required_for_trial: "Free trials start on Stripe's secure payment page. Use the plan's trial button to continue.",
+  organization_already_subscribed: "This organization already has a plan. Reload the page to see it."
 };
 
 function discountText(c) {
@@ -54,7 +57,14 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
     closed: "This account is closed. Contact support if you believe this is incorrect.",
     paused: "Billing collection is paused. Check the resume date before making changes."
   };
-  const accessBanner = accessBannerCopy[accessState]
+  // An organization that has never had a subscription is NEW, not expired: say so and invite the trial.
+  // (access.js still reports state "trial_expired" for it, with reason "no subscription", so enforcement is unchanged.)
+  const isNewOrg = !subscription && accessState === "trial_expired" && (!access?.subscriptionId || access?.reason === "no subscription");
+  const firstTrialDays = (availablePlans || []).map((p) => Number(p.trial_days) || 0).find((d) => d > 0) || 0;
+  const newOrgBanner = isNewOrg
+    ? `<div class="flash" role="status"><strong>Welcome:</strong> ${firstTrialDays ? "start your free " + escapeHtml(String(firstTrialDays)) + "-day trial by choosing a plan below." : "choose a plan below to get started."}</div>`
+    : "";
+  const accessBanner = isNewOrg ? newOrgBanner : accessBannerCopy[accessState]
     ? `<div class="flash ${["restricted", "suspended", "closed"].includes(accessState) ? "flash-error" : ""}" role="status"><strong>${escapeHtml(accessState.replace(/_/g, " "))}:</strong> ${escapeHtml(accessBannerCopy[accessState])} ${canManageBilling && accessState === "past_due" ? "Use the payment button below to update payment details." : ""}</div>`
     : "";
   const usageCard = usage ? `<section class="card" id="billing-overview"><h2>Overview</h2><div class="grid"><div class="stat"><div class="value">${escapeHtml(String(usage.sites?.used ?? "—"))}${usage.sites?.limit != null ? " / " + escapeHtml(String(usage.sites.limit)) : ""}</div><div class="label">Sites</div></div><div class="stat"><div class="value">${escapeHtml(String(usage.users?.used ?? "—"))}${usage.users?.limit != null ? " / " + escapeHtml(String(usage.users.limit)) : ""}</div><div class="label">Seats</div></div><div class="stat"><div class="value">${escapeHtml(String(usage.customDomains?.used ?? "—"))}${usage.customDomains?.limit != null ? " / " + escapeHtml(String(usage.customDomains.limit)) : ""}</div><div class="label">Domains</div></div><div class="stat"><div class="value">${usage.storageBytes == null ? "Unknown" : escapeHtml(String(usage.storageBytes)) + " bytes"}</div><div class="label">Storage</div></div><div class="stat"><div class="value">${aiCredits == null ? "Unknown" : escapeHtml(String(aiCredits))}</div><div class="label">AI credits</div></div></div></section>` : "";
@@ -210,7 +220,13 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
         fetch('/api/organizations/' + lummetActiveOrgId() + '/billing/profile', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
           .then(function(r){ return r.json(); }).then(function(data){ if(!data.success){ message.textContent='Could not save: '+String(data.error||'unknown error').replace(/_/g,' '); return; } message.textContent='Saved to Stripe and Lummet.'; });
       }
-      function lummetStartTrial(planId) { lummetBillingPost('/trial', { planId: planId }, 'Could not start trial'); }
+      function lummetStartTrial(planId) {
+        lummetBillingPost('/trial', { planId: planId }, 'Could not start trial', function (data) {
+          var ends = data && data.trialEndsAt ? new Date(data.trialEndsAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : null;
+          alert((data && data.alreadyStarted ? 'Your free trial is already running' : 'Your free trial has started') + (ends ? ' and ends ' + ends : '') + '.');
+          location.reload();
+        });
+      }
       function lummetCheckout(planId, gateway) {
         var code = (document.getElementById('coupon-code') || { value: '' }).value.trim();
         lummetBillingPost('/billing/checkout', { planId: planId, couponCode: code || undefined, gateway: gateway || undefined }, 'Could not start checkout', function (data) {

@@ -31,7 +31,7 @@ const PREVIOUS_HREFS = [
   "/platform/saas/jobs",
   "/platform/saas/email",
   "/platform/saas/notifications",
-  "/platform/saas/releases",
+  "/platform/saas/releases", "/platform/saas/settings",
 
   "/ai",
   "/tenants",

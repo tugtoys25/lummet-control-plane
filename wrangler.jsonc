@@ -250,7 +250,7 @@
 		"PLATFORM_DOMAIN_SUFFIX": "genteelisms.com",
 		"CONTACT_EMAIL": "elijul@proton.me",
 		"PORTAL_BASE_URL": "https://luminousagents.com",
-		"PAYMENT_GATEWAYS": "stripe,nowpayments",
+		"PAYMENT_GATEWAYS": "nowpayments",
 		"CF_WORKERS_DEV_SUBDOMAIN": "tugtoys25",
 		"WEBAUTHN_RP_ID": "luminousagents.com",
 		"WEBAUTHN_ORIGIN": "https://luminousagents.com"

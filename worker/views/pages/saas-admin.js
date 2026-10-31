@@ -16,6 +16,7 @@ import { listDrift } from "../../phase3-source-of-truth.js";
 import * as staffTokensModule from "../../staff-tokens.js";
 import { nonceToken, onClick, onSubmit, onChange } from "../../csp.js";
 import * as revenueAnalytics from "../../revenue-analytics.js";
+import * as platformSettings from "../../platform-settings.js";
 
 const money = (c) => (c == null ? "custom" : `$${(c / 100).toFixed(2)}`);
 // Round 6.1B: revenue is shown with its own currency code and is never summed across currencies. Unknown is "n/a", never zero.
@@ -255,6 +256,44 @@ export async function renderEmailPage(env, admin) {
     <p>${Object.entries(s.email).map(([k, v]) => `${badge(k)} ${h(v)}`).join(" &nbsp; ") || "Outbox empty."}</p>
     <p><button class="btn"${onClick("act", ["/api/platform/saas/email/flush", {}])}>Deliver queued now</button> &nbsp; <a href="/platform/saas/notifications">Billing notifications</a></p>
     <h2>Failed</h2>${table(["To", "Template", "Attempts", "Error", "When"], failed.map((f) => [h(f.to_email), h(f.template), h(f.attempts), h(f.last_error || ""), h(f.created_at)]), "No failed emails.")}`);
+}
+
+const SOURCE_LABEL = { staff: "console", wrangler: "wrangler", default: "default" };
+
+function settingInput(item) {
+  const current = item.staffValue ?? item.value ?? "";
+  if (item.options) {
+    return `<select name="value">${item.options.map((o) => `<option${o === current ? " selected" : ""}>${h(o)}</option>`).join("")}</select>`;
+  }
+  return `<input name="value" value="${h(current)}" style="min-width:160px" />`;
+}
+
+/** Staff console: every manageable setting, where its effective value comes from, and set / clear with an audited reason. */
+export async function renderPlatformSettingsPage(env, admin) {
+  const [items, events] = await Promise.all([platformSettings.listSettings(env), platformSettings.listSettingEvents(env, { limit: 20 })]);
+  const groups = [...new Set(items.map((i) => i.group))];
+  const sections = groups.map((g) => `<h2>${h(g)}</h2>${table(["Setting", "In force", "Source", "Change", ""],
+    items.filter((i) => i.group === g).map((i) => [
+      `<code>${h(i.key)}</code><div style="color:var(--text-dim);font-size:12px;max-width:340px">${h(i.help)}</div>`,
+      `<strong>${h(i.value === "" ? "(empty)" : i.value)}</strong>${i.wranglerValue !== null && i.source === "staff" ? `<div style="color:var(--text-dim);font-size:12px">wrangler: ${h(i.wranglerValue)}</div>` : ""}`,
+      `${badge(SOURCE_LABEL[i.source])}${i.updatedBy ? `<div style="color:var(--text-dim);font-size:12px">${h(i.updatedBy)}<br>${h(i.updatedAt || "")}</div>` : ""}`,
+      `<form${onSubmit("saveSetting", ["$el", i.key], { prevent: true })} style="display:flex;gap:6px;flex-wrap:wrap">${settingInput(i)}<input name="reason" placeholder="reason (audited)" style="min-width:140px" /><button class="btn" type="submit">Save</button></form>`,
+      i.staffValue !== null ? `<button class="btn"${onClick("clearSetting", [i.key])}>Use ${i.wranglerValue !== null ? "wrangler" : "default"}</button>` : ""
+    ]), "No settings.")}`).join("");
+  const recent = table(["When", "Setting", "Action", "From", "To", "By", "Reason"], events.map((e) => [h(e.created_at), `<code>${h(e.key)}</code>`, h(e.action), h(e.old_value ?? ""), h(e.new_value ?? ""), h(e.actor_id || ""), h(e.reason || "")]), "No changes yet.");
+  const script = `<script nonce="${nonceToken()}">
+function settingCall(key, method, body) {
+  fetch('/api/platform/saas/settings/' + encodeURIComponent(key), { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { if (d.success) location.reload(); else alert('Failed: ' + (d.error || 'unknown')); });
+}
+function saveSetting(f, key) { settingCall(key, 'PUT', { value: f.value.value, reason: f.reason.value }); }
+function clearSetting(key) { var r = prompt('Reason for going back to the wrangler value (audited):'); if (r && r.trim()) settingCall(key, 'DELETE', { reason: r.trim() }); }
+</script>`;
+  return shell(env, admin, "Platform settings", "saas-settings", `
+    <p style="color:var(--text-dim)">The value in force is the first that exists: <strong>console</strong> (set here), then <strong>wrangler</strong> (<code>wrangler.jsonc</code>), then the built-in <strong>default</strong>. Changes reach every edge location within about 15 seconds, with no deploy. Secrets, bindings and the lockout-prone settings (Cloudflare Access, passkey origin, portal URL, staff 2FA, password hashing) are not listed: they stay in <code>wrangler.jsonc</code> and Worker secrets.</p>
+    ${sections}
+    <h2>Recent changes</h2>${recent}${script}`);
 }
 
 const NOTIFICATION_STATE_HELP = {

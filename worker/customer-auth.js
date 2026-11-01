@@ -133,7 +133,7 @@ export async function createSession(env, userId, activeOrganizationId) {
 // separately — see organizations.js.
 // -----------------------------------------------------
 
-async function verifyCustomerTurnstile(request, env, token) {
+export async function verifyCustomerTurnstile(request, env, token) {
   if (String(env.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on") return { ok: true, skipped: true };
   if (!env.TURNSTILE_SECRET_KEY || !env.TURNSTILE_SITE_KEY || !token) return { ok: false, status: 422, error: "turnstile_required" };
   const controller = new AbortController();

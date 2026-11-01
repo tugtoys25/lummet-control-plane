@@ -97,6 +97,7 @@ import { cryptoBilling } from "./billing-nowpayments-service.js";
 import * as billingGateways from "./billing-gateways.js";
 import * as platformSettings from "./platform-settings.js";
 import { applySiteChrome, hasChromeMarkers, CHROME_HEADER } from "./site-chrome.js";
+import { staffTurnstileSiteKey, verifyStaffTurnstile } from "./staff-turnstile.js";
 import * as billingLifecycle from "./billing-lifecycle.js";
 import { evaluateWriteGate, evaluateServeGate, refusalFor, resolveAccess } from "./access.js";
 import { effectiveNow, cardRequiredTrial } from "./billing-config.js";
@@ -439,7 +440,10 @@ export default {
     // Visitors with no session cookie get { signedIn: false } with no DB work, so skip the overlay.
   const anonStatusCheck = pathname === "/session-status" &&
     !/(?:^|;\s*)lummet_session=/.test(request.headers.get("cookie") || "");
-  const rawEnv = anonStatusCheck ? baseEnv : await platformSettings.withPlatformSettings(baseEnv);
+  // Routes that read the staff settings fresh (not the 15 s isolate cache): a console toggle is live on the very next request.
+    const freshSettings = (request.method === "GET" && (pathname === "/app/login" || pathname === "/app/signup" || pathname === "/app/forgot-password" || /^\/(?:contact|demo|forms\/[^/]+)$/.test(pathname))) ||
+      (request.method === "POST" && (pathname === "/api/customer/login" || pathname === "/api/customer/signup" || pathname === "/api/customer/password/forgot" || /^\/(?:contact|demo|forms\/[^/]+)$/.test(pathname)));
+    const rawEnv = anonStatusCheck ? baseEnv : await platformSettings.withPlatformSettings(baseEnv, { fresh: freshSettings });
     installConsoleRedaction(rawEnv);     // LOG_REDACTION=on only; a no-op by default
     const requestId = crypto.randomUUID();
     const startedAt = Date.now();
@@ -550,6 +554,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       }
 
       if (method === "POST" && path === "/api/auth/login") {
+        const apiBody = await request.clone().json().catch(() => ({}));
+        const apiChallenge = await verifyStaffTurnstile(request, env, apiBody.turnstileToken);
+        if (!apiChallenge.ok) return json({ success: false, error: apiChallenge.error }, apiChallenge.status);
         const result = await auth.login(request, env);
 
         await logAudit(env, {
@@ -658,7 +665,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         const bootstrapMode = !(await auth.hasAnyAdmins(env));
 
         if (method === "GET") {
-          return html(renderLoginPage({ mode: bootstrapMode ? "bootstrap" : "login" }));
+          return html(renderLoginPage({ mode: bootstrapMode ? "bootstrap" : "login", turnstileSiteKey: staffTurnstileSiteKey(env) }));
         }
 
         if (method === "POST") {
@@ -710,10 +717,15 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             });
             if (mfa.ok) return redirect("/dashboard", { "Set-Cookie": mfa.cookie });
             const dead = ["invalid_challenge", "challenge_expired", "too_many_attempts", "account_disabled"].includes(mfa.error);
-            if (dead) return html(renderLoginPage({ mode: "login", error: describeAuthError(mfa.error === "too_many_attempts" ? "too_many_attempts" : "mfa_restart") }));
+            if (dead) return html(renderLoginPage({ mode: "login", turnstileSiteKey: staffTurnstileSiteKey(env), error: describeAuthError(mfa.error === "too_many_attempts" ? "too_many_attempts" : "mfa_restart") }));
             return html(renderLoginPage({ mode: "mfa", challengeId: form.challenge_id, error: describeAuthError(mfa.error) }));
           }
 
+          const staffChallenge = await verifyStaffTurnstile(request, env, form["cf-turnstile-response"]);
+          if (!staffChallenge.ok) {
+            return html(renderLoginPage({ mode: "login", turnstileSiteKey: staffTurnstileSiteKey(env),
+              error: staffChallenge.error === "turnstile_required" ? "Please complete the security check." : "The security check could not be completed. Try again." }));
+          }
           const loginResult = await auth.authenticateAdmin(env, form.email, form.password, authIpHash);
 
           await logAudit(env, {
@@ -727,7 +739,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
           if (!loginResult.ok) {
             return html(
-              renderLoginPage({ mode: "login", error: describeAuthError(loginResult.error) })
+              renderLoginPage({ mode: "login", error: describeAuthError(loginResult.error), turnstileSiteKey: staffTurnstileSiteKey(env) })
             );
           }
           if (loginResult.mfaRequired) return html(renderLoginPage({ mode: "mfa", challengeId: loginResult.challengeId }));
@@ -913,6 +925,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
       if (method === "POST" && path === "/api/customer/password/forgot") {
         const body = await request.json().catch(() => ({}));
+        // Same Turnstile switch as sign-in. The answer depends only on the challenge, never on the email, so it is no account oracle.
+        const forgotChallenge = await customerAuth.verifyCustomerTurnstile(request, env, body.turnstileToken);
+        if (!forgotChallenge.ok) return json({ success: false, error: forgotChallenge.error }, forgotChallenge.status);
         // Response is identical whether or not the email exists —
         // requestPasswordReset() never reveals that to the caller.
         // Email-bombing guard: per-IP cap, and a per-address cap so one
@@ -2911,7 +2926,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
         if (path === "/app/verify-email") return html(renderVerifyEmailPage());
         if (path === "/app/reset-password") return html(renderResetPasswordPage());
-        if (path === "/app/forgot-password") return html(renderForgotPasswordPage());
+        if (path === "/app/forgot-password") return html(renderForgotPasswordPage({ turnstileSiteKey: String(env.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" ? (env.TURNSTILE_SITE_KEY || "") : "" }));
         if (path === "/app/invitation") return html(renderInvitationPage());
         // The pricing page links here with ?plan=&period=. Serve the page itself (no redirect) so the query string survives and
         // the page can save the choice; a visitor who is already signed in goes straight to billing with the plan selected.

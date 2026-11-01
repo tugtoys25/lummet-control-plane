@@ -256,6 +256,7 @@
 		"EMAIL_FROM": "Lummet <no-reply@luminousagents.com>",
 		"PAYMENT_GATEWAYS": "nowpayments",
 		"CF_WORKERS_DEV_SUBDOMAIN": "tugtoys25",
+                "TURNSTILE_SITE_KEY": "0x4AAAAAAFu7XNvU-gnTjL26",
 		"WEBAUTHN_RP_ID": "luminousagents.com",
 		"WEBAUTHN_ORIGIN": "https://luminousagents.com"
 	},

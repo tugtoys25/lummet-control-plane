@@ -17,6 +17,7 @@ import * as staffTokensModule from "../../staff-tokens.js";
 import { nonceToken, onClick, onSubmit, onChange } from "../../csp.js";
 import * as revenueAnalytics from "../../revenue-analytics.js";
 import * as platformSettings from "../../platform-settings.js";
+import * as billingGateways from "../../billing-gateways.js";
 
 const money = (c) => (c == null ? "custom" : `$${(c / 100).toFixed(2)}`);
 // Round 6.1B: revenue is shown with its own currency code and is never summed across currencies. Unknown is "n/a", never zero.
@@ -260,8 +261,14 @@ export async function renderEmailPage(env, admin) {
 
 const SOURCE_LABEL = { staff: "console", wrangler: "wrangler", default: "default" };
 
-function settingInput(item) {
+function settingInput(item, gateways = []) {
   const current = item.staffValue ?? item.value ?? "";
+  if (item.type === "csvEnum" && item.options) {
+    const raw = String(current).trim().toLowerCase();
+    const on = new Set(raw === "none" ? [] : raw ? raw.split(/[\s,;]+/) : (gateways || []).filter((g) => g.enabled).map((g) => g.gateway));
+    const boxes = item.options.map((o) => `<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><input type="checkbox" data-opt="${h(o)}"${on.has(o) ? " checked" : ""} style="width:auto;margin:0" /> ${h(o)}</label>`).join("");
+    return `<div style="min-width:240px"><div>${boxes}</div><div style="margin-top:4px"><button class="btn" type="button"${onClick("gwAll", ["$el", true])}>All on</button> <button class="btn" type="button"${onClick("gwAll", ["$el", false])}>All off</button></div></div>`;
+  }
   if (item.options) {
     return `<select name="value">${item.options.map((o) => `<option${o === current ? " selected" : ""}>${h(o)}</option>`).join("")}</select>`;
   }
@@ -270,14 +277,14 @@ function settingInput(item) {
 
 /** Staff console: every manageable setting, where its effective value comes from, and set / clear with an audited reason. */
 export async function renderPlatformSettingsPage(env, admin) {
-  const [items, events] = await Promise.all([platformSettings.listSettings(env), platformSettings.listSettingEvents(env, { limit: 20 })]);
+  const [items, events, gateways] = await Promise.all([platformSettings.listSettings(env), platformSettings.listSettingEvents(env, { limit: 20 }), billingGateways.listGateways(env).catch(() => [])]);
   const groups = [...new Set(items.map((i) => i.group))];
   const sections = groups.map((g) => `<h2>${h(g)}</h2>${table(["Setting", "In force", "Source", "Change", ""],
     items.filter((i) => i.group === g).map((i) => [
       `<code>${h(i.key)}</code><div style="color:var(--text-dim);font-size:12px;max-width:340px">${h(i.help)}</div>`,
       `<strong>${h(i.value === "" ? "(empty)" : i.value)}</strong>${i.wranglerValue !== null && i.source === "staff" ? `<div style="color:var(--text-dim);font-size:12px">wrangler: ${h(i.wranglerValue)}</div>` : ""}`,
       `${badge(SOURCE_LABEL[i.source])}${i.updatedBy ? `<div style="color:var(--text-dim);font-size:12px">${h(i.updatedBy)}<br>${h(i.updatedAt || "")}</div>` : ""}`,
-      `<form${onSubmit("saveSetting", ["$el", i.key], { prevent: true })} style="display:flex;gap:6px;flex-wrap:wrap">${settingInput(i)}<input name="reason" placeholder="reason (audited)" style="min-width:140px" /><button class="btn" type="submit">Save</button></form>`,
+      `<form${onSubmit("saveSetting", ["$el", i.key], { prevent: true })} style="display:flex;gap:6px;flex-wrap:wrap">${settingInput(i, gateways)}<input name="reason" placeholder="reason (audited)" style="min-width:140px" /><button class="btn" type="submit">Save</button></form>`,
       i.staffValue !== null ? `<button class="btn"${onClick("clearSetting", [i.key])}>Use ${i.wranglerValue !== null ? "wrangler" : "default"}</button>` : ""
     ]), "No settings.")}`).join("");
   const recent = table(["When", "Setting", "Action", "From", "To", "By", "Reason"], events.map((e) => [h(e.created_at), `<code>${h(e.key)}</code>`, h(e.action), h(e.old_value ?? ""), h(e.new_value ?? ""), h(e.actor_id || ""), h(e.reason || "")]), "No changes yet.");
@@ -287,7 +294,18 @@ function settingCall(key, method, body) {
     .then(function (r) { return r.json(); })
     .then(function (d) { if (d.success) location.reload(); else alert('Failed: ' + (d.error || 'unknown')); });
 }
-function saveSetting(f, key) { settingCall(key, 'PUT', { value: f.value.value, reason: f.reason.value }); }
+function gwAll(btn, on) { var f = btn.closest('form'); f.querySelectorAll('input[data-opt]').forEach(function (b) { b.checked = on; }); }
+function saveSetting(f, key) {
+  var boxes = f.querySelectorAll('input[data-opt]');
+  var v = f.value ? f.value.value : '';
+  if (boxes.length) {
+    var on = [];
+    boxes.forEach(function (b) { if (b.checked) on.push(b.getAttribute('data-opt')); });
+    v = on.length ? on.join(',') : 'none';
+    if (v === 'none' && !confirm('Turn ALL options off for ' + key + '? For payment gateways this refuses new checkouts until one is turned on. Existing subscriptions and payments already in flight are not affected.')) return;
+  }
+  settingCall(key, 'PUT', { value: v, reason: f.reason.value });
+}
 function clearSetting(key) { var r = prompt('Reason for going back to the wrangler value (audited):'); if (r && r.trim()) settingCall(key, 'DELETE', { reason: r.trim() }); }
 </script>`;
   return shell(env, admin, "Platform settings", "saas-settings", `

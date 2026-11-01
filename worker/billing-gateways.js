@@ -42,6 +42,7 @@ const FALLBACK_ROWS = [
 export function configOverride(env) {
   const raw = String((env && env.PAYMENT_GATEWAYS) || "").trim().toLowerCase();
   if (!raw) return null;
+  if (raw === "none") return []; // explicit: every gateway off, new checkouts refused; subscriptions and webhooks are untouched
   const order = [...new Set(raw.split(/[\s,;]+/).filter((key) => GATEWAYS[key]))];
   return order.length ? order : null;
 }

@@ -53,7 +53,7 @@ export const SETTINGS = [
   def("BILLING_RESTRICTED_DAYS", "Billing", "int", { min: 0, max: 3650, default: "7", help: "Days restricted before suspended; also how long an expired trial stays live." }),
   def("BILLING_SUSPENDED_DAYS", "Billing", "int", { min: 0, max: 3650, default: "30", help: "Days suspended before closed." }),
   def("BILLING_REMINDER_DAYS", "Billing", "csvInt", { min: 0, max: 365, default: "3,1", help: "Days before a trial end, renewal, grace end or deletion to remind, e.g. 3,1." }),
-  def("PAYMENT_GATEWAYS", "Billing", "csvEnum", { options: ["stripe", "nowpayments"], default: "", help: "Gateways that are ON, in the order offered, e.g. stripe,nowpayments or nowpayments. Empty = the database switch decides." }),
+  def("PAYMENT_GATEWAYS", "Billing", "csvEnum", { options: ["stripe", "nowpayments"], allowNone: true, default: "", help: "Gateways that are ON, in the order offered. Tick the boxes (or All on / All off) and save. All off (none) refuses new checkouts; existing subscriptions are untouched. Clearing the console value = the database switch decides." }),
   def("STRIPE_API_VERSION", "Billing", "text", { max: 40, pattern: /^\d{4}-\d{2}-\d{2}(\.[a-z]+)?$/, default: "", help: "Stripe API version for general calls, e.g. 2024-06-20." }),
   def("STRIPE_CHECKOUT_API_VERSION", "Billing", "text", { max: 40, pattern: /^\d{4}-\d{2}-\d{2}(\.[a-z]+)?$/, default: "", help: "Stripe API version for Checkout Sessions, e.g. 2025-03-31.basil." }),
   def("STRIPE_TAX_ENABLED", "Billing", "enum", { options: ["true", "false"], default: "false", help: "Turn on Stripe Tax at checkout." }),
@@ -141,6 +141,7 @@ export function validateValue(definition, raw) {
       return nums.every((n) => n >= definition.min && n <= definition.max) ? { ok: true, value: nums.join(",") } : bad;
     }
     case "csvEnum": {
+      if (definition.allowNone && s.trim().toLowerCase() === "none") return { ok: true, value: "none" };
       const parts = [...new Set(s.toLowerCase().split(/[\s,;]+/).filter(Boolean))];
       return parts.length && parts.every((p) => definition.options.includes(p)) ? { ok: true, value: parts.join(",") } : bad;
     }
@@ -189,7 +190,7 @@ export function crossChecks(key, effective) {
   if (key === "PAYMENT_GATEWAYS") {
     const listed = lc(effective.PAYMENT_GATEWAYS).split(/[\s,;]+/).filter(Boolean);
     const usable = listed.some((g) => g === "stripe" || (g === "nowpayments" && effective.NOWPAYMENTS_API_KEY && effective.NOWPAYMENTS_IPN_SECRET));
-    if (listed.length && !usable) return "no_usable_payment_gateway";
+    if (listed.length && !listed.includes("none") && !usable) return "no_usable_payment_gateway";
   }
   return null;
 }

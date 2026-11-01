@@ -89,7 +89,7 @@ export const SETTINGS = [
   def("DEMO_PAGE_PLANS", "Public site", "enum", { options: ON_OFF, default: "off", help: "List plans under the /demo form." }),
   def("DEMO_PLANS_PRODUCT", "Public site", "text", { max: 80, pattern: /^[A-Za-z0-9_.:-]+$/, default: "", help: "Optional product id that picks which plan family /demo shows." }),
   def("PUBLIC_FORMS_TURNSTILE_REQUIRED", "Public site", "enum", { options: ON_OFF, default: "off", help: "Require Turnstile on the contact and demo forms (needs the site key and secret)." }),
-  def("CUSTOMER_TURNSTILE_REQUIRED", "Public site", "enum", { options: ON_OFF, default: "off", help: "Require Turnstile on customer sign-up and sign-in (needs the site key and secret)." }),
+  def("CUSTOMER_TURNSTILE_REQUIRED", "Public site", "enum", { options: ON_OFF, default: "off", help: "Require Turnstile on customer sign-up, sign-in and forgot-password (needs the site key and secret)." }),
   def("CONTACT_EMAIL", "Public site", "email", { default: "", help: "Shown on the homepage 'Get in Touch' section as a mailto link." }),
   def("STATUS_PROVIDER_URL", "Public site", "url", { default: "", help: "Public status page address (https)." }),
   def("SECURITY_CONTACT", "Public site", "text", { max: 200, pattern: /^(mailto:|https:\/\/)?[^\s<>"']+$/, default: "", help: "Security contact shown on the trust pages and security.txt." }),
@@ -111,7 +111,7 @@ export const NOT_MANAGEABLE = new Set([
   "ENVIRONMENT",
   "PLATFORM_ACCESS_JWT_MODE", "CF_ACCESS_ISSUER", "CF_ACCESS_AUD",
   "WEBAUTHN_RP_ID", "WEBAUTHN_ORIGIN", "PORTAL_BASE_URL",
-  "STAFF_2FA_REQUIRED", "PASSWORD_HASH_FORMAT", "PASSWORD_HASH_ITERATIONS"
+  "STAFF_2FA_REQUIRED", "STAFF_TURNSTILE_REQUIRED", "PASSWORD_HASH_FORMAT", "PASSWORD_HASH_ITERATIONS"
 ]);
 
 export const getDef = (key) => BY_KEY.get(key) || null;
@@ -183,6 +183,9 @@ export function crossChecks(key, effective) {
   if (key === "AUDIT_LOG_STREAM" || key === "LOG_REDACTION") {
     if (lc(effective.AUDIT_LOG_STREAM) === "on" && lc(effective.LOG_REDACTION) !== "on") return "audit_stream_needs_log_redaction";
   }
+  if (key === "CUSTOMER_TURNSTILE_REQUIRED" || key === "PUBLIC_FORMS_TURNSTILE_REQUIRED") {
+    if (lc(effective[key]) === "on" && (!effective.TURNSTILE_SITE_KEY || !effective.TURNSTILE_SECRET_KEY)) return "turnstile_needs_keys";
+  }
   if (key === "PAYMENT_GATEWAYS") {
     const listed = lc(effective.PAYMENT_GATEWAYS).split(/[\s,;]+/).filter(Boolean);
     const usable = listed.some((g) => g === "stripe" || (g === "nowpayments" && effective.NOWPAYMENTS_API_KEY && effective.NOWPAYMENTS_IPN_SECRET));
@@ -240,9 +243,9 @@ export function invalidateSettingsCache(env) {
 }
 
 /** env with the staff values laid over it (wrangler value stays underneath). Returns env itself when nothing is set. */
-export async function withPlatformSettings(env) {
+export async function withPlatformSettings(env, { fresh = false } = {}) {
   if (!env || !env.LUMMET_DB) return env;
-  const values = await loadStaffValues(env);
+  const values = await loadStaffValues(env, { fresh });
   if (!values.size) return env;
   const base = baseEnvOf(env);
   const overlay = { ...base };

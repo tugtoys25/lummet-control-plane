@@ -116,7 +116,8 @@ export function scriptDirectives(nonce, allowTurnstile = false) {
 }
 
 function baseCspFor(env) {
-  if (String(env?.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on" || !env?.TURNSTILE_SITE_KEY || !env?.TURNSTILE_SECRET_KEY) return BASE_CSP;
+  const turnstileOn = ["CUSTOMER_TURNSTILE_REQUIRED", "STAFF_TURNSTILE_REQUIRED"].some((k) => String(env?.[k] || "off").toLowerCase() === "on");
+  if (!turnstileOn || !env?.TURNSTILE_SITE_KEY || !env?.TURNSTILE_SECRET_KEY) return BASE_CSP;
   return BASE_CSP.replace("connect-src 'self'; frame-src 'none';", "connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com;");
 }
 

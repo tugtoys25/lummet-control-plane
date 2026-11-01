@@ -2,7 +2,7 @@ import { renderAuthShell, escapeHtml } from "../layout.js";
 
 // Staff console sign-in. Same look as the customer login (renderCustomerAuthShell, audience "staff"), plus the
 // "Are you a customer? Log in here" link to /app/login. Form fields, names and the POST contract are unchanged.
-export function renderLoginPage({ mode, error, challengeId }) {
+export function renderLoginPage({ mode, error, challengeId, turnstileSiteKey = "" }) {
   const flash = error
     ? `<div class="flash flash-error" role="alert">${escapeHtml(error)}</div>`
     : "";
@@ -61,6 +61,7 @@ export function renderLoginPage({ mode, error, challengeId }) {
         <input type="email" id="email" name="email" autocomplete="username" required autofocus />
         <label for="password">Password</label>
         <input type="password" id="password" name="password" autocomplete="current-password" required />
+        ${turnstileSiteKey ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile auth-turnstile" data-sitekey="${escapeHtml(turnstileSiteKey)}"></div>` : ""}
         <button class="btn" type="submit">Log in</button>
       </form>
     `

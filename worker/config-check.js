@@ -98,6 +98,7 @@ const RULES = [
   { key: "BILLING_REMINDER_DAYS", ok: (e) => /^\s*\d+(\s*,\s*\d+)*\s*$/.test(String(e.BILLING_REMINDER_DAYS || "")), impact: "trial and renewal reminder days are undefined" },
   { key: "PORTAL_BASE_URL", ok: (e) => isHttp(e.PORTAL_BASE_URL), impact: "no verification, reset or invitation emails are queued" },
   { key: "CUSTOMER_TURNSTILE_REQUIRED/TURNSTILE_SECRET_KEY/TURNSTILE_SITE_KEY", ok: (e) => String(e.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on" || (has(e, "TURNSTILE_SECRET_KEY") && has(e, "TURNSTILE_SITE_KEY")), impact: "portal signup/login bot protection is enabled without complete server and site keys" },
+  { key: "STAFF_TURNSTILE_REQUIRED/TURNSTILE_SECRET_KEY/TURNSTILE_SITE_KEY", ok: (e) => String(e.STAFF_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on" || (has(e, "TURNSTILE_SECRET_KEY") && has(e, "TURNSTILE_SITE_KEY")), impact: "staff sign-in bot protection is enabled without complete server and site keys (it stays off until both are set)" },
   { key: "PUBLIC_FORMS_TURNSTILE_REQUIRED/TURNSTILE_SECRET_KEY/TURNSTILE_SITE_KEY", ok: (e) => String(e.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on" || (has(e, "TURNSTILE_SECRET_KEY") && has(e, "TURNSTILE_SITE_KEY")), impact: "public contact/demo bot protection is enabled without complete server and site keys" },
   { key: "CREDENTIAL_KEK", ok: (e) => has(e, "CREDENTIAL_KEK"), impact: "stored secrets cannot be encrypted" },
   { key: "STRIPE_SECRET_KEY", ok: (e) => has(e, "STRIPE_SECRET_KEY"), impact: "checkout and billing fail" },

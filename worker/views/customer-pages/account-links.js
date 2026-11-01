@@ -54,7 +54,7 @@ export function renderResetPasswordPage() {
   });
 }
 
-export function renderForgotPasswordPage() {
+export function renderForgotPasswordPage({ turnstileSiteKey = "" } = {}) {
   return renderCustomerAuthShell({
     title: "Reset password",
     bodyHtml: `<h1>Forgot your password?</h1>
@@ -62,6 +62,7 @@ export function renderForgotPasswordPage() {
       ${FLASH}
       <label for="em">Email</label>
       <input type="email" id="em" autocomplete="email" required autofocus />
+      ${turnstileSiteKey ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile auth-turnstile" data-sitekey="${String(turnstileSiteKey).replace(/[^\w.-]/g, "")}"></div>` : ""}
       <button class="auth-btn" id="go" type="button">Send reset link</button>
       ${BACK}
       <script nonce="${nonceToken()}">(function(){
@@ -69,8 +70,8 @@ export function renderForgotPasswordPage() {
         var go = document.getElementById('go');
         go.addEventListener('click', function(e){
           e.preventDefault(); go.disabled = true;
-          fetch('/api/customer/password/forgot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email: document.getElementById('em').value }) })
-            .then(function(){ say('success', 'If that email has an account, a reset link is on its way.'); go.disabled = false; })
+          fetch('/api/customer/password/forgot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email: document.getElementById('em').value, turnstileToken: ((document.querySelector('[name=cf-turnstile-response]') || {}).value || '') }) })
+            .then(function(r){ if (r.status === 422 || r.status === 503) { say('error', 'Please complete the security check and try again.'); } else { say('success', 'If that email has an account, a reset link is on its way.'); } go.disabled = false; try { if (window.turnstile) window.turnstile.reset(); } catch (e) {} })
             .catch(function(){ go.disabled = false; say('error', 'Could not reach the server.'); });
         });
       })();</script>`

@@ -29,6 +29,17 @@ export function renderCustomerLoginPage({ turnstileSiteKey = "", initialView = "
         </p>
       </div>
 
+      <div id="mfa-view" style="display:none;">
+        <h1>Two-factor code</h1>
+        <p class="auth-sub">Enter the 6-digit code from your authenticator app, or one of your backup codes.</p>
+        <form id="mfa-form">
+          <label for="mfa-code">Code</label>
+          <input type="text" id="mfa-code" autocomplete="one-time-code" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+          <button class="auth-btn" type="submit">Verify</button>
+        </form>
+        <p class="auth-alt"><a href="/app/login">Back to log in</a></p>
+      </div>
+
       <div id="signup-view" style="display:none;">
         <h1>Create your account</h1>
         <p class="auth-sub">Set up your organization in a minute.</p>
@@ -79,6 +90,20 @@ export function renderCustomerLoginPage({ turnstileSiteKey = "", initialView = "
           document.getElementById('signup-view').style.display = 'block';
           flash('');
         }
+        var mfaChallengeId = null;
+        function showMfa() {
+          document.getElementById('login-view').style.display = 'none';
+          document.getElementById('signup-view').style.display = 'none';
+          document.getElementById('mfa-view').style.display = 'block';
+          flash('');
+          var c = document.getElementById('mfa-code'); if (c) { c.value = ''; c.focus(); }
+        }
+        function restartLogin(message) {
+          mfaChallengeId = null;
+          document.getElementById('mfa-view').style.display = 'none';
+          document.getElementById('login-view').style.display = 'block';
+          flash(message || '', 'error');
+        }
         function showLogin() {
           document.getElementById('signup-view').style.display = 'none';
           document.getElementById('login-view').style.display = 'block';
@@ -99,8 +124,33 @@ export function renderCustomerLoginPage({ turnstileSiteKey = "", initialView = "
           })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-              if (data.success) { location.href = intentDestination(); }
+              if (data.success && data.mfaRequired && data.challengeId) { mfaChallengeId = data.challengeId; busy(form, false); showMfa(); }
+              else if (data.success) { location.href = intentDestination(); }
               else { busy(form, false); flash('Could not log in — check your email and password.', 'error'); }
+            })
+            .catch(function () { busy(form, false); flash('Could not reach the server.', 'error'); });
+        });
+
+        document.getElementById('mfa-form').addEventListener('submit', function (e) {
+          e.preventDefault();
+          var form = e.target;
+          var raw = (document.getElementById('mfa-code').value || '').trim();
+          if (!raw || !mfaChallengeId) { restartLogin('That sign-in expired. Please log in again.'); return; }
+          busy(form, true);
+          var body = { challengeId: mfaChallengeId };
+          if (/^[0-9 ]{6,8}$/.test(raw)) body.code = raw.replace(/\s+/g, ''); else body.backupCode = raw;
+          fetch('/api/customer/mfa/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (data.success) { location.href = intentDestination(); return; }
+              busy(form, false);
+              if (data.error === 'invalid_challenge' || data.error === 'challenge_expired') restartLogin('That sign-in expired. Please log in again.');
+              else if (data.error === 'too_many_attempts') flash('Too many attempts. Please wait a few minutes and try again.', 'error');
+              else flash('That code did not work. Check the code and try again.', 'error');
             })
             .catch(function () { busy(form, false); flash('Could not reach the server.', 'error'); });
         });

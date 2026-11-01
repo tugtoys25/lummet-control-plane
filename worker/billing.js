@@ -20,7 +20,7 @@ import * as customerRepo from "./repositories/billing-customers.js";
 import * as subscriptionRepo from "./repositories/billing-subscriptions.js";
 import * as stripeProvider from "./billing-stripe.js";
 import * as webhooks from "./webhooks.js";
-import { billingConfig, renewalNoticeMode } from "./billing-config.js";
+import { billingConfig, renewalNoticeMode, effectiveTrialDays } from "./billing-config.js";
 import { applySiteGate } from "./billing-lifecycle.js";
 import * as lifecycleRepo from "./repositories/billing-lifecycle.js";
 import * as trialAbuse from "./trial-abuse.js";
@@ -67,13 +67,13 @@ export function createBillingService(provider) {
    * (none when expired, or when under Stripe's 48 hour minimum), and one that never trialed gets the plan's days.
    */
   function trialParams(env, plan, existingSub) {
-    if (billingConfig(env).mode === "off") return { trialDays: plan.trial_days || 0 };
+    if (billingConfig(env).mode === "off") return { trialDays: effectiveTrialDays(env, plan.trial_days) };
     if (existingSub && !existingSub.provider) {
       const end = existingSub.trial_ends_at ? Date.parse(existingSub.trial_ends_at) : NaN;
       if (Number.isFinite(end) && end - Date.now() >= MIN_STRIPE_TRIAL_MS) return { trialDays: 0, trialEnd: Math.floor(end / 1000) };
       return { trialDays: 0 };
     }
-    return { trialDays: plan.trial_days || 0 };
+    return { trialDays: effectiveTrialDays(env, plan.trial_days) };
   }
 
   async function getOrganizationIdForProviderCustomer(env, providerCustomerId) {

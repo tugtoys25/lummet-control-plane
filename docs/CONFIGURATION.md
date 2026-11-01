@@ -23,7 +23,9 @@ In production the staff overview and the `config_incomplete` alert report missin
 | `ENVIRONMENT` | var | `production` (or `staging`, `development`) | the Stripe livemode guard cannot tell test events from live ones; strict checks do not run |
 | `BILLING_ENFORCE` | var | rollout flag: `off`, then `shadow`, then `enforce` (see `docs/CHANGES_PHASE_1.md`) | the lifecycle rollout state is undefined; a bad value behaves as `off` |
 | `STRIPE_API_VERSION` | var | pin, e.g. `2024-06-20`; create the Stripe webhook endpoint on the same version | the API version is not pinned by configuration (code falls back to `2024-06-20`) |
-| `BILLING_TRIAL_DAYS_DEFAULT` | var | default trial length in days (7) | undefined default trial length |
+| `BILLING_TRIAL_DAYS_DEFAULT` | var | trial length in days for every plan that offers a trial (empty or 0 = each plan's own `trial_days`); drives the pricing page, billing page, Checkout and the no-card trial | each plan's own trial length applies |
+| `COOKIE_BANNER` | var | `on` (default) or `off`: cookie consent banner on the public site, sign-in pages and dashboard; its words and links are Interface text, group `cookies` | banner stays as configured |
+| `COOKIE_CONSENT_DAYS` | var | days a visitor's cookie choice is remembered (1 to 400, default 180) | 180 days |
 | `BILLING_GRACE_DAYS` | var | days a failed payment stays usable before `restricted` (14) | undefined grace period |
 | `BILLING_RESTRICTED_DAYS` | var | days `restricted` (read-only, sites live) lasts before `suspended` (7); also how long an expired trial stays live | undefined restricted period |
 | `BILLING_SUSPENDED_DAYS` | var | days `suspended` lasts before `closed` (30) | undefined suspended period |

@@ -48,7 +48,7 @@ export const SETTINGS = [
   def("BILLING_SAVE_FLOW", "Billing", "enum", { options: ON_OFF, default: "off", help: "Cancellation save flow (pause and resume offers)." }),
   def("BILLING_RENEWAL_NOTICES", "Billing", "enum", { options: ["yearly", "all", "off"], default: "yearly", help: "Which renewals get a reminder email." }),
   def("BILLING_WINBACK_EMAILS", "Billing", "enum", { options: ON_OFF, default: "off", help: "Promotional win-back emails. Needs an unsubscribe path first." }),
-  def("BILLING_TRIAL_DAYS_DEFAULT", "Billing", "int", { min: 0, max: 3650, default: "7", help: "Default trial length in days when a plan does not set its own." }),
+  def("BILLING_TRIAL_DAYS_DEFAULT", "Billing", "int", { min: 0, max: 3650, default: "7", help: "Trial length in days for every plan that offers a trial; changes the pricing page, billing page, Checkout and emails together. Empty or 0 = use each plan's own trial days." }),
   def("BILLING_GRACE_DAYS", "Billing", "int", { min: 0, max: 3650, default: "14", help: "Days from past due to restricted." }),
   def("BILLING_RESTRICTED_DAYS", "Billing", "int", { min: 0, max: 3650, default: "7", help: "Days restricted before suspended; also how long an expired trial stays live." }),
   def("BILLING_SUSPENDED_DAYS", "Billing", "int", { min: 0, max: 3650, default: "30", help: "Days suspended before closed." }),
@@ -93,6 +93,8 @@ export const SETTINGS = [
   def("CONTACT_EMAIL", "Public site", "email", { default: "", help: "Shown on the homepage 'Get in Touch' section as a mailto link." }),
   def("STATUS_PROVIDER_URL", "Public site", "url", { default: "", help: "Public status page address (https)." }),
   def("SECURITY_CONTACT", "Public site", "text", { max: 200, pattern: /^(mailto:|https:\/\/)?[^\s<>"']+$/, default: "", help: "Security contact shown on the trust pages and security.txt." }),
+  def("COOKIE_BANNER", "Public site", "enum", { options: ON_OFF, default: "on", help: "Cookie consent banner on the public site, sign-in pages and dashboard. Its text and links are Interface text (group cookies)." }),
+  def("COOKIE_CONSENT_DAYS", "Public site", "int", { min: 1, max: 400, default: "180", help: "Days a visitor's cookie choice is remembered (browsers cap cookies at 400 days)." }),
   def("SECURITY_TXT_EXPIRES", "Public site", "text", { max: 40, pattern: /^\d{4}-\d{2}-\d{2}(T[0-9:.]+Z?)?$/, default: "", help: "security.txt Expires date, e.g. 2027-12-31." }),
   // ---- Platform ----
   def("PLATFORM_DOMAIN_SUFFIX", "Platform", "hostname", { default: "sites.lummet.app", help: "Placeholder domain a newly provisioned site gets before a custom domain is attached." }),

@@ -14,6 +14,7 @@
 
 import { renderTemplate } from "./template.js";
 import { ASSET_VERSION } from "../perf/asset-version.js";
+import { renderCookieBanner } from "../cookie-consent.js";
 
 const CSP = [
   "default-src 'self'",
@@ -59,6 +60,7 @@ export async function renderPage(ctx, { template, data = {}, head = "", status =
     icons: siteCtx.icons,
     ui: siteCtx.ui,
     head_html: head,
+    cookie_banner_html: renderCookieBanner(env, siteCtx.ui),
     content,
     body_class: bodyClass,
     current_path: url.pathname

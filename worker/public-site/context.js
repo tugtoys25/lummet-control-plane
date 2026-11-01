@@ -10,6 +10,7 @@ import { loadSiteData } from "./data.js";
 import { safeUrl, safeCssColor, initials } from "./format.js";
 import { iconSvg } from "./icons.js";
 import { isLiveHref } from "./links.js";
+import { cookieSettingsLabel } from "../cookie-consent.js";
 
 // Column titles come from lummet_ui_strings (footer_<name>_title).
 const FOOTER_COLUMNS = [
@@ -156,7 +157,8 @@ export async function loadSite(env, url) {
       nav_mobile_all: [...navMain, ...navCta],
       footer_cta: footerCta,
       footer_columns: footerColumns,
-      has_footer_columns: footerColumns.length > 0
+      has_footer_columns: footerColumns.length > 0,
+      cookie_settings_label: cookieSettingsLabel(env, ui)
     },
     icons: {
       menu: iconSvg("menu", { size: 22 }),

@@ -96,6 +96,7 @@ import { billing } from "./billing.js";
 import { cryptoBilling } from "./billing-nowpayments-service.js";
 import * as billingGateways from "./billing-gateways.js";
 import * as platformSettings from "./platform-settings.js";
+import { applySiteChrome, hasChromeMarkers, CHROME_HEADER } from "./site-chrome.js";
 import * as billingLifecycle from "./billing-lifecycle.js";
 import { evaluateWriteGate, evaluateServeGate, refusalFor, resolveAccess } from "./access.js";
 import { effectiveNow, cardRequiredTrial } from "./billing-config.js";
@@ -323,7 +324,7 @@ async function orgIpDenied(env, request, organizationId) {
 function html(content, status = 200, extraHeaders = {}) {
   return new Response(content, {
     status,
-    headers: { "content-type": "text/html; charset=utf-8", ...extraHeaders }
+    headers: { "content-type": "text/html; charset=utf-8", ...(hasChromeMarkers(content) ? { [CHROME_HEADER]: "1" } : {}), ...extraHeaders }
   });
 }
 
@@ -448,6 +449,7 @@ export default {
     const d1 = withD1Session(rawEnv, request);
     const env = d1.env;
     let response = await handleRequest(request, env, ctx, requestId, holder);
+    response = await applySiteChrome(response, env, request);   // swaps <!--lummet:...--> markers (shared header/footer/cookie banner)
     response = applyD1Bookmark(response, d1);
     response = withRetryAfter(response, request, env);
     const seen = await observe(env, ctx, { requestId, method: request.method.toUpperCase(), pathname: new URL(request.url).pathname, status: response.status, startedAt, error: holder.error });

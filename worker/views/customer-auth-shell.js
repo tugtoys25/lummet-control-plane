@@ -21,6 +21,10 @@ function escapeHtml(v) {
 }
 
 const AUTH_CSS = `
+  /* Customer pages carry the public site's header and footer (see site-chrome.js): the card is centred between them. */
+  body.auth-chrome { display: block; padding: 0; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; }
+  body.auth-chrome > .auth-wrap { flex: 1 0 auto; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 16px; }
+  body.auth-chrome .site-footer { margin-top: auto; }
   *, *::before, *::after { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
   body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -84,6 +88,9 @@ const AUTH_CSS = `
  */
 export function renderCustomerAuthShell({ title, bodyHtml, audience = "customer" }) {
   const staff = audience === "staff";
+  // Customer pages: the public base styles, header and footer (and the cookie banner) are swapped in by site-chrome.js.
+  // Staff sign-in stays a plain card: it is an internal page and should not advertise the public site.
+  const chrome = !staff;
   return `<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
@@ -93,21 +100,27 @@ export function renderCustomerAuthShell({ title, bodyHtml, audience = "customer"
   <meta name="robots" content="noindex" />
   <title>${escapeHtml(title)} · Lummet</title>
   <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
-  <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
+  ${chrome ? `<script nonce="${nonceToken()}" src="/static/js/theme.js?v=${ASSET_VERSION}"></script>` : `<script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>`}
   <link rel="preload" href="/static/fonts/instrument-400-v1.woff" as="font" type="font/woff" crossorigin />
   <link rel="preload" href="/static/fonts/bricolage-700-v1.woff" as="font" type="font/woff" crossorigin />
   <link rel="stylesheet" href="/static/css/tokens.css?v=${ASSET_VERSION}" />
+  ${chrome ? `<link rel="stylesheet" href="/static/css/base.css?v=${ASSET_VERSION}" />
+  <link rel="stylesheet" href="/static/css/components.css?v=${ASSET_VERSION}" />` : ""}
   <style>${AUTH_CSS}</style>
   <script nonce="${nonceToken()}" src="${SHELL_JS_URL}" defer></script>
+  ${chrome ? `<script nonce="${nonceToken()}" src="/static/js/nav.js?v=${ASSET_VERSION}" defer></script>` : ""}
 </head>
-<body>
-  <a class="auth-brand" href="/" aria-label="Lummet home"><span class="dot"></span>Lummet</a>
-  <main class="auth-card">
+<body${chrome ? ' class="auth-chrome"' : ""}>
+  ${chrome ? "<!--lummet:site-header-->" : ""}
+  ${chrome ? '<div class="auth-wrap">' : '<a class="auth-brand" href="/" aria-label="Lummet home"><span class="dot"></span>Lummet</a>'}
+  <main class="auth-card" id="main">
     ${staff ? '<span class="auth-badge">Staff console</span>' : ""}
     ${bodyHtml}
   </main>
   ${staff ? '<p class="auth-switch">Are you a customer? <a href="/app/login">Log in here</a></p>' : ""}
-  <p class="auth-back"><a href="/">&larr; Back to home</a></p>
+  ${chrome ? "" : '<p class="auth-back"><a href="/">&larr; Back to home</a></p>'}
+  ${chrome ? "</div>" : ""}
+  ${chrome ? "<!--lummet:site-footer-->\n  <!--lummet:cookie-banner-->" : ""}
 </body>
 </html>`;
 }

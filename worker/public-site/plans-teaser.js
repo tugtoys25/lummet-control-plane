@@ -6,7 +6,7 @@
 // plans table; when there is nothing to sell this returns null and the homepage simply has no plans block. Never throws.
 // =====================================================
 import * as pricingRepo from "../repositories/pricing.js";
-import { cardRequiredTrial } from "../billing-config.js";
+import { cardRequiredTrial, withEffectiveTrial } from "../billing-config.js";
 import { pricingGroups, MONEY } from "./pages.js";
 
 export async function plansTeaser(ctx) {
@@ -15,7 +15,7 @@ export async function plansTeaser(ctx) {
   if (String(ctx.env.HOME_PLANS || "on").toLowerCase() === "off") return null;
   try {
     const ui = ctx.siteCtx.ui || {};
-    const all = await pricingRepo.listPricing(ctx.env, { requirePrice: cardRequiredTrial(ctx.env) });
+    const all = withEffectiveTrial(ctx.env, await pricingRepo.listPricing(ctx.env, { requirePrice: cardRequiredTrial(ctx.env) }));
     const monthly = all.filter((p) => p.billing_period === "monthly");
     if (!monthly.length) return null;
 

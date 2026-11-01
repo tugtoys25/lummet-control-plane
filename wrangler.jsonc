@@ -183,6 +183,8 @@
 	"queues": { "producers": [{ "binding": "JOB_QUEUE", "queue": "lummet-jobs" }], "consumers": [{ "queue": "lummet-jobs", "max_batch_size": 1, "max_retries": 5, "dead_letter_queue": "lummet-jobs-dlq" }] },
 	"triggers": { "crons": ["*/5 * * * *", "0 2 * * *", "0 7 * * 1"] },
 	"vars": {
+		// Turnstile on the staff sign-in: off | on. Needs TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY, else it stays off. Break-glass: set to "off" and deploy.
+		"STAFF_TURNSTILE_REQUIRED": "on",
 		"ENVIRONMENT": "test",
 		"OUTBOUND_DNS_CHECK": "on",
 		// Billing lifecycle (docs/CHANGES_PHASE_1.md). BILLING_ENFORCE is the rollout flag: off, then shadow, then enforce.

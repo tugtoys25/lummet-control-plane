@@ -218,11 +218,11 @@
 		"PUBLIC_LEGAL_PAGES": "off",
 		// Edge rate limiting (6.3A). RATE_LIMIT_RETRY_AFTER: off|on. The CF_WAF_* values and WAF_THRESHOLDS_CONFIRMED are owner inputs [OPEN]; see docs/WAF_RATE_LIMITS.md.
 		"RATE_LIMIT_RETRY_AFTER": "on",
-		"CF_WAF_ZONE_ID": "",
-		"CF_WAF_MAX_RULES": "",
-		"CF_WAF_ALLOWED_PERIODS": "",
-		"CF_WAF_MAX_TIMEOUT": "",
-		"WAF_THRESHOLDS_CONFIRMED": "no",
+		// "CF_WAF_ZONE_ID": "",  // off in production; set in staff platform settings (frees a Worker variable slot)
+		// "CF_WAF_MAX_RULES": "",  // off in production; set in staff platform settings (frees a Worker variable slot)
+		// "CF_WAF_ALLOWED_PERIODS": "",  // off in production; set in staff platform settings (frees a Worker variable slot)
+		// "CF_WAF_MAX_TIMEOUT": "",  // off in production; set in staff platform settings (frees a Worker variable slot)
+		// "WAF_THRESHOLDS_CONFIRMED": "no",  // off in production; set in staff platform settings (frees a Worker variable slot)
 		// HSTS preload (6.3C): off (default; header is max-age=31536000; includeSubDomains) | on (adds preload, two-year max-age; hard to undo, covers every subdomain). "on" also needs HSTS_PRELOAD_APPROVED=yes [OPEN owner approval]; see docs/HSTS_PRELOAD.md.
 		"HSTS_PRELOAD": "off",
 		// "HSTS_PRELOAD_APPROVED": "no",  // off in production; uncomment when needed (frees a Worker variable slot)

@@ -73,7 +73,10 @@ test('0072 is safe to run twice, starts empty, rejects bad values and cascades w
 
 test('migration numbering stays consecutive: 0075 (platform settings) is the newest, then 0074 (payment gateways), 0073 (public copy) and 0072; 0072 is additive only', () => {
   const files = readdirSync(new URL('../migrations/', import.meta.url)).filter((f) => f.endsWith('.sql')).sort();
-  assert.equal(files.at(-1), '0075_platform_settings.sql'); assert.equal(files.at(-2), '0074_payment_gateways.sql'); assert.equal(files.at(-3), '0073_public_conversion_copy.sql'); assert.equal(files.at(-4), '0072_org_security_policy.sql'); assert.equal(files.at(-5), '0071_revenue.sql');
+  // Numbering stays consecutive from 0071 onward; newer migrations may be added after 0075.
+  const tail = files.filter((f) => f.slice(0, 4) >= '0071');
+  assert.deepEqual(tail.slice(0, 5), ['0071_revenue.sql', '0072_org_security_policy.sql', '0073_public_conversion_copy.sql', '0074_payment_gateways.sql', '0075_platform_settings.sql']);
+  tail.forEach((f, i) => assert.equal(Number(f.slice(0, 4)), 71 + i, 'no gaps or duplicates after 0071: ' + f));
   assert.doesNotMatch(MIGRATION, /\b(DROP|DELETE\s+FROM|ALTER\s+TABLE|UPDATE\s)/i);
 });
 

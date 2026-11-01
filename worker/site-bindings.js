@@ -16,7 +16,9 @@
 // TENANT_TURNSTILE_SECRET on the control plane and every deploy passes them on as TURNSTILE_SITEKEY /
 // TURNSTILE_SECRET. Without them a site has no Turnstile and relies on its attempt limiter (that is how it can
 // be signed in to at all). The widget's allowed hostnames must include the site's hostnames (a Cloudflare setting).
-// Email variables (RESEND_*) are NOT set here; add them if tenants should send mail.
+// Email: every deploy passes the control plane's own setup to the site as RESEND_API_KEY / RESEND_FROM_EMAIL (the key from
+// RESEND_API_KEY, the sender from EMAIL_FROM, only when EMAIL_PROVIDER is resend). TENANT_RESEND_API_KEY and
+// TENANT_RESEND_FROM_EMAIL override them for sites only. Both a key and a sender are needed, or neither is passed.
 // =====================================================
 import * as siteResources from "./repositories/site-resources.js";
 import { decryptSecret, aadFor } from "./crypto.js";
@@ -48,6 +50,12 @@ export async function buildSiteBindings(env, { site, deploymentId, host, hasAsse
   if (env.TENANT_TURNSTILE_SITEKEY && env.TENANT_TURNSTILE_SECRET) {
     bindings.push({ type: "plain_text", name: "TURNSTILE_SITEKEY", text: String(env.TENANT_TURNSTILE_SITEKEY) });
     bindings.push({ type: "secret_text", name: "TURNSTILE_SECRET", text: String(env.TENANT_TURNSTILE_SECRET) });
+  }
+  const siteEmailKey = env.TENANT_RESEND_API_KEY || (String(env.EMAIL_PROVIDER || "").toLowerCase() === "resend" ? env.RESEND_API_KEY : "");
+  const siteEmailFrom = env.TENANT_RESEND_FROM_EMAIL || env.EMAIL_FROM;
+  if (siteEmailKey && siteEmailFrom) {
+    bindings.push({ type: "secret_text", name: "RESEND_API_KEY", text: String(siteEmailKey) });
+    bindings.push({ type: "plain_text", name: "RESEND_FROM_EMAIL", text: String(siteEmailFrom) });
   }
   if (hasAssets) bindings.push({ type: "assets", name: "ASSETS" });
   return bindings;

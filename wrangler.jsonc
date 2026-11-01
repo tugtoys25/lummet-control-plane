@@ -179,7 +179,7 @@
 	// header. Set it to the customer portal's real origin, e.g.
 	// "https://app.yourdomain.com".
 	"workers_dev": true,
-	"routes": [{ "pattern": "luminousagents.com", "custom_domain": true }],
+	"routes": [{ "pattern": "lummet.com", "custom_domain": true }],
 	"queues": { "producers": [{ "binding": "JOB_QUEUE", "queue": "lummet-jobs" }], "consumers": [{ "queue": "lummet-jobs", "max_batch_size": 1, "max_retries": 5, "dead_letter_queue": "lummet-jobs-dlq" }] },
 	"triggers": { "crons": ["*/5 * * * *", "0 2 * * *", "0 7 * * 1"] },
 	"vars": {
@@ -218,7 +218,7 @@
 		"PUBLIC_LEGAL_PAGES": "off",
 		// Edge rate limiting (6.3A). RATE_LIMIT_RETRY_AFTER: off|on. The CF_WAF_* values and WAF_THRESHOLDS_CONFIRMED are owner inputs [OPEN]; see docs/WAF_RATE_LIMITS.md.
 		"RATE_LIMIT_RETRY_AFTER": "on",
-		// "CF_WAF_ZONE_ID": "",  // off in production; set in staff platform settings (frees a Worker variable slot)
+		// "CF_WAF_ZONE_ID": "68a8b498fb91401bc287803ebb0690c5",  // off in production; set in staff platform settings (frees a Worker variable slot)
 		// "CF_WAF_MAX_RULES": "",  // off in production; set in staff platform settings (frees a Worker variable slot)
 		// "CF_WAF_ALLOWED_PERIODS": "",  // off in production; set in staff platform settings (frees a Worker variable slot)
 		// "CF_WAF_MAX_TIMEOUT": "",  // off in production; set in staff platform settings (frees a Worker variable slot)
@@ -260,14 +260,14 @@
 		"BILLING_REMINDER_DAYS": "3,1",
 		"PLATFORM_DOMAIN_SUFFIX": "genteelisms.com",
 		"CONTACT_EMAIL": "elijul@proton.me",
-		"PORTAL_BASE_URL": "https://luminousagents.com",
+		"PORTAL_BASE_URL": "https://lummet.com",
 		"EMAIL_PROVIDER": "resend",
-		"EMAIL_FROM": "Lummet <no-reply@luminousagents.com>",
+		"EMAIL_FROM": "Lummet <no-reply@lummet.com>",
 		"PAYMENT_GATEWAYS": "nowpayments",
 		"CF_WORKERS_DEV_SUBDOMAIN": "tugtoys25",
                 "TURNSTILE_SITE_KEY": "0x4AAAAAAFu7XNvU-gnTjL26",
-		"WEBAUTHN_RP_ID": "luminousagents.com",
-		"WEBAUTHN_ORIGIN": "https://luminousagents.com"
+		"WEBAUTHN_RP_ID": "lummet.com",
+		"WEBAUTHN_ORIGIN": "https://lummet.com"
 	},
 	// NOTE: scheduled work. "triggers.crons" declares three Cron Triggers (Workers Paid plan: Cron Triggers, Queues and
 	// the PBKDF2 CPU budget all need it; verify in the Cloudflare dashboard). scheduled() branches on event.cron:
@@ -284,12 +284,12 @@
     "staging": {
       "name": "lummet-control-plane-staging",
       "workers_dev": true,
-      "routes": [{ "pattern": "staging.luminousagents.com", "custom_domain": true }],
+      "routes": [{ "pattern": "staging.lummet.com", "custom_domain": true }],
       "d1_databases": [{"binding":"LUMMET_DB","database_name":"lummet-control-plane-staging-db","database_id":"00000000-0000-0000-0000-000000000001"}],
       "r2_buckets": [{"binding":"BACKUPS","bucket_name":"lummet-backups-staging"},{"binding":"TENANT_TEMPLATES","bucket_name":"lummet-tenant-templates-staging"}],
       "queues": {"producers":[{"binding":"JOB_QUEUE","queue":"lummet-jobs-staging"}],"consumers":[{"queue":"lummet-jobs-staging","max_batch_size":1,"max_retries":5,"dead_letter_queue":"lummet-jobs-staging-dlq"}]},
       "triggers": {"crons":["*/5 * * * *"]},
-      "vars": {"STAFF_TURNSTILE_REQUIRED":"on","ENVIRONMENT":"staging","BILLING_ENFORCE":"enforce","BILLING_EMAILS":"on","BILLING_SUSPEND_SITES":"enforce","STRIPE_TAX_ENABLED":"false","STRIPE_API_VERSION":"2024-06-20","REVENUE_METRICS":"on","REVENUE_ANALYTICS":"on","CREDENTIAL_KEK_STRICT":"off","CREDENTIAL_ENCRYPTION_FORMAT":"v1","API_ENTITLEMENT":"off","ORG_2FA_PASSKEY_COUNTS":"off","ORG_2FA_SCOPE":"any_org","ORG_SECURITY_POLICY":"enforce","ORG_IP_ALLOWLIST":"shadow","ORG_SSO_REQUIREMENT":"shadow","CUSTOMER_SESSION_ADMIN":"on","CUSTOMER_AUDIT_CSV":"on","CUSTOMER_2FA_ENROLL_PAGE":"on","PASSWORD_HASH_FORMAT":"v2","SYNTHETIC_MONITORS":"shadow","PUBLIC_TRUST_PAGES":"on","PUBLIC_LEGAL_PAGES":"draft","RATE_LIMIT_RETRY_AFTER":"on","CSP_REPORT_MODE":"full","LOG_REDACTION":"on","AUDIT_LOG_STREAM":"on","ERROR_TRACKING":"shadow","PLATFORM_ACCESS_JWT_MODE":"shadow","BILLING_TRIAL_DAYS_DEFAULT":"7","BILLING_GRACE_DAYS":"14","BILLING_RESTRICTED_DAYS":"7","BILLING_SUSPENDED_DAYS":"30","BILLING_REMINDER_DAYS":"3,1","EMAIL_PROVIDER":"resend","EMAIL_FROM":"Lummet <no-reply@luminousagents.com>","PLATFORM_DOMAIN_SUFFIX":"staging.sites.lummet.app","PORTAL_BASE_URL":"https://staging.luminousagents.com","CF_WORKERS_DEV_SUBDOMAIN":"staging","WEBAUTHN_RP_ID":"staging.luminousagents.com","WEBAUTHN_ORIGIN":"https://staging.luminousagents.com"}
+      "vars": {"STAFF_TURNSTILE_REQUIRED":"on","ENVIRONMENT":"staging","BILLING_ENFORCE":"enforce","BILLING_EMAILS":"on","BILLING_SUSPEND_SITES":"enforce","STRIPE_TAX_ENABLED":"false","STRIPE_API_VERSION":"2024-06-20","REVENUE_METRICS":"on","REVENUE_ANALYTICS":"on","CREDENTIAL_KEK_STRICT":"off","CREDENTIAL_ENCRYPTION_FORMAT":"v1","API_ENTITLEMENT":"off","ORG_2FA_PASSKEY_COUNTS":"off","ORG_2FA_SCOPE":"any_org","ORG_SECURITY_POLICY":"enforce","ORG_IP_ALLOWLIST":"shadow","ORG_SSO_REQUIREMENT":"shadow","CUSTOMER_SESSION_ADMIN":"on","CUSTOMER_AUDIT_CSV":"on","CUSTOMER_2FA_ENROLL_PAGE":"on","PASSWORD_HASH_FORMAT":"v2","SYNTHETIC_MONITORS":"shadow","PUBLIC_TRUST_PAGES":"on","PUBLIC_LEGAL_PAGES":"draft","RATE_LIMIT_RETRY_AFTER":"on","CSP_REPORT_MODE":"full","LOG_REDACTION":"on","AUDIT_LOG_STREAM":"on","ERROR_TRACKING":"shadow","PLATFORM_ACCESS_JWT_MODE":"shadow","BILLING_TRIAL_DAYS_DEFAULT":"7","BILLING_GRACE_DAYS":"14","BILLING_RESTRICTED_DAYS":"7","BILLING_SUSPENDED_DAYS":"30","BILLING_REMINDER_DAYS":"3,1","EMAIL_PROVIDER":"resend","EMAIL_FROM":"Lummet <no-reply@lummet.com>","PLATFORM_DOMAIN_SUFFIX":"staging.sites.lummet.app","PORTAL_BASE_URL":"https://staging.lummet.com","CF_WORKERS_DEV_SUBDOMAIN":"staging","WEBAUTHN_RP_ID":"staging.lummet.com","WEBAUTHN_ORIGIN":"https://staging.lummet.com"}
     }
   }
 }

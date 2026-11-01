@@ -12,7 +12,7 @@
 // STAFF_2FA_REQUIRED=true makes every staff session unusable (except for
 // setting 2FA up) until that admin has enrolled.
 // =====================================================
-import { encryptSecret, decryptSecret } from "./crypto.js";
+import { encryptSecret, decryptSecret, aadFor } from "./crypto.js";
 import { generateBase32Secret, generateTotpCode, buildOtpAuthUrl, generateBackupCodes, sha256Hex } from "./totp.js";
 
 export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
@@ -43,7 +43,7 @@ export async function startStaffTotpSetup(env, admin) {
   const existing = await env.LUMMET_DB.prepare(`SELECT status FROM lummet_admin_totp WHERE admin_id = ?`).bind(admin.id).first();
   if (existing?.status === "active") return { ok: false, status: 409, error: "already_enabled" };
   const secret = generateBase32Secret();
-  const enc = await encryptSecret(env, secret);
+  const enc = await encryptSecret(env, secret, aadFor("lummet_admin_totp", admin.id, "encrypted_secret"));
   await env.LUMMET_DB.prepare(
     `INSERT INTO lummet_admin_totp (admin_id, encrypted_secret, secret_iv, status) VALUES (?, ?, ?, 'pending')
      ON CONFLICT(admin_id) DO UPDATE SET encrypted_secret = excluded.encrypted_secret, secret_iv = excluded.secret_iv, status = 'pending', confirmed_at = NULL, last_used_step = 0`
@@ -54,7 +54,7 @@ export async function startStaffTotpSetup(env, admin) {
 export async function confirmStaffTotpSetup(env, adminId, code) {
   const row = await env.LUMMET_DB.prepare(`SELECT * FROM lummet_admin_totp WHERE admin_id = ? AND status = 'pending'`).bind(adminId).first();
   if (!row) return { ok: false, status: 404, error: "no_pending_setup" };
-  const step = await matchStep(await decryptSecret(env, row.encrypted_secret, row.secret_iv), code);
+  const step = await matchStep(await decryptSecret(env, row.encrypted_secret, row.secret_iv, aadFor("lummet_admin_totp", row.admin_id, "encrypted_secret")), code);
   if (step === null) return { ok: false, status: 422, error: "invalid_code" };
   const { codes, hashes } = await generateBackupCodes(10);
   await env.LUMMET_DB.prepare(
@@ -66,7 +66,7 @@ export async function confirmStaffTotpSetup(env, adminId, code) {
 /** Verifies a live code (with replay guard) or an unused backup code for an ACTIVE factor. */
 async function verifyFactor(env, row, { code, backupCode }) {
   if (code) {
-    const step = await matchStep(await decryptSecret(env, row.encrypted_secret, row.secret_iv), code);
+    const step = await matchStep(await decryptSecret(env, row.encrypted_secret, row.secret_iv, aadFor("lummet_admin_totp", row.admin_id, "encrypted_secret")), code);
     if (step === null) return { ok: false, status: 422, error: "invalid_code" };
     // Replay guard: only accept a step newer than the last accepted one. Done as
     // a single conditional UPDATE so two simultaneous uses of the same code

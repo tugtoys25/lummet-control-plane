@@ -28,6 +28,7 @@
 
 import { decodeCbor, decodeCborAt } from "./cbor.js";
 import { createSession } from "./customer-auth.js";
+import { passkeyCountsFor2fa } from "./org-security-policy.js";
 
 const CHALLENGE_TTL_MS = 1000 * 60 * 5; // 5 minutes
 
@@ -143,7 +144,8 @@ export async function generateRegistrationOptions(env, userId) {
       user: { id: bytesToBase64Url(new TextEncoder().encode(userId)), name: user.email, displayName: user.email },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }], // ES256 only
       excludeCredentials,
-      authenticatorSelection: { userVerification: "preferred" },
+      // With ORG_2FA_PASSKEY_COUNTS=on a passkey can satisfy an organization's 2FA requirement, which only holds if it checks the person too.
+      authenticatorSelection: { userVerification: passkeyCountsFor2fa(env) ? "required" : "preferred" },
       timeout: 60000
     }
   };
@@ -250,7 +252,7 @@ export async function generateAuthenticationOptions(env, userId) {
     .bind(challengeId, userId, challenge, new Date(Date.now() + CHALLENGE_TTL_MS).toISOString())
     .run();
 
-  return { ok: true, options: { challenge, rpId: rp.rpId, allowCredentials, userVerification: "preferred", timeout: 60000 } };
+  return { ok: true, options: { challenge, rpId: rp.rpId, allowCredentials, userVerification: passkeyCountsFor2fa(env) ? "required" : "preferred", timeout: 60000 } };
 }
 
 /**
@@ -338,7 +340,8 @@ export async function verifyAuthentication(env, credential) {
     .bind(counter, credRow.id)
     .run();
 
-  return { ok: true, userId: challengeRow.user_id };
+  // Flag 0x04 is "user verified" (PIN, biometric). Recorded so the session can say whether the passkey also verified the person.
+  return { ok: true, userId: challengeRow.user_id, userVerified: (flags & 0x04) !== 0 };
 }
 
 export async function completePasswordlessLogin(env, credential) {
@@ -355,9 +358,9 @@ export async function completePasswordlessLogin(env, credential) {
   )
     .bind(user.id)
     .first();
-  const session = await createSession(env, user.id, firstOrg?.organization_id || null);
+  const session = await createSession(env, user.id, firstOrg?.organization_id || null, { authMethod: verified.userVerified ? "passkey_uv" : "passkey" });
 
-  return { ok: true, userId: user.id, email: user.email, cookie: session.cookie };
+  return { ok: true, userId: user.id, email: user.email, cookie: session.cookie, twoFactorEnrollmentRequired: session.twoFactorEnrollmentRequired };
 }
 
 // -----------------------------------------------------

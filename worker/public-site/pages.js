@@ -580,7 +580,7 @@ export function legalApprovalRecorded(env, market, slug) {
   return Number.isFinite(at) && at <= Date.now();
 }
 
-async function approvedLegalPage(ctx, slug) {
+export async function approvedLegalPage(ctx, slug) {
   const market = legalMarketForHost(ctx.env, ctx.url.hostname);
   if (!market || !legalApprovalRecorded(ctx.env, market, slug)) return null;
   const row = await data.getPage(ctx.env, `legal-${market}-${slug}`);

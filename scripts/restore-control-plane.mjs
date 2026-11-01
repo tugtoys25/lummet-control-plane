@@ -15,7 +15,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { decryptSecret } from "../worker/crypto.js";
-import { rowToSql } from "../worker/cp-backup.js";
+import { rowToSql, backupPartAad } from "../worker/cp-backup.js";
 
 const dir = process.argv[2];
 if (!dir || !process.env.CREDENTIAL_KEK) {
@@ -34,7 +34,8 @@ for (const p of manifest.parts) {
   const body = await readFile(path.join(dir, name), "utf8");
   if (createHash("sha256").update(body).digest("hex") !== p.sha256) { console.error(`Hash mismatch (corrupted download?): ${name}`); process.exit(1); }
   const part = JSON.parse(body);
-  const plain = await decryptSecret(env, part.data, part.iv);
+  // p.key is the part's original object key, so a v2 part is checked against its own backup id and part name.
+  const plain = await decryptSecret(env, part.data, part.iv, backupPartAad(p.key));
   for (const line of plain.split("\n")) { const { t, r } = JSON.parse(line); byTable.get(t).push(r); }
 }
 

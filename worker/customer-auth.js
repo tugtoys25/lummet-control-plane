@@ -104,20 +104,22 @@ export async function hashIPForRateLimit(request) {
   return hashIP(request.headers.get("CF-Connecting-IP"));
 }
 
-export async function createSession(env, userId, activeOrganizationId) {
+// authMethod (migration 0077): how this session was authenticated ('password', 'password_totp', 'passkey', 'passkey_uv', 'sso').
+// Recorded for every new session; only read for a decision while ORG_2FA_PASSKEY_COUNTS=on.
+export async function createSession(env, userId, activeOrganizationId, { authMethod = null } = {}) {
   const sessionId = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + SESSION_DURATION_MS).toISOString();
 
   await env.LUMMET_DB.prepare(
-    `INSERT INTO customer_sessions (id, user_id, active_organization_id, expires_at) VALUES (?, ?, ?, ?)`
+    `INSERT INTO customer_sessions (id, user_id, active_organization_id, expires_at, auth_method) VALUES (?, ?, ?, ?, ?)`
   )
-    .bind(sessionId, userId, activeOrganizationId || null, expiresAt)
+    .bind(sessionId, userId, activeOrganizationId || null, expiresAt, authMethod)
     .run();
 
   // Round 6.4A: every sign-in path (password, passkey, SSO, sign-up) issues its session here. If an organization this person belongs to
   // requires 2FA and they have none, the session is restricted (see getCustomerSession) and the caller is told so it can say why.
   // With ORG_SECURITY_POLICY=off this is a no-op and never queries.
-  const policy = await evaluateSessionUse(env, userId);
+  const policy = await evaluateSessionUse(env, userId, { authMethod, activeOrganizationId: activeOrganizationId || null });
 
   return {
     sessionId,
@@ -219,7 +221,7 @@ export async function signUp(request, env) {
     .bind(userId, await hashToken(verificationToken), new Date(Date.now() + VERIFICATION_TTL_MS).toISOString())
     .run();
 
-  const session = await createSession(env, userId, org.organizationId);
+  const session = await createSession(env, userId, org.organizationId, { authMethod: "password" });
 
   return {
     ok: true,
@@ -292,7 +294,7 @@ export async function login(request, env) {
     return { ok: true, mfaRequired: true, challengeId, signupIntent: user.signup_plan_id ? { planId:user.signup_plan_id, period:user.signup_billing_period } : null };
   }
 
-  const session = await createSession(env, user.id, firstOrg?.organization_id || null);
+  const session = await createSession(env, user.id, firstOrg?.organization_id || null, { authMethod: "password" });
 
   // Round 6.4A: password alone is not enough for a member of an organization that requires 2FA. The session exists so the person can
   // reach the 2FA setup routes (the only way out), but getCustomerSession refuses it everywhere else.
@@ -332,7 +334,7 @@ export async function completeMfaLogin(env, challengeId, { code, backupCode } = 
   )
     .bind(challenge.user_id)
     .first();
-  const session = await createSession(env, challenge.user_id, firstOrg?.organization_id || null);
+  const session = await createSession(env, challenge.user_id, firstOrg?.organization_id || null, { authMethod: "password_totp" });
 
   return { ok: true, userId: user.id, email: user.email, cookie: session.cookie, signupIntent: user.signup_plan_id ? { planId:user.signup_plan_id, period:user.signup_billing_period } : null };
 }
@@ -380,7 +382,7 @@ export async function getCustomerSession(request, env) {
   // One round trip for session + user (was two). Same rules as before: unknown session, expired session, missing or
   // disabled user all end in "no customer", and the last two also delete the session row.
   const row = await env.LUMMET_DB.prepare(
-    `SELECT s.expires_at AS session_expires_at, s.active_organization_id AS session_active_organization_id,
+    `SELECT s.expires_at AS session_expires_at, s.active_organization_id AS session_active_organization_id, s.auth_method AS session_auth_method,
             u.id AS user_id, u.email AS user_email, u.full_name AS user_full_name, u.status AS user_status,
             u.email_verified_at AS user_email_verified_at
      FROM customer_sessions s
@@ -404,7 +406,7 @@ export async function getCustomerSession(request, env) {
   const user = { id: row.user_id, email: row.user_email, full_name: row.user_full_name, status: row.user_status, email_verified_at: row.user_email_verified_at };
   const session = { active_organization_id: row.session_active_organization_id };
 
-  const policy = await evaluateSessionUse(env, user.id);
+  const policy = await evaluateSessionUse(env, user.id, { authMethod: row.session_auth_method || null, activeOrganizationId: session.active_organization_id || null });
   return { customer: { ...user, sessionId, activeOrganizationId: session.active_organization_id || null }, policy };
 }
 

@@ -19,7 +19,7 @@
 // Email variables (RESEND_*) are NOT set here; add them if tenants should send mail.
 // =====================================================
 import * as siteResources from "./repositories/site-resources.js";
-import { decryptSecret } from "./crypto.js";
+import { decryptSecret, aadFor } from "./crypto.js";
 
 const activeResource = siteResources.findActiveResource;
 
@@ -33,7 +33,7 @@ export async function buildSiteBindings(env, { site, deploymentId, host, hasAsse
 
   const credential = await siteResources.findActiveCredential(env, site.tenant_id);
   if (!credential) throw new Error("cannot bind Super API credential: tenant has no active credential");
-  const secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv);
+  const secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv, aadFor("tenant_api_credentials", credential.credential_id, "encrypted_secret"));
 
   const bindings = [
     { type: "d1", name: "DB", id: d1.resource_id },

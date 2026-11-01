@@ -18,7 +18,7 @@
 // - Short-lived/sensitive tables (sessions, login attempts, one-time
 //   tokens, auth challenges) are deliberately not exported.
 // =====================================================
-import { encryptSecret, decryptSecret } from "./crypto.js";
+import { encryptSecret, decryptSecret, aadFor } from "./crypto.js";
 
 export const EXCLUDED_TABLES = new Set([
   "lummet_sessions", "customer_sessions", "lummet_auth_attempts", "customer_mfa_challenges",
@@ -57,11 +57,23 @@ export async function listExportTables(env) {
   return ordered;
 }
 
+/**
+ * Authenticated data for one backup part (CREDENTIAL_ENCRYPTION_FORMAT=v2): the
+ * backup id and part name, both read from the part's object key
+ * (`control-plane/<date>/<backupId>/part-NNNN.json`). A part copied into
+ * another backup, or renumbered, no longer decrypts.
+ */
+export function backupPartAad(partKey) {
+  const m = /\/([^/]+)\/(part-\d+)\.json$/.exec(String(partKey || ""));
+  if (!m) throw new Error("backup_part_key_invalid");
+  return aadFor("control_plane_backups", m[1], m[2]);
+}
+
 async function putPart(env, prefix, index, lines) {
   const plain = lines.join("\n");
-  const enc = await encryptSecret(env, plain);
-  const body = JSON.stringify({ v: 1, iv: enc.secretIv, data: enc.encryptedSecret });
   const key = `${prefix}/part-${String(index).padStart(4, "0")}.json`;
+  const enc = await encryptSecret(env, plain, backupPartAad(key));
+  const body = JSON.stringify({ v: 1, iv: enc.secretIv, data: enc.encryptedSecret });
   await env.BACKUPS.put(key, body);
   return { key, sha256: await sha256Hex(body), rows: lines.length, bytes: body.length };
 }
@@ -133,7 +145,7 @@ export async function verifyControlPlaneBackup(env, backupId) {
     const body = await obj.text();
     if ((await sha256Hex(body)) !== p.sha256) return fail("part_hash_mismatch");
     let plain;
-    try { plain = await decryptPartWithEnv(env, JSON.parse(body)); } catch (_) { return fail("part_not_decryptable"); }
+    try { plain = await decryptPartWithEnv(env, JSON.parse(body), p.key); } catch (_) { return fail("part_not_decryptable"); }
     for (const line of plain.split("\n")) { const t = JSON.parse(line).t; counted[t] = (counted[t] || 0) + 1; }
   }
   for (const t of manifest.tables) {
@@ -143,7 +155,7 @@ export async function verifyControlPlaneBackup(env, backupId) {
   return { ok: true };
 }
 
-async function decryptPartWithEnv(env, part) { return decryptSecret(env, part.data, part.iv); }
+async function decryptPartWithEnv(env, part, partKey) { return decryptSecret(env, part.data, part.iv, backupPartAad(partKey)); }
 
 /** Reads a stored backup back into rows grouped by table (used by tests and by an in-Worker restore tool). */
 export async function* readBackupRows(env, backupId) {
@@ -152,7 +164,7 @@ export async function* readBackupRows(env, backupId) {
   if (!manifest) throw new Error("manifest_missing");
   for (const p of manifest.parts) {
     const obj = await env.BACKUPS.get(p.key);
-    const plain = await decryptPartWithEnv(env, JSON.parse(await obj.text()));
+    const plain = await decryptPartWithEnv(env, JSON.parse(await obj.text()), p.key);
     for (const line of plain.split("\n")) yield JSON.parse(line);
   }
 }

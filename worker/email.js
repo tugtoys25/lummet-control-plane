@@ -12,7 +12,7 @@
 // build links and is deliberately NOT derived from the request
 // Host header (host-header poisoning of reset links).
 // =====================================================
-import { encryptSecret, decryptSecret } from "./crypto.js";
+import { encryptSecret, decryptSecret, aadFor } from "./crypto.js";
 import * as notificationRepo from "./repositories/billing-notifications.js";
 
 const MAX_ATTEMPTS = 5;
@@ -76,7 +76,7 @@ export async function queueEmail(env, { to, template, vars = {}, organizationId 
   const payload = { text: msg.text, html: msg.html };
   if (from) payload.from = from;
   if (replyTo) payload.replyTo = replyTo;
-  const enc = await encryptSecret(env, JSON.stringify(payload));
+  const enc = await encryptSecret(env, JSON.stringify(payload), aadFor("email_outbox", id, "body_encrypted"));
   try {
     await env.LUMMET_DB.prepare(
       `INSERT INTO email_outbox (id, organization_id, to_email, template, subject, body_encrypted, body_iv, dedupe_key, notification_id)
@@ -128,7 +128,7 @@ export async function flushOutbox(env, { limit = 20, fetchImpl = fetch, now = Da
     }
     let result;
     try {
-      const body = JSON.parse(await decryptSecret(env, row.body_encrypted, row.body_iv));
+      const body = JSON.parse(await decryptSecret(env, row.body_encrypted, row.body_iv, aadFor("email_outbox", row.id, "body_encrypted")));
       result = await sendViaResend(env, row, body, fetchImpl);
     } catch (e) {
       result = { ok: false, retryable: true, error: "delivery_exception" };

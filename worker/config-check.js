@@ -8,6 +8,7 @@
 // =====================================================
 
 import { parsePlatformAccessMode, normalizeAccessIssuer, isValidAccessAudience } from "./cloudflare-access-jwt.js";
+import { validateKekMaterial } from "./crypto.js";
 import { parseDsn } from "./error-tracking.js";
 import { MONITORS, applicability } from "./synthetic-monitors.js";
 
@@ -100,7 +101,15 @@ const RULES = [
   { key: "CUSTOMER_TURNSTILE_REQUIRED/TURNSTILE_SECRET_KEY/TURNSTILE_SITE_KEY", ok: (e) => String(e.CUSTOMER_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on" || (has(e, "TURNSTILE_SECRET_KEY") && has(e, "TURNSTILE_SITE_KEY")), impact: "portal signup/login bot protection is enabled without complete server and site keys" },
   { key: "STAFF_TURNSTILE_REQUIRED/TURNSTILE_SECRET_KEY/TURNSTILE_SITE_KEY", ok: (e) => String(e.STAFF_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on" || (has(e, "TURNSTILE_SECRET_KEY") && has(e, "TURNSTILE_SITE_KEY")), impact: "staff sign-in bot protection is enabled without complete server and site keys (it stays off until both are set)" },
   { key: "PUBLIC_FORMS_TURNSTILE_REQUIRED/TURNSTILE_SECRET_KEY/TURNSTILE_SITE_KEY", ok: (e) => String(e.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() !== "on" || (has(e, "TURNSTILE_SECRET_KEY") && has(e, "TURNSTILE_SITE_KEY")), impact: "public contact/demo bot protection is enabled without complete server and site keys" },
-  { key: "CREDENTIAL_KEK", ok: (e) => has(e, "CREDENTIAL_KEK"), impact: "stored secrets cannot be encrypted" },
+  { key: "CREDENTIAL_KEK", ok: (e) => has(e, "CREDENTIAL_KEK") && validateKekMaterial(e.CREDENTIAL_KEK).ok, impact: (e) => has(e, "CREDENTIAL_KEK") ? `CREDENTIAL_KEK is not an acceptable key (${validateKekMaterial(e.CREDENTIAL_KEK).reason}): it must be standard base64 of exactly 32 random bytes, not all zero and not a repeated pattern` : "stored secrets cannot be encrypted" },
+  // Phase K (K.1, K.2). A previous key is only for reading during a rotation; it may be a legacy key, but it must be base64 and must differ from the active key.
+  { key: "CREDENTIAL_KEK_PREVIOUS", ok: (e) => !has(e, "CREDENTIAL_KEK_PREVIOUS") || (e.CREDENTIAL_KEK_PREVIOUS !== e.CREDENTIAL_KEK && /^[A-Za-z0-9+/]+={0,2}$/.test(String(e.CREDENTIAL_KEK_PREVIOUS).trim())), impact: "CREDENTIAL_KEK_PREVIOUS is set but is not base64 or equals CREDENTIAL_KEK; a rotation is half-configured (remove it once the rotation status says it is safe)" },
+  { key: "CREDENTIAL_KEK_STRICT", ok: (e) => ["off", "on"].includes(String(e.CREDENTIAL_KEK_STRICT || "").trim().toLowerCase()), impact: "key strictness is not explicitly set (must be off or on); set on once CREDENTIAL_KEK passes the 32-byte check" },
+  // Release 2.6.1.6: optional rollout settings. Unset means off; a value that is not recognised is reported (it would silently read as off).
+  { key: "API_ENTITLEMENT", ok: (e) => !has(e, "API_ENTITLEMENT") || ["off", "shadow", "enforce"].includes(String(e.API_ENTITLEMENT).trim().toLowerCase()), impact: "API_ENTITLEMENT is not off, shadow or enforce, so api.enabled is not being enforced" },
+  { key: "ORG_2FA_PASSKEY_COUNTS", ok: (e) => !has(e, "ORG_2FA_PASSKEY_COUNTS") || ["off", "on"].includes(String(e.ORG_2FA_PASSKEY_COUNTS).trim().toLowerCase()), impact: "ORG_2FA_PASSKEY_COUNTS is not off or on, so passkeys do not satisfy an organization's 2FA requirement" },
+  { key: "ORG_2FA_SCOPE", ok: (e) => !has(e, "ORG_2FA_SCOPE") || ["any_org", "active_org"].includes(String(e.ORG_2FA_SCOPE).trim().toLowerCase()), impact: "ORG_2FA_SCOPE is not any_org or active_org, so a 2FA requirement restricts the whole session" },
+  { key: "CREDENTIAL_ENCRYPTION_FORMAT", ok: (e) => ["v1", "v2"].includes(String(e.CREDENTIAL_ENCRYPTION_FORMAT || "").trim().toLowerCase()), impact: "the encrypted-value format is not explicitly set (must be v1 or v2); v2 binds each stored secret to its table, row and column" },
   { key: "STRIPE_SECRET_KEY", ok: (e) => has(e, "STRIPE_SECRET_KEY"), impact: "checkout and billing fail" },
   { key: "STRIPE_WEBHOOK_SECRET", ok: (e) => has(e, "STRIPE_WEBHOOK_SECRET"), impact: "billing webhooks are rejected" },
   { key: "CF_API_TOKEN", ok: (e) => has(e, "CF_API_TOKEN"), impact: "sites cannot be provisioned" },

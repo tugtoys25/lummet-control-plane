@@ -12,7 +12,7 @@
 //   Lummet -> HTTPS -> tenant Worker -> tenant D1
 // =====================================================
 
-import { decryptSecret } from "./crypto.js";
+import { decryptSecret, aadFor } from "./crypto.js";
 import { buildSuperApiHeaders } from "./signing.js";
 import { getActiveCredential, getTenant } from "./data.js";
 
@@ -106,7 +106,7 @@ export async function requestTenant(env, tenantOrId, options) {
 
   let secret;
   try {
-    secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv);
+    secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv, aadFor("tenant_api_credentials", credential.credential_id, "encrypted_secret"));
   } catch (error) {
     return fail(
       500,
@@ -238,7 +238,7 @@ export async function pushTenantSiteAccess(env, tenantOrId, { state, generation,
   if (!tenant) return fail(404, "tenant_not_found", "Tenant is not registered.");
   const credential = await getActiveCredential(env, tenant.id);
   if (!credential) return fail(422, "no_active_credential", "No active Super API credential is configured for this tenant.");
-  let secret; try { secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv); } catch { return fail(500, "credential_decrypt_failed", "Could not decrypt this tenant's credential."); }
+  let secret; try { secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv, aadFor("tenant_api_credentials", credential.credential_id, "encrypted_secret")); } catch { return fail(500, "credential_decrypt_failed", "Could not decrypt this tenant's credential."); }
   const payload = { state, generation, siteId: String(siteId), issuedAt: Date.now() };
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
   const signature = [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(JSON.stringify(payload))))].map(b=>b.toString(16).padStart(2,"0")).join("");
@@ -251,7 +251,7 @@ export async function pushTenantStorageLimit(env, tenantOrId, { maxBytes, genera
   if (!tenant) return fail(404, "tenant_not_found", "Tenant is not registered.");
   const credential = await getActiveCredential(env, tenant.id);
   if (!credential) return fail(422, "no_active_credential", "No active Super API credential is configured for this tenant.");
-  let secret; try { secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv); } catch { return fail(500, "credential_decrypt_failed", "Could not decrypt this tenant's credential."); }
+  let secret; try { secret = await decryptSecret(env, credential.encrypted_secret, credential.secret_iv, aadFor("tenant_api_credentials", credential.credential_id, "encrypted_secret")); } catch { return fail(500, "credential_decrypt_failed", "Could not decrypt this tenant's credential."); }
   const payload = { purpose: "storage_limit", maxBytes, generation, siteId: String(siteId), issuedAt: Date.now() };
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const signature = [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(JSON.stringify(payload))))].map((b) => b.toString(16).padStart(2, "0")).join("");

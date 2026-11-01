@@ -214,6 +214,11 @@
     "HSTS_PRELOAD": "off",
     "HSTS_PRELOAD_APPROVED": "no",
     // CSP violation-report collection (6.3C): basic (default, the 2.6.0.7 behaviour) | full (Reporting API, scrubbed fields, flood cap). CSP_MODE stays report-only here; see docs/CSP_REPORTING.md.
+    "CREDENTIAL_KEK_STRICT": "off",
+    "CREDENTIAL_ENCRYPTION_FORMAT": "v1",
+    "API_ENTITLEMENT": "off",
+    "ORG_2FA_PASSKEY_COUNTS": "off",
+    "ORG_2FA_SCOPE": "any_org",
     "CSP_REPORT_MODE": "basic",
     // Error tracking (6.3C): off (default) | shadow (build + scrub + log a summary, send nothing) | on (send scrubbed events to SENTRY_DSN, a Worker SECRET set with `wrangler secret put`, never a var). "on" also needs ERROR_TRACKING_APPROVED=yes [OPEN owner approval, tracker as sub-processor]; see docs/ERROR_TRACKING.md.
     "ERROR_TRACKING": "off",

@@ -1,0 +1,6 @@
+{
+ "hello": "6fe97a21d94f523c",
+ "otpauth://totp/Lummet:user%40example.com?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Lummet&algorithm=SHA1&digits=6&period=30": "94f65350140151c4",
+ "0123456789": "b803df1215dbf695",
+ "héllo wörld ✓ 日本語": "bf5cc35bd650666f"
+}

@@ -16,7 +16,7 @@
 
 import { checkOutboundUrlResolved } from "./url-safety.js";
 import { runAutomations } from "./automations.js";
-import { encryptSecret, decryptSecret, generateSecret } from "./crypto.js";
+import { encryptSecret, decryptSecret, generateSecret, aadFor } from "./crypto.js";
 import * as deliveries from "./repositories/webhook-deliveries.js";
 
 /** Attempts in total, including the first. */
@@ -65,7 +65,7 @@ export async function createWebhook(env, { organizationId, url, eventTypes, acto
 
   const id = crypto.randomUUID();
   const secret = generateSecret();
-  const { encryptedSecret, secretIv } = await encryptSecret(env, secret);
+  const { encryptedSecret, secretIv } = await encryptSecret(env, secret, aadFor("webhooks", id, "encrypted_secret"));
 
   await env.LUMMET_DB.prepare(
     `INSERT INTO webhooks (id, organization_id, url, encrypted_secret, secret_iv, event_types, created_by)
@@ -107,7 +107,7 @@ export async function rotateSecret(env, organizationId, webhookId) {
   if (!webhook) return { ok: false, status: 404, error: "not_found" };
 
   const secret = generateSecret();
-  const { encryptedSecret, secretIv } = await encryptSecret(env, secret);
+  const { encryptedSecret, secretIv } = await encryptSecret(env, secret, aadFor("webhooks", webhookId, "encrypted_secret"));
   await env.LUMMET_DB.prepare(`UPDATE webhooks SET encrypted_secret = ?, secret_iv = ? WHERE id = ?`)
     .bind(encryptedSecret, secretIv, webhookId)
     .run();
@@ -174,7 +174,7 @@ async function sendOnce(env, webhook, deliveryId, body, attempt) {
   try {
     const timestamp = Math.floor(Date.now() / 1000);
     let secret;
-    try { secret = await decryptSecret(env, webhook.encrypted_secret, webhook.secret_iv); }
+    try { secret = await decryptSecret(env, webhook.encrypted_secret, webhook.secret_iv, aadFor("webhooks", webhook.id, "encrypted_secret")); }
     catch (_) { return { ok: false, permanent: true, error: "secret_unavailable" }; }
     const signature = await hmacSha256Hex(secret, `${timestamp}.${body}`);
 

@@ -124,6 +124,7 @@ import { renderDomainsPage } from "./views/customer-pages/domains.js";
 import { renderUsagePage } from "./views/customer-pages/usage.js";
 import { renderTeamPage } from "./views/customer-pages/team.js";
 import { renderSessionsPage, SESSIONS_PAGE_PATH } from "./views/customer-pages/sessions.js";
+import { handlePlanCatalogRoute } from "./plan-catalog-routes.js";
 import { qrForText } from "./qr.js";
 import { renderDeploymentsPage as renderCustomerDeploymentsPage } from "./views/customer-pages/deployments.js";
 import { renderDeveloperPage } from "./views/customer-pages/developer.js";
@@ -4389,6 +4390,11 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           }
           const staffBody = async () => (await request.json().catch(() => ({})));
 
+          // Plan catalog management (staff console, Plans & pricing): full CRUD, bulk actions, labels, SEO, promotions, price versions.
+          // Handled in its own module; /api/platform/saas/plans/:id below is unchanged and keeps refusing price edits.
+          const planCatalogResponse = await handlePlanCatalogRoute({ env, request, url, method, path, admin, requestId, ipHash, json, logAudit, matchPath });
+          if (planCatalogResponse) return planCatalogResponse;
+
           // Round 6.1C: staff-only revenue analytics CSV and finance unit-cost settings (super-admin gate above).
           if (method === "GET" && path === "/api/platform/saas/revenue-analytics/export.csv") {
             const mode = revenueAnalytics.analyticsMode(env);
@@ -5197,7 +5203,7 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas/revenue-analytics") return html(await renderRevenueAnalyticsPage(env, admin, { trialPage: url.searchParams.get("trialPage") || 1, activationPage: url.searchParams.get("activationPage") || 1 }));
         if (path === "/platform/saas/organizations") return html(await renderOrganizationsPage(env, admin, { q: url.searchParams.get("q") || "", status: url.searchParams.get("status") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/subscriptions") return html(await renderSubscriptionsPage(env, admin, { status: url.searchParams.get("status") || "", page: url.searchParams.get("page") }));
-        if (path === "/platform/saas/plans") return html(await renderPlansPage(env, admin));
+        if (path === "/platform/saas/plans") return html(await renderPlansPage(env, admin, Object.fromEntries(url.searchParams)));
         if (path === "/platform/saas/jobs") return html(await renderJobsPage(env, admin, { status: url.searchParams.get("status") || "", type: url.searchParams.get("type") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/email") return html(await renderEmailPage(env, admin));
         if (path === "/platform/saas/settings") return html(await renderPlatformSettingsPage(env, admin));

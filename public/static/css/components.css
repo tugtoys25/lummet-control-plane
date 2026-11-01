@@ -247,3 +247,14 @@ a.card:hover .card-cta svg { transform: translateX(4px); }
 /* Pages that already end with a CTA band do not repeat it in the footer */
 body:has(.cta-band, .contact-card, .form-layout) .footer-cta { display: none; }
 body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var(--space-7); }
+
+/* Staff-managed plan presentation (labels, tagline, promotion, excluded features). All optional: absent = no markup. */
+.plan-labels { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 var(--space-2) !important; }
+.plan-label { padding: 3px 10px; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent-ink); font-size: var(--fs-xs); font-weight: 700; }
+.plan-label-green { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.plan-label-amber { background: color-mix(in srgb, #f5b23a 20%, transparent); color: #96560a; }
+.plan-label-red { background: color-mix(in srgb, #c4264a 14%, transparent); color: #b3203a; }
+.plan-tagline { margin: 0 0 var(--space-3) !important; color: var(--ink-dim); font-size: var(--fs-sm); }
+.plan-promo { margin: var(--space-2) 0 0 !important; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); font-size: var(--fs-xs) !important; }
+.plan-promo span { display: block; color: var(--ink-dim); }
+.plan-features li.is-off { opacity: .55; text-decoration: line-through; }

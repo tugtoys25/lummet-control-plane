@@ -18,6 +18,7 @@ import { nonceToken, onClick, onSubmit, onChange } from "../../csp.js";
 import * as revenueAnalytics from "../../revenue-analytics.js";
 import * as platformSettings from "../../platform-settings.js";
 import * as billingGateways from "../../billing-gateways.js";
+import { renderPlanCatalogPage } from "./plan-catalog-admin.js";
 
 const money = (c) => (c == null ? "custom" : `$${(c / 100).toFixed(2)}`);
 // Round 6.1B: revenue is shown with its own currency code and is never summed across currencies. Unknown is "n/a", never zero.
@@ -213,18 +214,9 @@ export async function renderSubscriptionsPage(env, admin, { status = "", page: r
     ${table(["Organization", "Plan", "Status", "Trial ends", "Period end"], rows.map((s) => [`<a href="/platform/saas/organizations/${h(s.organization_id)}">${h(s.organization)}</a>`, h(s.plan), badge(s.status), h(s.trial_ends_at || "—"), h(s.current_period_end || "—")]))}${pager("/platform/saas/subscriptions", { status }, page, hasMore)}`);
 }
 
-export async function renderPlansPage(env, admin) {
-  const plans = await staff.listPlansCatalog(env);
-  const priceCell = (p) => {
-    if (!p.active_price_id) return `<span style="color:var(--text-dim)">${h(p.billing_period === "custom" ? "contract" : "— not synced —")}</span>`;
-    const mismatch = p.price_cents != null && p.price_amount_cents != null && p.price_cents !== p.price_amount_cents;
-    return `<code>${h(p.active_price_id)}</code><br><small>${h(p.price_lookup_key || "")} · v${h(p.price_version)} · ${badge(p.price_mode)}${mismatch ? ` ${badge("amount differs: Stripe " + money(p.price_amount_cents))}` : ""}</small>`;
-  };
-  return shell(env, admin, "Plans & pricing", "saas-plans", `
-    <p style="color:var(--text-dim)">Prices are read-only here. They come from <code>catalog/plans.v1.json</code> through <code>scripts/stripe-sync.mjs</code>: change the catalog (a new price version, never an edit), run the sync, and this page shows the result. Existing subscribers keep the Stripe price they bought; only new checkouts use the active version. You can still retire or reactivate a plan.</p>
-    ${table(["Product", "Plan", "Price", "Period", "Trial", "Status", "Stripe price (active)", "Live subs", ""], plans.map((p) => [h(p.product), h(p.name), money(p.price_cents), h(p.billing_period), h(p.trial_days), badge(p.status), priceCell(p),
-      h(p.live_subscriptions),
-      `<button class="btn"${onClick("act", [`/api/platform/saas/plans/${p.id}`, {status: (p.status === "active" ? "retired" : "active")}, `${p.status === "active" ? "Retire" : "Reactivate"} this plan?`])}>${p.status === "active" ? "Retire" : "Activate"}</button>`]))}`);
+// The plan catalog manager (full CRUD, bulk actions, labels, SEO, promotions, price versions) lives in plan-catalog-admin.js.
+export async function renderPlansPage(env, admin, params = {}) {
+  return renderPlanCatalogPage(env, admin, params);
 }
 
 export async function renderJobsPage(env, admin, { status = "", type = "", page: rawPage } = {}) {

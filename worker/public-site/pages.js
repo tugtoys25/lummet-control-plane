@@ -378,6 +378,16 @@ export function pricingFeatures(ent) {
   return out.filter(Boolean);
 }
 
+/** Feature lines staff wrote for the card, when there are any; otherwise the lines derived from entitlements (the original behaviour). */
+function planFeatureTexts(p) {
+  const custom = (p.feature_lines || []).filter((f) => f.included).map((f) => f.text);
+  return custom.length ? custom : pricingFeatures(p.entitlements);
+}
+function planFeatureItems(p) {
+  const lines = p.feature_lines || [];
+  return lines.length ? lines.map((f) => ({ text: f.text, off: !f.included, strong: f.highlight })) : pricingFeatures(p.entitlements).map((text) => ({ text, off: false, strong: false }));
+}
+
 /** Groups plans by product for one billing period; an annual plan says what it saves against its monthly twin. */
 export function pricingGroups(plans, period, ui = {}) {
   const monthlyOf = new Map();
@@ -393,22 +403,49 @@ export function pricingGroups(plans, period, ui = {}) {
     if (!groups.has(p.product_id)) groups.set(p.product_id, { id: String(p.product_id), name: p.product_name, category: p.category || "", plans: [] });
     groups.get(p.product_id).plans.push({
       name: base,
+      price_cents: p.price_cents,
+      currency: p.currency,
       price: MONEY(p.price_cents, p.currency),
       period: period === "annual" ? (ui.pricing_per_year || "per year") : (ui.pricing_per_month || "per month"),
       trial: p.trial_days > 0 ? (ui.pricing_trial || "{n}-day free trial").replace("{n}", String(p.trial_days)) : "",
       saving,
-      features: pricingFeatures(p.entitlements),
+      features: planFeatureTexts(p),
+      featureItems: planFeatureItems(p),
+      tagline: p.tagline || "",
+      labels: p.labels || [],
+      has_labels: !!(p.labels && p.labels.length),
+      promo: p.promo ? { text: p.promo.text, code_note: p.promo.code ? (ui.pricing_promo_code || "Use code {code} at checkout").replace("{code}", p.promo.code) : "" } : null,
+      cta: p.cta_label || "",
+      sort_order: p.sort_order || 0,
+      staffFeatured: !!p.is_featured,
+      seo_description: p.seo_description || "",
       planId: p.id,
       signupPeriod: period,
       productId: String(p.product_id),
-      featuresText: pricingFeatures(p.entitlements).join(", ") || "Core platform",
+      featuresText: planFeatureTexts(p).join(", ") || "Core platform",
       featured: false,
       href: `/app/signup?plan=${encodeURIComponent(p.id)}&period=${period}`
     });
   }
-  // A three-tier family highlights its middle plan as the recommended one (layout only; the price is unchanged).
-  for (const g of groups.values()) if (g.plans.length === 3) g.plans[1].featured = true;
+  for (const g of groups.values()) {
+    // Staff order first (sort_order, default 0 = the existing price order; the sort is stable).
+    g.plans.sort((a, b) => a.sort_order - b.sort_order);
+    // A plan staff marked as recommended wins; otherwise a three-tier family highlights its middle plan (layout only; the price is unchanged).
+    const picked = g.plans.filter((x) => x.staffFeatured);
+    if (picked.length) for (const x of picked) x.featured = true;
+    else if (g.plans.length === 3) g.plans[1].featured = true;
+  }
   return [...groups.values()];
+}
+
+/** One schema.org Offer per listed plan. The description is the staff-written SEO text, or the tagline; nothing is invented. */
+function pricingOffersLd(groups, period) {
+  const offers = groups.flatMap((g) => g.plans.map((p) => ({
+    "@type": "Offer", name: `${g.name}: ${p.name}`, price: String((p.price_cents ?? 0) / 100), priceCurrency: String(p.currency || "USD").toUpperCase(),
+    ...(p.seo_description || p.tagline ? { description: p.seo_description || p.tagline } : {}),
+    eligibleDuration: { "@type": "QuantitativeValue", unitCode: period === "annual" ? "ANN" : "MON", value: 1 }
+  })));
+  return offers.length ? [{ "@type": "ItemList", name: "Plans", itemListElement: offers.map((o, i) => ({ "@type": "ListItem", position: i + 1, item: o })) }] : [];
 }
 
 export async function pricingPage(ctx) {
@@ -427,7 +464,8 @@ export async function pricingPage(ctx) {
     noindex: groups.length === 0,
     jsonLd: [
       { "@type": "WebPage", name: heading.title, url: absoluteUrl(site, "/pricing") },
-      breadcrumbLd(site, [crumb(ui.crumb_home, "/"), crumb(heading.title, "/pricing")])
+      breadcrumbLd(site, [crumb(ui.crumb_home, "/"), crumb(heading.title, "/pricing")]),
+      ...pricingOffersLd(groups, period)
     ]
   });
   return renderPage(ctx, {

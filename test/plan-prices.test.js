@@ -198,16 +198,30 @@ test('GET /api/platform/saas/plan-prices is staff-only, filterable and paged', a
 });
 
 // ------------------------------------------------------------------ immutability
-test('no Worker code updates or deletes a plan_prices row, or writes plans.stripe_price_id', () => {
+// The ONE module allowed to write plan_prices is the price-version repository behind the staff "add a price version" action
+// (worker/plan-catalog.js setPlanPrice). Everything else stays forbidden, and that module is held to two statements.
+const PRICE_VERSION_WRITER = '../worker/repositories/plan-price-versions.js';
+test('no Worker code except the price-version repository updates or deletes a plan_prices row, or writes plans.stripe_price_id', () => {
   const files = [];
   const walk = (dir) => { for (const d of readdirSync(new URL(dir, import.meta.url), { withFileTypes: true })) { const p = dir + d.name; if (d.isDirectory()) walk(p + '/'); else if (p.endsWith('.js')) files.push(p); } };
   walk('../worker/');
   assert.ok(files.length > 50);
+  assert.ok(files.includes(PRICE_VERSION_WRITER));
   for (const f of files) {
     const text = readFileSync(new URL(f, import.meta.url), 'utf8');
-    assert.doesNotMatch(text, /UPDATE\s+plan_prices/i, f);
     assert.doesNotMatch(text, /DELETE\s+FROM\s+plan_prices/i, f);
     assert.doesNotMatch(text, /UPDATE\s+plans\s+SET[^`"']*stripe_price_id/i, f);
+    if (f === PRICE_VERSION_WRITER) continue;
+    assert.doesNotMatch(text, /UPDATE\s+plan_prices/i, f);
     assert.doesNotMatch(text, /INSERT\s+(OR\s+\w+\s+)?INTO\s+plan_prices/i, f);
   }
+});
+
+test('the price-version repository can only add a version row and retire the previous active flag: it never edits an amount, id, key or interval', () => {
+  const text = readFileSync(new URL(PRICE_VERSION_WRITER, import.meta.url), 'utf8');
+  const updates = [...text.matchAll(/UPDATE\s+plan_prices\s+SET\s+([^`]*?)\s+WHERE/gi)].map((m) => m[1].trim());
+  assert.deepEqual(updates, ['active = 0']);
+  const inserts = [...text.matchAll(/INSERT\s+(?:OR\s+\w+\s+)?INTO\s+(\w+)/gi)].map((m) => m[1]);
+  assert.deepEqual(inserts, ['plan_prices']);
+  assert.doesNotMatch(text, /INSERT\s+OR\s+(REPLACE|IGNORE)/i, 'a plain INSERT: a clash must fail, never overwrite');
 });

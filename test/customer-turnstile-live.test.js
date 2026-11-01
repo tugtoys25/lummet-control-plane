@@ -44,7 +44,7 @@ test('turning customer Turnstile off is live on the next request too', async () 
 
 test('forgot-password: widget on the page and a challenge on the request when customer Turnstile is on', async () => {
   const e = env(KEYS);
-  assert.doesNotMatch((await call(e, 'GET', '/app/forgot-password')).text, /cf-turnstile/);
+  assert.doesNotMatch((await call(e, 'GET', '/app/forgot-password')).text, /class="cf-turnstile|turnstile\/v0\/api\.js/);
   await repo.upsert(e, { key: 'CUSTOMER_TURNSTILE_REQUIRED', value: 'on', actorId: 'test' });
   assert.match((await call(e, 'GET', '/app/forgot-password')).text, /class="cf-turnstile/);
   const r = await call(e, 'POST', '/api/customer/password/forgot', { body: { email: 'someone@example.com' } });

@@ -239,8 +239,10 @@ export function renderCustomerShell({ title, activeKey, customer, organizations 
       <main class="content" id="main-content">
         ${bodyHtml}
       </main>
+      <!--lummet:site-footer-compact-->
     </div>
   </div>
+  <!--lummet:cookie-banner-->
   <script nonce="${nonceToken()}">
     function lummetLogout() { fetch('/api/customer/logout', { method: 'POST' }).then(function () { location.href = '/app/login'; }); }
     function lummetSwitchOrg(id) {

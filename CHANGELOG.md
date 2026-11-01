@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased - One trial length, shared header/footer, cookie banner
+
+- Trial length is decided in one place (`effectiveTrialDays` in `worker/billing-config.js`). `BILLING_TRIAL_DAYS_DEFAULT`
+  (Platform settings) now sets the trial for every plan that offers one; unset or 0 keeps each plan's own `trial_days`.
+  The pricing page, home teaser, demo plans, customer billing page, Checkout and the no-card trial all read it.
+- Customer sign-in pages carry the public header and footer (swapped in by `worker/site-chrome.js` from markers), and the
+  dashboard has a slim footer built from the same footer text and links. Staff sign-in is unchanged.
+- Cookie consent banner: `COOKIE_BANNER`, `COOKIE_CONSENT_DAYS` in Platform settings; every word and link is Interface text
+  (group `cookies`, migration 0076). `/static/js/cookie-consent.js` stores the choice in `lummet_cookie_consent`. ASSET_VERSION ui3.
+
 ## 2.6.1.4 - Homepage hardening: "Temporarily unavailable" on a cold load
 
 A cold homepage render issued about 19 separate D1 queries and fetched about 15 templates, and any single transient failure

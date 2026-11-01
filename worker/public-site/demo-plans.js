@@ -3,7 +3,7 @@
 // route the pricing page uses, so the choice is kept through signup), and a "View all plans" link to /pricing.
 // Only plans with an active Stripe price are shown, so a visitor never clicks a plan that cannot be bought.
 import * as pricingRepo from "../repositories/pricing.js";
-import { cardRequiredTrial } from "../billing-config.js";
+import { cardRequiredTrial, withEffectiveTrial } from "../billing-config.js";
 import { pricingGroups } from "./pages.js";
 
 export function demoPlansMode(env) {
@@ -15,7 +15,7 @@ export async function demoPlans(ctx) {
   try {
     if (!demoPlansMode(ctx.env)) return null;
     const ui = ctx.siteCtx.ui || {};
-    const plans = await pricingRepo.listPricing(ctx.env, { requirePrice: true });
+    const plans = withEffectiveTrial(ctx.env, await pricingRepo.listPricing(ctx.env, { requirePrice: true }));
     const groups = pricingGroups(plans, "monthly", ui).filter((g) => g.plans.length);
     // DEMO_PLANS_PRODUCT (a product id) picks the family to show; otherwise the first one.
     const wanted = String(ctx.env.DEMO_PLANS_PRODUCT || "").trim();

@@ -6,7 +6,7 @@
 //   BILLING_GRACE_DAYS       past_due -> restricted      (default 14)
 //   BILLING_RESTRICTED_DAYS  restricted -> suspended     (default 7); also how long an expired trial stays live
 //   BILLING_SUSPENDED_DAYS   suspended -> closed         (default 30)
-//   BILLING_TRIAL_DAYS_DEFAULT                           (default 7)
+//   BILLING_TRIAL_DAYS_DEFAULT  length of every plan's trial (unset = each plan's own trial_days); see effectiveTrialDays below
 //   BILLING_REMINDER_DAYS    "3,1"                       (default) days before a trial end / renewal / grace end / deletion
 //   BILLING_RENEWAL_NOTICES  yearly | all | off          (default yearly)
 //   BILLING_WINBACK_EMAILS   off | on                    (default off: promotional, needs an unsubscribe path first)
@@ -34,6 +34,31 @@ export function billingMode(env) {
  */
 export function cardRequiredTrial(env) {
   return String((env && env.CARD_REQUIRED_TRIAL) || "off").trim().toLowerCase() === "on";
+}
+
+/**
+ * The ONE place trial length is decided. BILLING_TRIAL_DAYS_DEFAULT (Platform settings, or wrangler vars) is the length of the
+ * trial for every plan that offers one; unset, blank, 0 or invalid means "use each plan's own trial_days". A plan with no trial
+ * (trial_days 0) never gets one from this setting. Every screen, email and Checkout call reads trial length through here, so
+ * changing the setting changes them all.
+ */
+export function configuredTrialDays(env) {
+  const raw = env && env.BILLING_TRIAL_DAYS_DEFAULT;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n <= 3650 ? n : null;
+}
+
+export function effectiveTrialDays(env, planTrialDays) {
+  const own = Number(planTrialDays) || 0;
+  if (own <= 0) return 0;
+  const configured = configuredTrialDays(env);
+  return configured == null ? own : configured;
+}
+
+/** Rows that carry trial_days (plans, pricing rows) with the length every screen should show. */
+export function withEffectiveTrial(env, rows) {
+  return (rows || []).map((r) => (r && Number(r.trial_days) > 0 ? { ...r, trial_days: effectiveTrialDays(env, r.trial_days) } : r));
 }
 
 export const EMAIL_MODES = ["off", "shadow", "on"];

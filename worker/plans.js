@@ -10,6 +10,7 @@
 // =====================================================
 
 import { notify } from "./billing-notifications.js";
+import { effectiveTrialDays, withEffectiveTrial } from "./billing-config.js";
 import * as repo from "./repositories/billing-lifecycle.js";
 import { checkTrialByDomain, recordTrialByDomain } from "./trial-abuse.js";
 
@@ -30,7 +31,7 @@ export async function listPlans(env, productId) {
   )
     .bind(productId)
     .all();
-  return result.results || [];
+  return withEffectiveTrial(env, result.results || []);
 }
 
 export async function getPlan(env, planId) {
@@ -93,7 +94,7 @@ export async function startTrialSubscription(env, organizationId, planId) {
     .first();
   if (existing) return { ok: false, status: 409, error: "organization_already_subscribed" };
 
-  const trialDays = plan.trial_days || 0;
+  const trialDays = effectiveTrialDays(env, plan.trial_days);
   if (trialDays > 0 && (await hasPriorTrialElsewhere(env, organizationId))) {
     return { ok: false, status: 409, error: "trial_already_used" };
   }

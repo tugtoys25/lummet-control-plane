@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased - Staff plan & pricing manager
+
+`/platform/saas/plans` is no longer read-only. Staff manage the whole catalog from the console; everything below is additive
+(migration 0078, after the 2.6.1.6 migration 0077) and the existing checkout, plan-change, webhook and entitlement paths are untouched.
+
+- Full CRUD: create (always as a draft), edit, duplicate, retire/restore, delete. Delete is refused for any plan that has
+  subscribers, a price history, plan-change intents or crypto checkouts (retire it instead). The key is immutable.
+- Lifecycle: `draft` (new status, invisible), `active` = published, `retired`. Publish/unpublish switch per row. Publishing
+  without a Stripe price is allowed but warns ("not purchasable yet"); unpublishing never touches live subscriptions.
+- Bulk actions on selected rows (max 100, per-plan result and one audit row per plan): publish, unpublish, retire, restore,
+  duplicate, feature/unfeature, add/remove label, set trial days, delete.
+- Search, filters (status, product, period, label), sortable columns, paging, CSV export, status counters.
+- Editor drawer: details, pricing (price history + add a version), marketing feature lines, entitlements (typed, with a
+  catalog of the keys the product enforces plus custom keys), labels, promotions, SEO (with search preview).
+- Labels (reusable chips, 6 seeded), products (create/rename/retire), promotions (time-boxed banner, optional link to an
+  existing coupon; never changes what is charged; hidden automatically when the coupon is disabled or exhausted).
+- Prices: changing a price is adding a version. Staff paste the Stripe price id and the amount; when `STRIPE_SECRET_KEY`
+  is set the Worker asks Stripe and refuses an amount, currency, interval or mode mismatch. Old versions stay, subscribers
+  keep them, `plans.price_cents` is mirrored. `POST /api/platform/saas/plans/:id` still refuses price edits.
+- Guardrail change: the test that forbade any Worker write to `plan_prices` now exempts exactly one file,
+  `worker/repositories/plan-price-versions.js`, and a second test pins it to "insert a version" and "set `active = 0`".
+- Public pricing page: staff order, recommended plan, tagline, label chips, custom feature lines (escaped), button text,
+  live promotion, and `ItemList`/`Offer` JSON-LD using the SEO description. With none of it set the page is unchanged;
+  the extras are fail-soft if the migration is not yet applied. ASSET_VERSION ui4.
+- API: `/api/platform/saas/plan-catalog*`, `/plan-labels*`, `/products*` (super-admin only, audited). Tests: `test/plan-catalog.test.js`.
+- Deploy order: apply migration 0078, then deploy the Worker. Rollback: deploy the previous Worker; drafts are simply hidden.
+
 ## 2.6.1.6 - Org 2FA completion (H.4) and the three gaps the entitlement matrix found (G1, G2, G3)
 
 Merged onto the codebase that already contains the trial-length, shared header/footer and cookie-banner work (the "Unreleased" section below).

@@ -1,9 +1,12 @@
 <article class="card pricing-plan{{#if featured}} is-featured{{/if}}">
   {{#if featured}}<span class="plan-flag">{{ui.pricing_recommended}}</span>{{/if}}
   <h3>{{name}}</h3>
+  {{#if has_labels}}<p class="plan-labels">{{#each labels}}<span class="plan-label plan-label-{{color}}">{{name}}</span>{{/each}}</p>{{/if}}
+  {{#if tagline}}<p class="plan-tagline">{{tagline}}</p>{{/if}}
   <p class="pricing-price"><strong>{{price}}</strong> {{period}}</p>
   {{#if saving}}<p class="pricing-saving">{{saving}}</p>{{/if}}
+  {{#if promo}}<p class="plan-promo"><strong>{{promo.text}}</strong>{{#if promo.code_note}} <span>{{promo.code_note}}</span>{{/if}}</p>{{/if}}
   {{#if trial}}<p class="plan-trial">{{trial}}</p>{{/if}}
-  <ul class="plan-features">{{#each features}}<li>{{this}}</li>{{/each}}</ul>
-  <a class="btn btn-primary btn-lg" href="{{href}}">{{ui.pricing_cta}}</a>
+  <ul class="plan-features">{{#each featureItems}}<li{{#if off}} class="is-off"{{/if}}>{{#if strong}}<strong>{{text}}</strong>{{else}}{{text}}{{/if}}</li>{{/each}}</ul>
+  <a class="btn btn-primary btn-lg" href="{{href}}">{{#if cta}}{{cta}}{{else}}{{ui.pricing_cta}}{{/if}}</a>
 </article>

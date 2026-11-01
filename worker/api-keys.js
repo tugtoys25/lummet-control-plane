@@ -16,9 +16,41 @@
 // =====================================================
 
 import * as apiKeysRepo from "./repositories/api-keys.js";
-import { evaluateWriteGate, refusalFor } from "./access.js";
+import { evaluateWriteGate, refusalFor, resolveAccess } from "./access.js";
+import { requireEntitlement } from "./entitlements.js";
+import { billingConfig } from "./billing-config.js";
 
 const VALID_SCOPES = ["sites:read", "domains:read", "analytics:read", "usage:read"];
+
+// -----------------------------------------------------
+// api.enabled (release 2.6.1.6, gap G1). The entitlement used to be displayed but never enforced, so a plan without API access
+// could create and use API keys. API_ENTITLEMENT=off (default) | shadow (log only) | enforce.
+//   create  refused (403 api_not_enabled) when the plan has no api.enabled.
+//   use     refused the same way, EXCEPT while the organization is read-only for non-payment: that state resolves every entitlement to
+//           the zero floor, and its keys keep reading exactly as its public sites keep serving. A downgrade to a plan without API
+//           access therefore ends key use; a payment lapse does not.
+// -----------------------------------------------------
+export const API_ENTITLEMENT_MODES = ["off", "shadow", "enforce"];
+export function apiEntitlementMode(env) {
+  const v = String((env && env.API_ENTITLEMENT) || "off").trim().toLowerCase();
+  return API_ENTITLEMENT_MODES.includes(v) ? v : "off";
+}
+
+/** Returns { blocked, mode }. Never throws on a refusal; a failed lookup fails the request rather than letting a key through. */
+export async function apiEntitlementCheck(env, organizationId, entryPoint, { forUse = false } = {}) {
+  const mode = apiEntitlementMode(env);
+  if (mode === "off") return { blocked: false, mode };
+  if (forUse && billingConfig(env).mode === "enforce") {
+    const access = await resolveAccess(env, organizationId);
+    if (!access.canMutate) return { blocked: false, mode };      // read-only for non-payment: the floor is not a plan decision
+  }
+  if (await requireEntitlement(env, organizationId, "api.enabled")) return { blocked: false, mode };
+  if (mode === "shadow") {
+    console.log(JSON.stringify({ msg: "api_entitlement_would_refuse", organizationId, entryPoint }));
+    return { blocked: false, mode };
+  }
+  return { blocked: true, mode };
+}
 
 async function sha256Hex(text) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -43,6 +75,8 @@ export function listValidScopes() {
 export async function createApiKey(env, { organizationId, siteId, name, scopes, actorUserId, expiresAt }) {
   const gate = await evaluateWriteGate(env, { organizationId, method: "POST", subPath: "/api-keys" });
   if (gate.blocked) return { ok: false, status: 402, ...refusalFor(gate.access) };
+  const entitled = await apiEntitlementCheck(env, organizationId, "api-keys:create");
+  if (entitled.blocked) return { ok: false, status: 403, error: "api_not_enabled" };
   const trimmedName = (name || "").trim();
   if (!trimmedName) return { ok: false, status: 422, error: "name_required" };
 

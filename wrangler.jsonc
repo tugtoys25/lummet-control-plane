@@ -228,6 +228,15 @@
 		// "HSTS_PRELOAD_APPROVED": "no",  // off in production; uncomment when needed (frees a Worker variable slot)
 		// CSP violation-report collection (6.3C): basic (default, the 2.6.0.7 behaviour) | full (Reporting API, scrubbed fields, flood cap). CSP_MODE stays report-only here; see docs/CSP_REPORTING.md.
 		"CSP_REPORT_MODE": "full",
+		// Secret encryption (Phase K). CREDENTIAL_KEK_STRICT: off (default) | on (the runtime refuses a CREDENTIAL_KEK that is not base64 of exactly 32 non-trivial bytes; turn on only after config-check passes with the real key). CREDENTIAL_ENCRYPTION_FORMAT: v1 (default) | v2 (new secrets are bound to their table, row and column; v1 and v2 are always readable; run the staff key-rotation page to upgrade existing rows). See docs/KEY_CUSTODY.md.
+		"CREDENTIAL_KEK_STRICT": "off",
+		"CREDENTIAL_ENCRYPTION_FORMAT": "v1",
+		// 2.6.1.6. API_ENTITLEMENT: off (default) | shadow (log only) | enforce (a plan without api.enabled cannot create or use API keys; a payment lapse does not end key reads).
+		// ORG_2FA_PASSKEY_COUNTS: off (default) | on (a passkey sign-in with user verification satisfies an organization's 2FA requirement; needs migration 0077).
+		// ORG_2FA_SCOPE: any_org (default, one organization's requirement restricts the whole session) | active_org (it restricts only that organization).
+		"API_ENTITLEMENT": "off",
+		"ORG_2FA_PASSKEY_COUNTS": "off",
+		"ORG_2FA_SCOPE": "any_org",
 		// Error tracking (6.3C): off (default) | shadow (build + scrub + log a summary, send nothing) | on (send scrubbed events to SENTRY_DSN, a Worker SECRET set with `wrangler secret put`, never a var). "on" also needs ERROR_TRACKING_APPROVED=yes [OPEN owner approval, tracker as sub-processor]; see docs/ERROR_TRACKING.md.
 		"ERROR_TRACKING": "off",
 		"ERROR_TRACKING_APPROVED": "no",
@@ -280,7 +289,7 @@
       "r2_buckets": [{"binding":"BACKUPS","bucket_name":"lummet-backups-staging"},{"binding":"TENANT_TEMPLATES","bucket_name":"lummet-tenant-templates-staging"}],
       "queues": {"producers":[{"binding":"JOB_QUEUE","queue":"lummet-jobs-staging"}],"consumers":[{"queue":"lummet-jobs-staging","max_batch_size":1,"max_retries":5,"dead_letter_queue":"lummet-jobs-staging-dlq"}]},
       "triggers": {"crons":["*/5 * * * *"]},
-      "vars": {"STAFF_TURNSTILE_REQUIRED":"on","ENVIRONMENT":"staging","BILLING_ENFORCE":"enforce","BILLING_EMAILS":"on","BILLING_SUSPEND_SITES":"enforce","STRIPE_TAX_ENABLED":"false","STRIPE_API_VERSION":"2024-06-20","REVENUE_METRICS":"on","REVENUE_ANALYTICS":"on","ORG_SECURITY_POLICY":"enforce","ORG_IP_ALLOWLIST":"shadow","ORG_SSO_REQUIREMENT":"shadow","CUSTOMER_SESSION_ADMIN":"on","CUSTOMER_AUDIT_CSV":"on","CUSTOMER_2FA_ENROLL_PAGE":"on","PASSWORD_HASH_FORMAT":"v2","SYNTHETIC_MONITORS":"shadow","PUBLIC_TRUST_PAGES":"on","PUBLIC_LEGAL_PAGES":"draft","RATE_LIMIT_RETRY_AFTER":"on","CSP_REPORT_MODE":"full","LOG_REDACTION":"on","AUDIT_LOG_STREAM":"on","ERROR_TRACKING":"shadow","PLATFORM_ACCESS_JWT_MODE":"shadow","BILLING_TRIAL_DAYS_DEFAULT":"7","BILLING_GRACE_DAYS":"14","BILLING_RESTRICTED_DAYS":"7","BILLING_SUSPENDED_DAYS":"30","BILLING_REMINDER_DAYS":"3,1","EMAIL_PROVIDER":"resend","EMAIL_FROM":"Lummet <no-reply@luminousagents.com>","PLATFORM_DOMAIN_SUFFIX":"staging.sites.lummet.app","PORTAL_BASE_URL":"https://staging.luminousagents.com","CF_WORKERS_DEV_SUBDOMAIN":"staging","WEBAUTHN_RP_ID":"staging.luminousagents.com","WEBAUTHN_ORIGIN":"https://staging.luminousagents.com"}
+      "vars": {"STAFF_TURNSTILE_REQUIRED":"on","ENVIRONMENT":"staging","BILLING_ENFORCE":"enforce","BILLING_EMAILS":"on","BILLING_SUSPEND_SITES":"enforce","STRIPE_TAX_ENABLED":"false","STRIPE_API_VERSION":"2024-06-20","REVENUE_METRICS":"on","REVENUE_ANALYTICS":"on","CREDENTIAL_KEK_STRICT":"off","CREDENTIAL_ENCRYPTION_FORMAT":"v1","API_ENTITLEMENT":"off","ORG_2FA_PASSKEY_COUNTS":"off","ORG_2FA_SCOPE":"any_org","ORG_SECURITY_POLICY":"enforce","ORG_IP_ALLOWLIST":"shadow","ORG_SSO_REQUIREMENT":"shadow","CUSTOMER_SESSION_ADMIN":"on","CUSTOMER_AUDIT_CSV":"on","CUSTOMER_2FA_ENROLL_PAGE":"on","PASSWORD_HASH_FORMAT":"v2","SYNTHETIC_MONITORS":"shadow","PUBLIC_TRUST_PAGES":"on","PUBLIC_LEGAL_PAGES":"draft","RATE_LIMIT_RETRY_AFTER":"on","CSP_REPORT_MODE":"full","LOG_REDACTION":"on","AUDIT_LOG_STREAM":"on","ERROR_TRACKING":"shadow","PLATFORM_ACCESS_JWT_MODE":"shadow","BILLING_TRIAL_DAYS_DEFAULT":"7","BILLING_GRACE_DAYS":"14","BILLING_RESTRICTED_DAYS":"7","BILLING_SUSPENDED_DAYS":"30","BILLING_REMINDER_DAYS":"3,1","EMAIL_PROVIDER":"resend","EMAIL_FROM":"Lummet <no-reply@luminousagents.com>","PLATFORM_DOMAIN_SUFFIX":"staging.sites.lummet.app","PORTAL_BASE_URL":"https://staging.luminousagents.com","CF_WORKERS_DEV_SUBDOMAIN":"staging","WEBAUTHN_RP_ID":"staging.luminousagents.com","WEBAUTHN_ORIGIN":"https://staging.luminousagents.com"}
     }
   }
 }

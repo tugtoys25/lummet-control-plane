@@ -14,11 +14,26 @@ const SCRIPT = () => `
     if (!d) return;
     if (d.data && d.data.enabled) { $('start').hidden = true; say('success', 'Two-factor authentication is already active on your account.'); $('done').hidden = false; }
   });
+  // Draws the QR code with createElementNS and setAttribute only (no HTML string is ever built). The server sends the grid size and one path; the 4-module
+  // quiet zone a scanner needs is added here. Light squares behind it so it also scans in dark mode.
+  function drawQr(qr){
+    var box = $('qr'); box.textContent = '';
+    if (!qr || !qr.path || !qr.size) return;
+    var NS = 'http://www.w3.org/2000/svg', total = qr.size + 8;
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + total + ' ' + total); svg.setAttribute('width', '208'); svg.setAttribute('height', '208');
+    svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'QR code for your authenticator app');
+    var bg = document.createElementNS(NS, 'rect'); bg.setAttribute('width', total); bg.setAttribute('height', total); bg.setAttribute('fill', '#ffffff'); svg.appendChild(bg);
+    var g = document.createElementNS(NS, 'g'); g.setAttribute('transform', 'translate(4 4)');
+    var p = document.createElementNS(NS, 'path'); p.setAttribute('d', qr.path); p.setAttribute('fill', '#000000'); p.setAttribute('shape-rendering', 'crispEdges');
+    g.appendChild(p); svg.appendChild(g); box.appendChild(svg);
+  }
   $('start').addEventListener('click', function(e){
     e.preventDefault(); $('start').disabled = true;
     post('/api/customer/2fa/setup').then(function(r){
       if (!r.data.success) { $('start').disabled = false; say('error', r.data.error === 'already_enabled' ? 'Two-factor authentication is already active.' : 'Could not start setup. Try again.'); return; }
       $('secret').textContent = r.data.secret; $('otpauth').textContent = r.data.otpauthUrl;
+      drawQr(r.data.qr);
       $('step2').hidden = false; $('start').hidden = true; $('code').focus();
     });
   });
@@ -43,7 +58,8 @@ export function renderCustomer2faEnrollPage() {
       <div id="flash" role="status" aria-live="polite"></div>
       <button class="auth-btn" id="start" type="button">Start setup</button>
       <div id="step2" hidden>
-        <p>Add this key to your authenticator app, then enter the 6-digit code it shows.</p>
+        <p>Scan this code with your authenticator app, or add the key by hand, then enter the 6-digit code it shows.</p>
+        <div id="qr" style="margin:12px 0"></div>
         <p>Setup key: <code id="secret"></code></p>
         <p>App link: <code id="otpauth"></code></p>
         <label for="code">6-digit code</label>

@@ -33,8 +33,30 @@ const MAX_TOTAL_CHARS = 20000;
 const INPUT_TYPES = { text: "text", email: "email", tel: "tel", url: "url" };
 const AUTOCOMPLETE = { name: "name", email: "email", company: "organization", organization: "organization", role: "organization-title", phone: "tel", tel: "tel" };
 
+export const CONTACT_SALES_KEY = "contact-sales";
+
 export function formPath(key) {
-  return key === "contact" || key === "demo" ? `/${key}` : `/forms/${key}`;
+  return key === "contact" || key === "demo" || key === CONTACT_SALES_KEY ? `/${key}` : `/forms/${key}`;
+}
+
+// The public forms that carry the optional Turnstile check (PUBLIC_FORMS_TURNSTILE_REQUIRED). /contact-sales has always been protected
+// like /contact; giving it its own record key (H.5) must not drop that.
+const isProtectedForm = (key) => key === "contact" || key === "demo" || key === CONTACT_SALES_KEY;
+
+/**
+ * The form record and fields to show for `key`. /contact-sales (H.5) stores its inquiries under its own key `contact-sales`, so sales
+ * enquiries are no longer mixed into /contact in the inbox. Until the owner creates a `contact-sales` form in the dashboard, the
+ * wording and fields come from `fallbackKey` (`contact`), which is exactly what the page showed before. No migration is involved.
+ */
+async function resolveForm(env, key, fallbackKey = null) {
+  let form = await data.getForm(env, key);
+  let fields = form ? await data.listFormFields(env, key) : [];
+  if ((!form || !fields.length) && fallbackKey) {
+    const fbForm = await data.getForm(env, fallbackKey);
+    const fbFields = fbForm ? await data.listFormFields(env, fallbackKey) : [];
+    if (fbForm && fbFields.length) { form = fbForm; fields = fbFields; }
+  }
+  return { form, fields };
 }
 
 function parseOptions(text) {
@@ -212,9 +234,9 @@ async function renderForm(ctx, { key, path: pathOverride, form, fields, values =
       has_errors: hasErrors,
       honeypot: HONEYPOT_FIELD,
       turnstile: {
-        required: (key === "contact" || key === "demo") && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on",
-        enabled: (key === "contact" || key === "demo") && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && Boolean(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
-        misconfigured: (key === "contact" || key === "demo") && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && !(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
+        required: isProtectedForm(key) && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on",
+        enabled: isProtectedForm(key) && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && Boolean(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
+        misconfigured: isProtectedForm(key) && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && !(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
         siteKey: String(ctx.env.TURNSTILE_SITE_KEY || "")
       },
       crumbs: trail
@@ -231,21 +253,19 @@ async function renderForm(ctx, { key, path: pathOverride, form, fields, values =
   return response;
 }
 
-export async function formPage(ctx, { key, path }) {
-  const form = await data.getForm(ctx.env, key);
+export async function formPage(ctx, { key, path, fallbackKey = null }) {
+  const { form, fields } = await resolveForm(ctx.env, key, fallbackKey);
   if (!form) return null;
-  const fields = await data.listFormFields(ctx.env, key);
   return renderForm(ctx, { key, path, form, fields, sent: ctx.url.searchParams.get("sent") === "1" && fields.length > 0 });
 }
 
 // --------------------------------------------------------------- POST
 
-export async function submitForm(ctx, { key, path }) {
+export async function submitForm(ctx, { key, path, fallbackKey = null }) {
   const { env, request, url } = ctx;
   const { ui, settings } = ctx.siteCtx;
-  const form = await data.getForm(env, key);
+  const { form, fields } = await resolveForm(env, key, fallbackKey);
   if (!form) return null;
-  const fields = await data.listFormFields(env, key);
   if (!fields.length) return null;
 
   const fail = (status, message, extra = {}) =>
@@ -278,7 +298,7 @@ export async function submitForm(ctx, { key, path }) {
 
   // Public contact/demo bot protection is opt-in and fail-closed. Generic custom forms
   // are intentionally unaffected; no token is ever logged or persisted.
-  if ((key === "contact" || key === "demo") && String(env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on") {
+  if (isProtectedForm(key) && String(env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on") {
     const token = String(formData.get("cf-turnstile-response") || "").trim();
     if (!env.TURNSTILE_SECRET_KEY || !env.TURNSTILE_SITE_KEY || !token) {
       return fail(503, "This form is temporarily unavailable because bot protection is not configured. Please contact support directly.");

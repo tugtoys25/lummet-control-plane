@@ -9,7 +9,7 @@
 // tenant's actual content is untouched (rule #5).
 // =====================================================
 
-import { encryptSecret, generateSecret } from "./crypto.js";
+import { encryptSecret, generateSecret, aadFor } from "./crypto.js";
 import { getTenant, getTenantByHost, getActiveCredential } from "./data.js";
 import { requestTenant } from "./client.js";
 
@@ -160,7 +160,7 @@ export async function deleteTenant(env, id) {
 async function generateCredentialMaterial(env) {
   const credentialId = crypto.randomUUID();
   const secret = generateSecret();
-  const { encryptedSecret, secretIv } = await encryptSecret(env, secret);
+  const { encryptedSecret, secretIv } = await encryptSecret(env, secret, aadFor("tenant_api_credentials", credentialId, "encrypted_secret"));
   return { credentialId, secret, encryptedSecret, secretIv };
 }
 

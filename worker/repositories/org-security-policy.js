@@ -32,13 +32,21 @@ export async function enforcingOrganizationIdsForUser(env, userId) {
 }
 
 /** How many members of the organization have no ACTIVE authenticator factor (a pending setup does not count). */
-export async function countMembersWithout2fa(env, organizationId) {
+export async function countMembersWithout2fa(env, organizationId, { passkeysCount = false } = {}) {
+  // With ORG_2FA_PASSKEY_COUNTS=on a member who has registered a passkey is not counted as lacking a second factor.
+  const passkeyClause = passkeysCount ? "AND NOT EXISTS (SELECT 1 FROM customer_webauthn_credentials w WHERE w.user_id = m.user_id)" : "";
   const row = await env.LUMMET_DB.prepare(
     `SELECT COUNT(*) AS n
        FROM organization_users m
        LEFT JOIN customer_totp t ON t.user_id = m.user_id AND t.status = 'active'
-      WHERE m.organization_id = ? AND t.user_id IS NULL`
+      WHERE m.organization_id = ? AND t.user_id IS NULL ${passkeyClause}`
   ).bind(organizationId).first();
+  return Number(row?.n || 0);
+}
+
+/** How many passkeys a person has registered. */
+export async function countPasskeys(env, userId) {
+  const row = await env.LUMMET_DB.prepare(`SELECT COUNT(*) AS n FROM customer_webauthn_credentials WHERE user_id = ?`).bind(userId).first();
   return Number(row?.n || 0);
 }
 

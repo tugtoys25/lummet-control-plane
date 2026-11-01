@@ -15,7 +15,7 @@
 // storage).
 // =====================================================
 
-import { encryptSecret, decryptSecret } from "./crypto.js";
+import { encryptSecret, decryptSecret, aadFor } from "./crypto.js";
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const TIME_STEP_SECONDS = 30;
@@ -143,7 +143,7 @@ export async function startTotpSetup(env, userId) {
   if (!user) return { ok: false, status: 404, error: "user_not_found" };
 
   const secret = generateBase32Secret();
-  const { encryptedSecret, secretIv } = await encryptSecret(env, secret);
+  const { encryptedSecret, secretIv } = await encryptSecret(env, secret, aadFor("customer_totp", userId, "encrypted_secret"));
 
   await env.LUMMET_DB.prepare(
     `INSERT INTO customer_totp (user_id, encrypted_secret, secret_iv, status) VALUES (?, ?, ?, 'pending')
@@ -160,7 +160,7 @@ export async function confirmTotpSetup(env, userId, code) {
   const row = await env.LUMMET_DB.prepare(`SELECT * FROM customer_totp WHERE user_id = ? AND status = 'pending'`).bind(userId).first();
   if (!row) return { ok: false, status: 404, error: "no_pending_setup" };
 
-  const secret = await decryptSecret(env, row.encrypted_secret, row.secret_iv);
+  const secret = await decryptSecret(env, row.encrypted_secret, row.secret_iv, aadFor("customer_totp", row.user_id, "encrypted_secret"));
   const valid = await verifyTotpCode(secret, code);
   if (!valid) return { ok: false, status: 422, error: "invalid_code" };
 
@@ -190,7 +190,7 @@ export async function disableTotp(env, userId, { code, backupCode } = {}) {
 
 async function verifyEitherFactor(env, row, { code, backupCode }) {
   if (code) {
-    const secret = await decryptSecret(env, row.encrypted_secret, row.secret_iv);
+    const secret = await decryptSecret(env, row.encrypted_secret, row.secret_iv, aadFor("customer_totp", row.user_id, "encrypted_secret"));
     if (await verifyTotpCode(secret, code)) return { ok: true };
     return { ok: false, status: 422, error: "invalid_code" };
   }

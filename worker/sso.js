@@ -19,10 +19,12 @@
 // =====================================================
 
 import { emailKey } from "./email-key.js";
-import { encryptSecret, decryptSecret } from "./crypto.js";
+import { encryptSecret, decryptSecret, aadFor } from "./crypto.js";
 import { verifyJwt } from "./jwt.js";
 import { hashPassword } from "./auth.js";
 import { createSession } from "./customer-auth.js";
+import { seatCheck, getMembership } from "./organizations.js";
+import { billingConfig } from "./billing-config.js";
 import { checkOutboundUrl, checkOutboundUrlResolved } from "./url-safety.js";
 import { emailDomainAllowed } from "./sso-domains.js";
 
@@ -61,7 +63,7 @@ export async function configureSso(env, organizationId, { issuer, clientId, clie
     if (!check.ok) return { ok: false, status: 422, error: `${field}_${check.error}` };
   }
 
-  const { encryptedSecret, secretIv } = await encryptSecret(env, clientSecret);
+  const { encryptedSecret, secretIv } = await encryptSecret(env, clientSecret, aadFor("organization_sso_settings", organizationId, "encrypted_client_secret"));
 
   await env.LUMMET_DB.prepare(
     `INSERT INTO organization_sso_settings
@@ -153,7 +155,7 @@ export async function completeLogin(env, { state, code }, { fetchImpl = fetch } 
     return { ok: false, status: 422, error: "sso_endpoint_not_allowed" };
   }
 
-  const clientSecret = await decryptSecret(env, settings.encrypted_client_secret, settings.client_secret_iv);
+  const clientSecret = await decryptSecret(env, settings.encrypted_client_secret, settings.client_secret_iv, aadFor("organization_sso_settings", settings.organization_id, "encrypted_client_secret"));
 
   const tokenResponse = await fetchImpl(settings.token_endpoint, {
     method: "POST",
@@ -205,6 +207,19 @@ export async function completeLogin(env, { state, code }, { fetchImpl = fetch } 
   if (user && user.sso_organization_id !== stateRow.organization_id) {
     return { ok: false, status: 409, error: "account_exists_not_managed_by_sso" };
   }
+  // Seats (release 2.6.1.6, gap G3). Signing in through SSO adds the person to the organization the first time, so it takes a seat like an
+  // accepted invitation does: BILLING_ENFORCE=off never blocks, shadow only reports, enforce refuses. Checked BEFORE any row is written, so a
+  // refusal leaves no half-created account. Someone who is already a member never needs a new seat.
+  const alreadyMember = user ? !!(await getMembership(env, stateRow.organization_id, user.id)) : false;
+  if (!alreadyMember) {
+    const seatMode = billingConfig(env).mode;
+    if (seatMode !== "off") {
+      const seats = await seatCheck(env, stateRow.organization_id);
+      if (seats.wouldExceed && seatMode === "enforce") return { ok: false, status: 402, error: "seat_limit_reached", limit: seats.limit, used: seats.used };
+      if (seats.wouldExceed) console.log(JSON.stringify({ msg: "sso_seat_limit_would_refuse", organizationId: stateRow.organization_id, limit: seats.limit, used: seats.used }));
+    }
+  }
+
   if (!user) {
     const userId = crypto.randomUUID();
     const unusablePasswordHash = await hashPassword(randomHex(32));
@@ -226,6 +241,6 @@ export async function completeLogin(env, { state, code }, { fetchImpl = fetch } 
       .run();
   }
 
-  const session = await createSession(env, user.id, stateRow.organization_id);
+  const session = await createSession(env, user.id, stateRow.organization_id, { authMethod: "sso" });
   return { ok: true, userId: user.id, email, cookie: session.cookie };
 }

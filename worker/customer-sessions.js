@@ -22,7 +22,8 @@
 // =====================================================
 
 import { logAudit } from "./audit.js";
-import { getMembership } from "./organizations.js";
+import { getMembership, getOrganization } from "./organizations.js";
+import { queueEmail } from "./email.js";
 import { roleAtLeast } from "./customer-rbac.js";
 import * as repo from "./repositories/customer-sessions.js";
 
@@ -137,7 +138,38 @@ export async function revokeSessions(env, { organizationId, actorUserId, actorSe
   let revoked = 0;
   for (const c of candidates) revoked += await repo.deleteOne(env, { sessionId: c.id, userId: c.user_id });
   await audit("customer_session_revoke", true, 200, null, targetUserId);
-  return { ok: true, shadow: false, revoked, mode };
+  // Release 2.6.0.25 (H.5): tell the person whose sign-in was ended. A failed email never undoes or hides the revoke; it is logged
+  // (no address, no reason) and reported in the result.
+  const notified = revoked > 0 ? await notifySessionRevoked(env, { organizationId, email: candidates[0].email, userId: targetUserId, requestId, nowIso }) : false;
+  return { ok: true, shadow: false, revoked, mode, notified };
+}
+
+const escapeText = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * Queues the "your session was ended" email (I-10). The text is fixed: it names the organization and the day, never the
+ * administrator's reason, the administrator, the device or any session id. Returns true when a message was queued.
+ */
+export async function notifySessionRevoked(env, { organizationId, email, userId, requestId = null, nowIso = new Date().toISOString() }) {
+  if (typeof email !== "string" || !email.includes("@")) return false;
+  try {
+    const org = organizationId ? await getOrganization(env, organizationId) : null;
+    const orgName = org && org.name ? String(org.name).slice(0, 120) : "your organization";
+    const day = String(nowIso).slice(0, 10);
+    const subject = "You were signed out of your account";
+    const text = `An administrator of ${orgName} ended your sign-in session on ${day}. You were signed out on that device and will need to sign in again.\n\n` +
+      "If you did not expect this, contact your organization administrator. If you think someone else knows your password, change it after you sign in.";
+    const html = `<p>An administrator of <strong>${escapeText(orgName)}</strong> ended your sign-in session on ${escapeText(day)}. You were signed out on that device and will need to sign in again.</p>` +
+      "<p>If you did not expect this, contact your organization administrator. If you think someone else knows your password, change it after you sign in.</p>";
+    const queued = await queueEmail(env, {
+      to: email, template: "notification", organizationId: organizationId || null,
+      message: { subject, text, html }, dedupeKey: `session_revoked:${userId}:${requestId || nowIso}`
+    });
+    return queued.ok === true && !queued.duplicate;
+  } catch (e) {
+    console.error(JSON.stringify({ msg: "session_revoked_email_failed", organizationId: organizationId || null, error: String(e && e.message ? e.message : e).slice(0, 200) }));
+    return false;
+  }
 }
 
 /**

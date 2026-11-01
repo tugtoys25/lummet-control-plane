@@ -84,9 +84,13 @@ async function loadOverrides(env, subscriptionId) {
   return map;
 }
 
+// A local trial (no card, no provider subscription) lapses by the clock. A trial with a provider subscription behind it is
+// converted by the provider, exactly as access.js already treats it (computeAccess never lapses it locally), so a delayed provider
+// event must not strip a paying customer's entitlements while access still lets them write (release 2.6.1.6, gap G2).
 function isEffectivelyExpiredTrial(subscription) {
   return (
     subscription.status === "trialing" &&
+    !subscription.provider_subscription_id &&
     subscription.trial_ends_at &&
     new Date(subscription.trial_ends_at).getTime() < Date.now()
   );

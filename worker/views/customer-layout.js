@@ -80,6 +80,7 @@ const NAV = [
     icon: "team",
     items: [
       { label: "Team", href: "/app/team", key: "team" },
+      { label: "Sessions", href: "/app/sessions", key: "sessions" },
       { label: "Billing", href: "/app/billing", key: "billing" },
       { label: "Usage & AI", href: "/app/usage", key: "usage" },
       { label: "Settings", href: "/app/settings", key: "settings" },

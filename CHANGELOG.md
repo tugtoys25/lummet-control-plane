@@ -1,5 +1,89 @@
 # Changelog
 
+## 2.6.1.6 - Org 2FA completion (H.4) and the three gaps the entitlement matrix found (G1, G2, G3)
+
+Merged onto the codebase that already contains the trial-length, shared header/footer and cookie-banner work (the "Unreleased" section below).
+Because that work already uses migration 0076, this release's migration is **0077**.
+
+**Apply migration 0077 BEFORE deploying this release**: every new session now writes the new column, so the code needs it present.
+One migration (0077, one nullable column, no backfill). Every new behaviour is behind a setting that defaults to today's behaviour, except the two
+plain fixes (G2, and the extra `qr` field), which only remove a wrong result.
+
+QR code on the 2FA enrollment page
+- `POST /api/customer/2fa/setup` now also returns `qr` (`{ size, path }`): the otpauth link as a drawable grid, made in the Worker by a
+  dependency-free encoder (`worker/qr.js`, byte mode, level M, versions 1 to 10). The page draws it with DOM calls only; the secret
+  never goes to an image service. Verified by decoding rendered images with an independent decoder (OpenCV) across all ten versions.
+
+Passkeys and 2FA (`ORG_2FA_PASSKEY_COUNTS=off|on`, default off)
+- Sessions now record how they were authenticated (`customer_sessions.auth_method`, migration 0077): password, password_totp, passkey,
+  passkey_uv (passkey with user verification) or sso. Sessions created before this release have NULL and behave as password sessions.
+- On: a passkey_uv session satisfies an organization's 2FA requirement. A password session of the same person stays restricted, and
+  so does a passkey sign-in that did not verify the person. Passkey options ask for user verification, a member with a registered
+  passkey is not counted as lacking a second factor, and a passkey-only owner may turn the requirement on.
+
+Several organizations (`ORG_2FA_SCOPE=any_org|active_org`, default any_org)
+- any_org: unchanged. One organization requiring 2FA restricts the whole session.
+- active_org: only the organization that requires 2FA is restricted. Routes that name an organization decide by that organization
+  (including `/api/sites/:id` by the site's organization), so a restricted person cannot reach it through another active organization.
+  Listing and switching organizations stay available, so switching to an unrestricted organization is the way out.
+
+Gaps G1 to G3 from the entitlement matrix (now real tests, no todo left)
+- G1 `api.enabled` (`API_ENTITLEMENT=off|shadow|enforce`, default off): enforce refuses creating API keys on a plan without API access
+  (403 `api_not_enabled`) and ends use of existing keys the same way. An organization that is read-only for non-payment keeps its keys
+  reading, like its public sites; a downgrade to a plan without the API ends key use.
+- G2 a trial with a provider subscription behind it no longer loses its entitlements when its end date passes before the provider
+  event arrives (access.js already let it write). A local trial still lapses by the clock.
+- G3 SSO just-in-time sign-in takes a seat (BILLING_ENFORCE off never blocks, shadow logs, enforce refuses with 402
+  `seat_limit_reached`), checked before any account row is written. Existing members never need a new seat. Accounts that exist outside
+  this organization's SSO were already refused (409) and still are.
+
+Configuration and tests
+- `config-check` validates the three settings when they are set (unset is fine). They are declared in `wrangler.jsonc`/example.
+- New: `test/h4-org-2fa-completion.test.js` (real signed passkey assertions, scope, QR), `test/sso-seat-limit.test.js`, and the QR
+  golden vectors in `test/support/qr-golden.json`. `test/support/webauthn-fixtures.js` shares the WebAuthn builders.
+- Two tests that pin the newest migration number were updated for 0077 (0076 is the cookie-consent migration already in this codebase).
+- Not changed: the production defaults. Nothing above takes effect until a setting is turned on; see `docs/ORG_2FA_AND_API_ROLLOUT.md`.
+
+## 2.6.1.5 - Key management, sessions page, isolation and entitlement matrices
+
+Everything new is off by default or tests only. No existing behaviour changes unless a flag below is turned on. No migration.
+
+Secret encryption (blueprint K.1, K.2)
+- `CREDENTIAL_KEK_STRICT=off|on` (default off). On: the runtime refuses a `CREDENTIAL_KEK` that is not standard base64 of exactly
+  32 bytes, or is all zero, or is a repeated pattern. `validateKekMaterial()` in `worker/crypto.js` is the one definition. The
+  previous key (rotation only) is never held to it, so old data stays readable.
+- `CREDENTIAL_ENCRYPTION_FORMAT=v1|v2` (default v1). v2 stores `<keyId>:v2:<base64>` and authenticates the table, row and column
+  (`aadFor`), so a ciphertext copied to another row or column fails to decrypt. v1 and v2 are always readable, so turning the flag
+  off never strands data. Control-plane backup parts are bound to their backup id and part name.
+- Every `encryptSecret` and `decryptSecret` call now passes its location (webhooks, TOTP, staff 2FA, SSO, email outbox, tenant
+  credentials, backups, the offline restore script). A gate test fails any new call that does not.
+- Key rotation upgrades rows to v2 when the flag is on, never downgrades a v2 row, and `rotationStatus` reports `rowsNotV2`.
+- `config-check` (production): `CREDENTIAL_KEK` must pass the 32-byte rule, `CREDENTIAL_KEK_STRICT` and
+  `CREDENTIAL_ENCRYPTION_FORMAT` must be set explicitly, and a previous key must differ from the active one.
+  See `docs/KEY_CUSTODY.md`.
+
+Organization sessions page (H.5)
+- `GET /app/sessions` for owners and admins, shown while `CUSTOMER_SESSION_ADMIN` is `shadow` or `on` (dark when off), after the
+  organization 2FA policy and IP allowlist, so a restricted session never reaches it. Nav link "Sessions".
+- Ending a member's session queues a fixed-text email to that member (organization name and date only, never the reason, the
+  administrator or a session id). A failed email never undoes the revoke; it is logged without the address.
+- Sitemap lists `/status`, `/security`, `/changelog`, `/docs`, `/contact-sales` only when `PUBLIC_TRUST_PAGES=on`, and legal pages
+  only when `PUBLIC_LEGAL_PAGES=on` with a recorded approval and approved text. Each URL once.
+- `/contact-sales` stores inquiries under its own key `contact-sales` (no longer mixed into `/contact`). Until a `contact-sales`
+  form exists in the dashboard it uses the contact form's fields. Turnstile still applies.
+
+Tests only (blueprint R.4, R.5)
+- `test/isolation-matrix-r4.test.js`: the organization route list is read from `worker/index.js` (107 routes, any unreadable
+  routing style fails a gate). Per route and method: outsider gets 403, anonymous 401, forged ids of another organization are never
+  served, never change its rows and never leak its data; organization-id enumeration; session operations.
+- `test/entitlement-matrix-r5.test.js`: 18 subscription states against real HTTP (reads, site and API-key create, entitlement values,
+  serve gate), rollout modes, site and seat limits, downgrade, add-ons, and a gate over every way a member is added.
+- Three behaviours that did not match the rules were recorded as `todo` tests (all three are fixed in 2.6.1.6 below):
+  G1 `api.enabled` is never enforced server-side; G2 a provider trial past its end date can write but loses all entitlements until
+  the provider event arrives; G3 SSO just-in-time sign-in adds members without the seat check.
+- Existing test fixtures that describe a "complete" production configuration (`alerts`, `billing-lifecycle`, `v7c-ops`) now include
+  the new settings.
+
 ## Unreleased - One trial length, shared header/footer, cookie banner
 
 - Trial length is decided in one place (`effectiveTrialDays` in `worker/billing-config.js`). `BILLING_TRIAL_DAYS_DEFAULT`

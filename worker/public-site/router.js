@@ -60,7 +60,7 @@ const ROUTES = [
   ["/openapi.json", pages.openApiJsonPage],
   ["/security", pages.securityPage],
   ["/changelog", pages.changelogPage],
-  ["/contact-sales", (ctx) => (pages.trustMode(ctx.env) === "off" ? null : forms.formPage(ctx, { key: "contact", path: "/contact-sales" }))],
+  ["/contact-sales", (ctx) => (pages.trustMode(ctx.env) === "off" ? null : forms.formPage(ctx, { key: forms.CONTACT_SALES_KEY, fallbackKey: "contact", path: "/contact-sales" }))],
   ["/authors/:slug", pages.authorPage],
   ["/contact", (ctx) => forms.formPage(ctx, { key: "contact" })],
   ["/demo", (ctx) => forms.formPage(ctx, { key: "demo" })],
@@ -70,7 +70,7 @@ const ROUTES = [
 // The only public POST routes: form submissions. Same paths as the GET pages.
 const FORM_POST_ROUTES = [
   ["/contact", (ctx) => forms.submitForm(ctx, { key: "contact" })],
-  ["/contact-sales", (ctx) => (pages.trustMode(ctx.env) === "off" ? null : forms.submitForm(ctx, { key: "contact", path: "/contact-sales" }))],
+  ["/contact-sales", (ctx) => (pages.trustMode(ctx.env) === "off" ? null : forms.submitForm(ctx, { key: forms.CONTACT_SALES_KEY, fallbackKey: "contact", path: "/contact-sales" }))],
   ["/demo", (ctx) => forms.submitForm(ctx, { key: "demo" })],
   ["/forms/:key", forms.submitForm]
 ];

@@ -50,19 +50,56 @@ function safeList(json) {
   return Array.isArray(v) ? v : [];
 }
 
+// -----------------------------------------------------
+// Release 2.6.1.6 (round H.4): two decisions the owner had left open, each behind its own flag. Both default to today's behaviour.
+//   ORG_2FA_PASSKEY_COUNTS=off|on   (default off) on: a session that signed in with a passkey WITH user verification satisfies an organization's
+//                                   2FA requirement. The session records how it was authenticated (migration 0077), so a passkey on the account
+//                                   no longer has to be told apart from a password-only sign-in by guesswork: only the session that used the
+//                                   passkey counts, and a password session of the same person stays restricted.
+//   ORG_2FA_SCOPE=any_org|active_org (default any_org) any_org: one organization requiring 2FA restricts the person's whole session, in every
+//                                   organization they belong to. active_org: the restriction applies only to the organization that requires it;
+//                                   the person's other organizations stay usable, and switching to one is the way out of a restricted session.
+// -----------------------------------------------------
+export function passkeyCountsFor2fa(env) { return String((env && env.ORG_2FA_PASSKEY_COUNTS) || "off").trim().toLowerCase() === "on"; }
+export function orgPolicyScope(env) { return String((env && env.ORG_2FA_SCOPE) || "any_org").trim().toLowerCase() === "active_org" ? "active_org" : "any_org"; }
+
 /**
  * Decides, for one person on one request, whether an organization policy blocks the session.
  * Called on every customer session use, so it does nothing (no query at all) while the flag is off.
  * Errors are not caught: a failed lookup must fail the request, never silently let a blocked person through.
+ *
+ * Result: { mode, scope, blocked, wouldBlock, reason, organizationIds, blockedOrganizationIds }.
+ *   organizationIds         every organization the person belongs to that requires 2FA
+ *   blockedOrganizationIds  those of them this session may NOT use (empty unless mode is enforce and the person has no second factor)
+ *   blocked                 any_org: the whole session is restricted. active_org: only when the session's active organization is one of them.
+ * Routes that name one organization should ask orgRouteDenied(policy, organizationId) instead of reading `blocked`.
  */
-export async function evaluateSessionUse(env, userId) {
+export async function evaluateSessionUse(env, userId, { authMethod = null, activeOrganizationId = null } = {}) {
   const mode = orgSecurityPolicyMode(env);
-  const open = { mode, blocked: false, wouldBlock: false, reason: null, organizationIds: [] };
+  const scope = orgPolicyScope(env);
+  const open = { mode, scope, blocked: false, wouldBlock: false, reason: null, organizationIds: [], blockedOrganizationIds: [] };
   if (mode === "off" || !userId) return open;
   const organizationIds = await repo.enforcingOrganizationIdsForUser(env, userId);
   if (!organizationIds.length) return open;
   if ((await getTotpStatus(env, userId)).enabled) return open;
-  return { mode, blocked: mode === "enforce", wouldBlock: true, reason: "org_2fa_required", organizationIds };
+  if (passkeyCountsFor2fa(env) && authMethod === "passkey_uv") return open;
+  const blockedOrganizationIds = mode === "enforce" ? organizationIds : [];
+  const touchesActive = scope === "any_org" || (!!activeOrganizationId && organizationIds.includes(activeOrganizationId));
+  return {
+    mode, scope, blocked: mode === "enforce" && touchesActive, wouldBlock: touchesActive, reason: "org_2fa_required",
+    organizationIds, blockedOrganizationIds
+  };
+}
+
+/**
+ * For a route that names one organization: true when this session may not use THAT organization. any_org keeps the old rule (the whole
+ * session is restricted); active_org looks only at the named organization, so a restricted person cannot reach an organization that
+ * requires 2FA just because their active organization does not.
+ */
+export function orgRouteDenied(policy, organizationId) {
+  if (!policy) return false;
+  if (policy.scope === "active_org") return (policy.blockedOrganizationIds || []).includes(organizationId);
+  return !!policy.blocked;
 }
 
 /** Reads the policy of one organization for a member. Anyone else, in any other organization, gets nothing. */
@@ -72,6 +109,12 @@ export async function readPolicy(env, { organizationId, actorUserId }) {
   const membership = actorUserId ? await getMembership(env, organizationId, actorUserId) : null;
   if (!membership) return { ok: false, status: 403, error: "forbidden" };
   return { ok: true, policy: policyView(await repo.getPolicy(env, organizationId)), enforcement: mode, role: membership.role };
+}
+
+/** The person turning the requirement on must be able to meet it: an active authenticator, or (ORG_2FA_PASSKEY_COUNTS=on) a registered passkey. */
+async function actorHasSecondFactor(env, userId) {
+  if ((await getTotpStatus(env, userId)).enabled) return true;
+  return passkeyCountsFor2fa(env) && (await repo.countPasskeys(env, userId)) > 0;
 }
 
 /**
@@ -97,18 +140,18 @@ export async function setRequire2fa(env, { organizationId, actorUserId, require2
   if (!membership || membership.role !== "owner") return refuse(403, "forbidden");
   if (!typed) return refuse(422, "invalid_value");
   if (trimmed.length < REASON_MIN || trimmed.length > REASON_MAX) return refuse(422, "reason_required");
-  if (require2fa && !(await getTotpStatus(env, actorUserId)).enabled) return refuse(409, "actor_needs_2fa");
+  if (require2fa && !(await actorHasSecondFactor(env, actorUserId))) return refuse(409, "actor_needs_2fa");
 
   const current = await repo.getPolicy(env, organizationId);
   const before = !!(current && current.require_2fa === 1);
   if (before === require2fa) {
-    return { ok: true, changed: false, policy: policyView(current), enforcement: orgSecurityPolicyMode(env), membersWithout2fa: await repo.countMembersWithout2fa(env, organizationId) };
+    return { ok: true, changed: false, policy: policyView(current), enforcement: orgSecurityPolicyMode(env), membersWithout2fa: await repo.countMembersWithout2fa(env, organizationId, { passkeysCount: passkeyCountsFor2fa(env) }) };
   }
   await repo.upsertRequire2fa(env, organizationId, require2fa, new Date().toISOString());
   await audit(true, 200, null);
   return {
     ok: true, changed: true, policy: policyView(await repo.getPolicy(env, organizationId)), enforcement: orgSecurityPolicyMode(env),
-    membersWithout2fa: await repo.countMembersWithout2fa(env, organizationId)
+    membersWithout2fa: await repo.countMembersWithout2fa(env, organizationId, { passkeysCount: passkeyCountsFor2fa(env) })
   };
 }
 

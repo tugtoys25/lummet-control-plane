@@ -123,6 +123,8 @@ import { renderBillingPage } from "./views/customer-pages/billing.js";
 import { renderDomainsPage } from "./views/customer-pages/domains.js";
 import { renderUsagePage } from "./views/customer-pages/usage.js";
 import { renderTeamPage } from "./views/customer-pages/team.js";
+import { renderSessionsPage, SESSIONS_PAGE_PATH } from "./views/customer-pages/sessions.js";
+import { qrForText } from "./qr.js";
 import { renderDeploymentsPage as renderCustomerDeploymentsPage } from "./views/customer-pages/deployments.js";
 import { renderDeveloperPage } from "./views/customer-pages/developer.js";
 import { renderBackupsPage } from "./views/customer-pages/backups.js";
@@ -1047,7 +1049,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (!result.ok) return json({ success: false, error: result.error }, result.status);
           // Secret shown once — same pattern as every other
           // generated secret in this codebase.
-          return json({ success: true, secret: result.secret, otpauthUrl: result.otpauthUrl });
+          // qr: the same otpauth link as a drawable grid (see qr.js), generated here so the secret never goes to an image service.
+          return json({ success: true, secret: result.secret, otpauthUrl: result.otpauthUrl, qr: qrForText(result.otpauthUrl) });
         }
 
         if (method === "POST" && path === "/api/customer/2fa/confirm") {
@@ -1140,7 +1143,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
       if (path.startsWith("/api/organizations") || path.startsWith("/api/sites") || path === "/api/products") {
         const { customer, policy: customerPolicy } = await customerAuth.getCustomerSession(request, env);
         if (!customer) return json({ success: false, error: "unauthorized" }, 401);
-        const customerDenied = orgPolicyDenied(customerPolicy);
+        // ORG_2FA_SCOPE=any_org (default): a restricted session is refused on every route here, as always. active_org: the decision is made per
+        // organization below, from the organization the route names (orgRouteDenied), so listing and switching organizations stay available.
+        const customerDenied = customerPolicy.scope === "active_org" ? null : orgPolicyDenied(customerPolicy);
         if (customerDenied) return customerDenied;
         const customerIpHash = await hashIP(request);
 
@@ -1187,6 +1192,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (orgMatch) {
           const organizationId = orgMatch[1];
           const subPath = orgMatch[2] || "";
+          if (customerPolicy.scope === "active_org" && orgSecurityPolicy.orgRouteDenied(customerPolicy, organizationId)) {
+            return json({ success: false, error: customerPolicy.reason || "org_2fa_required" }, 403);
+          }
 
           // Every route below requires SOME membership; specific
           // actions additionally call requireOrgRole() for a minimum
@@ -2695,6 +2703,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // without verifying ownership).
           const membership = await organizations.getMembership(env, site.organization_id, customer.id);
           if (!membership) return json({ success: false, error: "forbidden" }, 403);
+          if (customerPolicy.scope === "active_org" && orgSecurityPolicy.orgRouteDenied(customerPolicy, site.organization_id)) {
+            return json({ success: false, error: customerPolicy.reason || "org_2fa_required" }, 403);
+          }
           const siteIpDenied = await orgIpDenied(env, request, site.organization_id); // Round 6.4C: the site's own organization decides
           if (siteIpDenied) return siteIpDenied;
           return json({ success: true, data: site });
@@ -2833,6 +2844,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (!apiAuth) {
           await customerAuth.recordFailure(env, apiIpHash, "api_v1_bad_key");
           return json({ success: false, error: "unauthorized" }, 401);
+        }
+        // api.enabled (G1): API_ENTITLEMENT=off is inert; enforce ends key use for a plan without API access.
+        if ((await apiKeys.apiEntitlementCheck(env, apiAuth.organizationId, "api-key:use", { forUse: true })).blocked) {
+          return json({ success: false, error: "api_not_enabled" }, 403);
         }
 
         async function siteInScope(siteId) {
@@ -3011,10 +3026,14 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           notificationsRepo.countOpen(env, activeOrgId)
         ]);
         const hasAnalytics = !!analyticsLevel && analyticsLevel !== "none";
+        const portalSessionsMode = customerSessions.sessionAdminMode(env);
+        const portalSessionsVisible = portalSessionsMode !== "off" && (myOrgs.find((o) => o.id === activeOrgId) ? roleAtLeast(myOrgs.find((o) => o.id === activeOrgId).my_role, "admin") : false);
         const hiddenNavKeys = [
           ...(hasBackups ? [] : ["backups"]), ...(hasAutomations ? [] : ["automations"]),
           ...(hasAnalytics ? [] : ["analytics"]), ...(hasReports ? [] : ["reports"]),
-          ...(hasAffiliate ? [] : ["campaigns"]), ...(hasAlerts ? [] : ["alerts"])
+          ...(hasAffiliate ? [] : ["campaigns"]), ...(hasAlerts ? [] : ["alerts"]),
+          // Sessions page (H.5): shown to owners and admins only, and only while CUSTOMER_SESSION_ADMIN is not off.
+          ...(portalSessionsVisible ? [] : ["sessions"])
         ];
         const shell = (opts) => renderCustomerShell({ hiddenNavKeys, navBadges: { notifications: openNotifications }, ...opts });
         const myMembership = myOrgs.find((o) => o.id === activeOrgId);
@@ -3249,6 +3268,21 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               organizations: myOrgs, activeOrganizationId: activeOrgId,
               bodyHtml: renderTeamPage({ members, pendingInvitations, canManage })
             })
+          );
+        }
+
+        // Organization sessions (H.5). Dark (back to the overview) while CUSTOMER_SESSION_ADMIN=off or for anyone below admin; the API behind
+        // it does its own role, scope and audit checks. It sits after the org 2FA policy and IP allowlist checks above, so a restricted
+        // session (policy-blocked, or from a disallowed address) never reaches it.
+        if (path === SESSIONS_PAGE_PATH) {
+          if (!portalSessionsVisible) return redirect("/app/overview");
+          return html(
+            shell({
+              title: "Sessions", activeKey: "sessions", customer: portalCustomer,
+              organizations: myOrgs, activeOrganizationId: activeOrgId,
+              bodyHtml: renderSessionsPage({ mode: portalSessionsMode, organizationId: activeOrgId })
+            }),
+            200, { "Cache-Control": "no-store" }
           );
         }
 

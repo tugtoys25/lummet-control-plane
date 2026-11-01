@@ -3035,7 +3035,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // Sessions page (H.5): shown to owners and admins only, and only while CUSTOMER_SESSION_ADMIN is not off.
           ...(portalSessionsVisible ? [] : ["sessions"])
         ];
-        const shell = (opts) => renderCustomerShell({ hiddenNavKeys, navBadges: { notifications: openNotifications }, ...opts });
+        const shell = (opts) => renderCustomerShell({ hiddenNavKeys, securityLink: customer2faEnrollMode(env) === "on", navBadges: { notifications: openNotifications }, ...opts });
         const myMembership = myOrgs.find((o) => o.id === activeOrgId);
         const canManage = myMembership ? roleAtLeast(myMembership.my_role, "admin") : false;
 

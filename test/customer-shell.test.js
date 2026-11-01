@@ -42,7 +42,10 @@ test('customer shell uses the same structure as the staff shell', () => {
 test('customer navigation is grouped, complete, and opens the current page\'s group', () => {
   const out = renderCustomerShell({ ...base, title: 'Domains', activeKey: 'domains' });
   const all = NAV.flatMap((g) => g.items.map((i) => i.href));
-  assert.deepEqual(hrefs(out).sort(), all.sort());
+  // The Security (2FA setup) entry shows only while CUSTOMER_2FA_ENROLL_PAGE is on (securityLink).
+  assert.deepEqual(hrefs(out).sort(), all.filter((h) => h !== '/app/security/2fa').sort());
+  const withSecurity = renderCustomerShell({ ...base, title: 'Domains', activeKey: 'domains', securityLink: true });
+  assert.deepEqual(hrefs(withSecurity).sort(), all.sort());
   assert.match(out, /data-group="hosting" data-has-active open/);
   assert.match(out, /aria-current="page"/);
   assert.equal(new Set(NAV.map((g) => g.id)).size, NAV.length);

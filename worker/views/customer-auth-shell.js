@@ -89,8 +89,9 @@ const AUTH_CSS = `
 export function renderCustomerAuthShell({ title, bodyHtml, audience = "customer" }) {
   const staff = audience === "staff";
   // Customer pages: the public base styles, header and footer (and the cookie banner) are swapped in by site-chrome.js.
-  // Staff sign-in stays a plain card: it is an internal page and should not advertise the public site.
-  const chrome = !staff;
+  // Staff sign-in carries the same public header, footer and cookie banner as the customer sign-in (the staff badge and the
+  // "Are you a customer?" link stay inside the card area).
+  const chrome = true;
   return `<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>

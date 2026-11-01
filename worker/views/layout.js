@@ -401,8 +401,10 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
         ${admin && !admin.two_factor_enabled && admin.two_factor_enabled !== undefined ? `<div class="flash flash-error">Your account has no second factor. <a href="/account/2fa">Turn on two-factor authentication</a>: staff accounts can reach every customer.</div>` : ""}
         ${bodyHtml}
       </main>
+      <!--lummet:site-footer-compact-->
     </div>
   </div>
+  <!--lummet:cookie-banner-->
   <script nonce="${nonceToken()}">
     function lummetSwitchTenant(id) {
       const url = id ? ('/api/tenants/' + id + '/switch') : '/api/session/active-tenant';

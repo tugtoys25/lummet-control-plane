@@ -105,8 +105,29 @@ test('dashboard: the compact footer shares the public footer text and links, and
   assert.doesNotMatch(r.text, /<!--lummet:/);
 });
 
-test('staff sign-in is left alone: no public header, footer or banner', async () => {
+test('staff sign-in carries the public header, footer and cookie banner, and keeps its staff badge and customer link', async () => {
   const e = env();
   const r = await call(e, 'GET', '/login');
-  assert.doesNotMatch(r.text, /class="site-header"|lummet-cookie-banner/);
+  assert.equal(r.status, 200);
+  assert.match(r.text, /class="site-header"/);
+  assert.match(r.text, /class="site-footer"/);
+  assert.match(r.text, /id="lummet-cookie-banner"/);
+  assert.match(r.text, /Staff console/);
+  assert.match(r.text, /href="\/app\/login"/);
+  assert.doesNotMatch(r.text, /<!--lummet:/);
+});
+
+test('staff console pages carry the same compact footer as the customer dashboard, with the cookie banner', async () => {
+  const e = env();
+  assert.equal((await call(e, 'POST', '/api/auth/bootstrap', { body: { email: 'root@example.com', password: 'Correct-Horse-Battery-9' } })).status, 200);
+  const login = await call(e, 'POST', '/api/auth/login', { body: { email: 'root@example.com', password: 'Correct-Horse-Battery-9' } });
+  assert.equal(login.status, 200, login.text.slice(0, 200));
+  for (const path of ['/dashboard', '/platform/saas/deployments']) {
+    const r = await call(e, 'GET', path, { cookie: login.cookie });
+    assert.equal(r.status, 200, path + ' ' + r.text.slice(0, 200));
+    assert.match(r.text, /class="lummet-app-footer"/, path);
+    assert.match(r.text, /href="\/privacy"/, path);
+    assert.match(r.text, /id="lummet-cookie-banner"/, path);
+    assert.doesNotMatch(r.text, /<!--lummet:/, path);
+  }
 });

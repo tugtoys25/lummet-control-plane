@@ -3051,7 +3051,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             shell({
               title: "Overview", activeKey: "overview", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderOverviewPage({ organization: activeOrg, subscription, plan, usage, sites: sitesList })
+              bodyHtml: renderOverviewPage({ organization: activeOrg, subscription, plan, usage, sites: sitesList, showTwoFactorNotice: customer2faEnrollMode(env) === "on" && !(await totp.getTotpStatus(env, portalCustomer.id).catch(() => ({ enabled: true }))).enabled })
             })
           );
         }

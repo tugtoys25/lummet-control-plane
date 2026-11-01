@@ -84,7 +84,8 @@ const NAV = [
       { label: "Billing", href: "/app/billing", key: "billing" },
       { label: "Usage & AI", href: "/app/usage", key: "usage" },
       { label: "Settings", href: "/app/settings", key: "settings" },
-      { label: "Account", href: "/app/account", key: "account" }
+      { label: "Account", href: "/app/account", key: "account" },
+      { label: "Security", href: "/app/security/2fa", key: "security" }
     ]
   }
 ];
@@ -168,7 +169,7 @@ function renderOrgSwitcher(organizations, activeOrganizationId) {
     </div>`;
 }
 
-function renderUserMenu(customer, role) {
+function renderUserMenu(customer, role, securityLink = false) {
   const email = customer.email || "";
   const initial = escapeHtml(email.trim().charAt(0) || "?");
   return `
@@ -180,6 +181,7 @@ function renderUserMenu(customer, role) {
       <div class="menu-pop">
         <div class="who-full">${escapeHtml(email)}${role ? `<br><span class="role-badge">${escapeHtml(role)}</span>` : ""}</div>
         <a href="/app/account">Account</a>
+        ${securityLink ? `<a href="/app/security/2fa">Security</a>` : ""}
         <a href="/app/billing">Billing</a>
         <button type="button"${onClick("lummetLogout", [])}>Log out</button>
       </div>
@@ -192,7 +194,7 @@ function renderUserMenu(customer, role) {
  * one. Which organization a page shows is decided by the route handler before this is called, the same way
  * the staff shell's tenant switcher works.
  */
-export function renderCustomerShell({ title, activeKey, customer, organizations = [], activeOrganizationId, bodyHtml, hiddenNavKeys = [], navBadges = {} }) {
+export function renderCustomerShell({ title, activeKey, customer, organizations = [], activeOrganizationId, bodyHtml, hiddenNavKeys = [], navBadges = {}, securityLink = false }) {
   const activeOrg = organizations.find((org) => org.id === activeOrganizationId) || null;
   const role = activeOrg && activeOrg.my_role ? String(activeOrg.my_role) : "";
   const scope = activeOrg && activeOrg.name ? activeOrg.name : "Lummet";
@@ -222,7 +224,7 @@ export function renderCustomerShell({ title, activeKey, customer, organizations 
         <input type="search" id="nav-filter" placeholder="Find a page…" aria-label="Find a page" autocomplete="off" />
       </div>
       <nav class="nav-scroll" aria-label="Sections">
-        ${renderNav(activeKey, hiddenNavKeys, navBadges)}
+        ${renderNav(activeKey, securityLink ? hiddenNavKeys : [...hiddenNavKeys, "security"], navBadges)}
         <div class="nav-empty" id="nav-empty" hidden>No matching pages.</div>
       </nav>
     </aside>
@@ -233,7 +235,7 @@ export function renderCustomerShell({ title, activeKey, customer, organizations 
         <div class="page-crumb">${escapeHtml(scope)} <span aria-hidden="true">/</span> <strong>${escapeHtml(title)}</strong></div>
         <div class="topbar-right">
           <button type="button" class="icon-btn theme-toggle" id="theme-toggle" aria-label="Switch color theme"><span class="icon sun">${ICONS.sun}</span><span class="icon moon">${ICONS.moon}</span></button>
-          ${customer ? renderUserMenu(customer, role) : ""}
+          ${customer ? renderUserMenu(customer, role, securityLink) : ""}
         </div>
         ${organizations.length ? renderOrgSwitcher(organizations, activeOrganizationId) : ""}
       </header>

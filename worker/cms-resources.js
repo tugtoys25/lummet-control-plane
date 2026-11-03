@@ -80,6 +80,8 @@ export const CMS_RESOURCES = {
       { name: "website_url", label: "Website URL", type: "text" },
       { name: "tenant_id", label: "Linked tenant (optional)", type: "tenant_select" },
       { name: "status", label: "Status", type: "select", options: ["draft", "published"] },
+      { name: "show_in_strip", label: "Show in the dashboard brand strip", type: "select", options: ["1", "0"], default: "1", hint: "1 = shown to customers under the header, 0 = only on /brands (staff still see it, marked Hidden)" },
+      { name: "accent_color", label: "Accent colour", type: "text", hint: "#RRGGBB, e.g. #5b47f5. Leave empty for an automatic colour" },
       { name: "sort_order", label: "Sort order", type: "number", default: 0 },
       { name: "seo_title", label: "SEO title", type: "text" },
       { name: "seo_description", label: "SEO description", type: "textarea" },

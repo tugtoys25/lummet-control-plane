@@ -478,3 +478,16 @@ test('Round 6.2A links on trust pages resolve to routes the site serves', async 
     assert.ok(r && r.status < 400, `${href} must resolve (got ${r && r.status})`);
   }
 });
+
+test('the homepage announces its stylesheets and fonts as early hints, matching the tags in the page', async () => {
+  const env = createPublicEnv();
+  const res = await get(handlePublicRoute, env, '/');
+  const link = res.headers.get('link') || '';
+  const html = await text(res);
+  const sheets = [...html.matchAll(/<link rel="stylesheet" href="(\/static\/css\/[^"]+)">/g)].map((m) => m[1]);
+  assert.ok(sheets.length >= 4);
+  for (const href of sheets) assert.ok(link.includes(`<${href}>; rel=preload; as=style`), href);
+  assert.match(link, /<\/static\/fonts\/instrument-400-v1\.woff>; rel=preload; as=font; type="font\/woff"; crossorigin/);
+  const notFound = await get(handlePublicRoute, env, '/p/does-not-exist');
+  assert.equal(notFound.headers.get('link'), null, 'only successful pages carry hints');
+});

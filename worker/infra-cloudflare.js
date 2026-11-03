@@ -191,6 +191,31 @@ export async function uploadAssets(env, { workerName, manifest, readAsset }) {
   return completion;
 }
 
+// Static files (/static/*: css, js, images) are answered by Cloudflare's assets layer directly: no Worker run, no database
+// read, no Worker request counted per file. Everything else (pages, API, templates) still goes through the tenant Worker.
+// The cache policy comes with the upload as the text of a _headers file (the same text as lummet-tenant/en/_headers).
+// css/js are linked as ?v=<hash> URLs, so a release is a new URL; browsers show their copy at once and refresh it in the background.
+// TENANT_STATIC_BYPASS=off restores "every request through the Worker" (the Worker then sets the same policy itself).
+export const TENANT_STATIC_HEADERS = [
+  "/static/css/*",
+  "  Cache-Control: public, max-age=3600, stale-while-revalidate=604800",
+  "  X-Content-Type-Options: nosniff",
+  "/static/js/*",
+  "  Cache-Control: public, max-age=3600, stale-while-revalidate=604800",
+  "  X-Content-Type-Options: nosniff",
+  "/static/images/*",
+  "  Cache-Control: public, max-age=86400, stale-while-revalidate=604800",
+  "  X-Content-Type-Options: nosniff",
+  "/static/sw.js",
+  "  Cache-Control: no-cache",
+  ""
+].join("\n");
+
+export function tenantAssetsConfig(env) {
+  if (String(env?.TENANT_STATIC_BYPASS || "on").toLowerCase() === "off") return { run_worker_first: true };
+  return { run_worker_first: ["/*", "!/static/*"], _headers: TENANT_STATIC_HEADERS };
+}
+
 /**
  * Creates or updates a Worker (same PUT either way). Uses FormData
  * (native in the Workers runtime): a "metadata" JSON part plus one part
@@ -198,8 +223,8 @@ export async function uploadAssets(env, { workerName, manifest, readAsset }) {
  *
  * bindings: Cloudflare binding objects (see site-bindings.js).
  * assets:   optional { manifest, readAsset }; uploaded first and attached
- *           via the completion token. run_worker_first keeps the tenant
- *           Worker in front of its static files, as in its wrangler.jsonc.
+ *           via the completion token. The tenant Worker stays in front of
+ *           everything except /static/* (see tenantAssetsConfig), as in its wrangler.jsonc.
  */
 export async function uploadWorkerScript(env, { workerName, scriptContent, bindings = [], assets = null }) {
   if (!env.CF_API_TOKEN) throw new Error("CF_API_TOKEN is not configured on this Worker");
@@ -214,8 +239,11 @@ export async function uploadWorkerScript(env, { workerName, scriptContent, bindi
   };
   if (assets) {
     const jwt = await uploadAssets(env, { workerName, manifest: assets.manifest, readAsset: assets.readAsset });
-    metadata.assets = { jwt, config: { run_worker_first: true } };
+    metadata.assets = { jwt, config: tenantAssetsConfig(env) };
   }
+  // Smart Placement runs the tenant Worker near its D1 database, so the ~15 sequential queries of a page render are
+  // not each a long round trip. Cloudflare keeps it only where it measures an improvement. TENANT_SMART_PLACEMENT=off removes it.
+  if (String(env.TENANT_SMART_PLACEMENT || "on").toLowerCase() !== "off") metadata.placement = { mode: "smart" };
 
   const formData = new FormData();
   formData.append("metadata", JSON.stringify(metadata));

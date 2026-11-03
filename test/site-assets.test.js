@@ -184,7 +184,10 @@ test('Cloudflare adapter: session -> upload missing buckets -> completion token 
   assert.match(reqs[3].url, /\/workers\/scripts\/w1$/);
   const meta = JSON.parse(reqs[3].init.body.get('metadata'));
   assert.equal(meta.assets.jwt, 'completion-jwt');
-  assert.equal(meta.assets.config.run_worker_first, true);
+  assert.deepEqual(meta.assets.config.run_worker_first, ['/*', '!/static/*']);
+  assert.match(meta.assets.config._headers, /\/static\/css\/\*\n {2}Cache-Control: public, max-age=3600, stale-while-revalidate=604800/);
+  assert.match(meta.assets.config._headers, /\/static\/sw\.js\n {2}Cache-Control: no-cache/);
+  assert.deepEqual(meta.placement, { mode: 'smart' });
   assert.deepEqual(meta.bindings, [{ type: 'ai', name: 'AI' }]);
   assert.ok(meta.compatibility_flags.includes('nodejs_compat'));
 });
@@ -238,4 +241,22 @@ test('staff routes: asset upload is super-admin only, recomputes the hash, and p
   assert.equal(pub.status, 200, pub.text);
   const pubBad = await call('POST', '/api/platform/saas/tenant-template/publish', { cookie: staff, body: { version: '9.9.8', scriptContent: 'x', migrations: [], assets: { '/static/nope.css': { hash: 'd'.repeat(32), size: 1 } } } });
   assert.equal(pubBad.status, 422);
+});
+
+test('Cloudflare adapter: TENANT_STATIC_BYPASS=off and TENANT_SMART_PLACEMENT=off restore the old upload settings', async () => {
+  assert.deepEqual(infraCf.tenantAssetsConfig({ TENANT_STATIC_BYPASS: 'off' }), { run_worker_first: true });
+  assert.deepEqual(infraCf.tenantAssetsConfig({}).run_worker_first, ['/*', '!/static/*']);
+  const env = { CF_API_TOKEN: 'tok', CF_ACCOUNT_ID: 'acct', TENANT_SMART_PLACEMENT: 'off', TENANT_STATIC_BYPASS: 'off' };
+  const manifest = { '/a.css': { hash: 'c'.repeat(32), size: 1 } };
+  const realFetch = globalThis.fetch; let meta;
+  try {
+    globalThis.fetch = async (url, init) => {
+      if (url.endsWith('/assets-upload-session')) return new Response(JSON.stringify({ success: true, result: { jwt: 'already', buckets: [] } }));
+      meta = JSON.parse(init.body.get('metadata'));
+      return new Response(JSON.stringify({ success: true, result: {} }));
+    };
+    await infraCf.uploadWorkerScript(env, { workerName: 'w', scriptContent: 'x', assets: { manifest, readAsset: async () => { throw new Error('no'); } } });
+  } finally { globalThis.fetch = realFetch; }
+  assert.equal(meta.assets.config.run_worker_first, true);
+  assert.equal(meta.placement, undefined);
 });

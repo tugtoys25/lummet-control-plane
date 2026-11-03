@@ -21,14 +21,12 @@ Additive: migration 0081 (after 0080); no existing table is rewritten.
 - **Dashboards.** Sidebar logo icon and name now come from the public site's logo and name (markers `site-brand`, `site-name`, fail-soft to
   "Lummet"). Modern glass header with accent hairline. New "Brand partners" band under the header on the Overview pages: colourful, clickable
   cards; staff get Manage / Add brand and edit links, customers get public brand links.
-- **Public menu scrolls properly:** `100dvh` sizing, scroll contained inside the menu, `<html>` scroll lock (iOS), pinned full-height sheet on
-  phones. `ASSET_VERSION` ui5.
+- **Public menu scrolls properly (CSS only):** the header markup and `nav.js` are unchanged. The mobile menu uses `100dvh`, contained smooth scrolling and bottom safe-area padding so the last link is never hidden. `ASSET_VERSION` ui6.
 - Tests: `test/brand-marquee.test.js` (strip models + real homepage render); `test/new-tenant-defaults-and-brands.test.js`; `test/deployments.test.js` expectations updated for the first-deploy seed.
 - **Brand band, editable (migration 0082).** Brand profiles gain `accent_color` (#RRGGBB, validated; empty keeps the automatic colour) and
   `show_in_strip` (0 hides a brand from customers' strip; staff still see it marked Hidden). The band reads `SELECT *`, so it still renders on a
   database that has not run 0082. 0082 also adds the strip interface strings and a unique index (one automatic listing per tenant; earlier duplicates are unlinked, not deleted).
 - Brand slugs are accent-folded, capped at 60 and collision-proof (`base`, `base-<id>`, `base-<id>-2`...); a unique-index clash is reported, not swallowed.
-  The desktop nav bar scrolls the current page's link into view.
 - Tests: `test/brand-accent-and-seed.test.js` (also applies the seed to the real tenant schema).
 
 ## Unreleased - Staff plan & pricing manager

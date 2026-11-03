@@ -258,7 +258,7 @@
 		"BILLING_RESTRICTED_DAYS": "7",
 		"BILLING_SUSPENDED_DAYS": "30",
 		"BILLING_REMINDER_DAYS": "3,1",
-		"PLATFORM_DOMAIN_SUFFIX": "genteelisms.com",
+		"PLATFORM_DOMAIN_SUFFIX": "lummet.app",
 		"CONTACT_EMAIL": "elijul@proton.me",
 		"PORTAL_BASE_URL": "https://lummet.com",
 		"EMAIL_PROVIDER": "resend",

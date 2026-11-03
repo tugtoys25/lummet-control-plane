@@ -217,7 +217,7 @@ export function renderCustomerShell({ title, activeKey, customer, organizations 
   <div class="app">
     <aside class="sidebar" id="sidebar" aria-label="Main navigation">
       <div class="sidebar-head">
-        <a class="brand" href="/app/overview" aria-label="Dashboard home"><!--lummet:site-brand--></a>
+        <a class="brand" href="/app/overview"><span class="dot"></span> Lummet</a>
         <button type="button" class="icon-btn nav-close" id="nav-close" aria-label="Close menu">${ICONS.close}</button>
       </div>
       <div class="nav-filter-wrap">
@@ -239,7 +239,6 @@ export function renderCustomerShell({ title, activeKey, customer, organizations 
         </div>
         ${organizations.length ? renderOrgSwitcher(organizations, activeOrganizationId) : ""}
       </header>
-      ${activeKey === "overview" ? "<!--lummet:brand-band-->" : ""}
       <main class="content" id="main-content">
         ${bodyHtml}
       </main>

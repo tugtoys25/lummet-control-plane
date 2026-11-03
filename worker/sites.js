@@ -10,7 +10,6 @@
 
 import * as webhooks from "./webhooks.js";
 import { evaluateWriteGate, refusalFor } from "./access.js";
-import { syncSiteBrand } from "./site-brands.js";
 
 export const SITE_STATUSES = [
   "pending",
@@ -168,9 +167,6 @@ export async function transitionSiteStatus(env, siteId, toStatus, { reason, acto
     .run();
 
   await recordStatusEvent(env, { siteId, fromStatus: site.status, toStatus, reason, actorType, actorId });
-
-  // Keep the public "Powered by Lummet" brand listing in step with the site (best effort, never throws).
-  await syncSiteBrand(env, siteId);
 
   return { ok: true };
 }

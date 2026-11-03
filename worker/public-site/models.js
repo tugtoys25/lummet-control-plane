@@ -131,3 +131,41 @@ export function authorModel(row) {
     social
   };
 }
+
+// ---- Brand strip (moving, under the homepage header) --------------------------------------------------------------
+// Accent colours for brands with no colour of their own: deep, saturated hues that hold 4.5:1 text contrast on white and stay legible on dark.
+const STRIP_PALETTE = ["#4f46e5", "#0e7490", "#047857", "#b45309", "#be123c", "#7e22ce", "#1d4ed8", "#0f766e"];
+
+function hashSlug(slug) {
+  let h = 0;
+  for (const ch of String(slug || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h;
+}
+
+/** The stored #RRGGBB when valid (nothing user-typed reaches CSS otherwise), else a stable colour derived from the slug. */
+export function brandAccent(row) {
+  const stored = String(row?.accent_color || "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(stored)) return stored.toLowerCase();
+  return STRIP_PALETTE[hashSlug(row?.slug) % STRIP_PALETTE.length];
+}
+
+/**
+ * Chips for the marquee. Only published brands with show_in_strip on (absent before migration 0082 = shown).
+ * `track` is the list repeated until it is long enough to loop without a gap; repeats are flagged aria_hidden so
+ * assistive tech and the tab order see each brand once. `dup` is the second, fully hidden copy the CSS animation slides in.
+ */
+export function brandStripModels(rows, { limit = 24, minItems = 12 } = {}) {
+  const base = (rows || [])
+    .filter((r) => r && r.slug && r.status !== "draft" && r.show_in_strip !== 0 && r.show_in_strip !== "0")
+    .slice(0, limit)
+    .map((r) => {
+      const logo = safeUrl(r.logo_url);
+      return { name: r.name, url: `/brands/${encodeURIComponent(r.slug)}`, logo_url: logo, has_logo: Boolean(logo), initials: initials(r.name), accent: brandAccent(r), aria_hidden: false };
+    });
+  if (!base.length) return { items: [], track: [], dup: [], seconds: 0 };
+  const track = [];
+  while (track.length < minItems) for (const b of base) track.push({ ...b, aria_hidden: track.length >= base.length });
+  const dup = track.map((b) => ({ ...b, aria_hidden: true }));
+  // ~4.5 s per chip keeps the pace readable however many brands there are.
+  return { items: base, track, dup, seconds: Math.max(30, Math.round(track.length * 4.5)) };
+}

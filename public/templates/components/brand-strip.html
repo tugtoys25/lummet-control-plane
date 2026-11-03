@@ -1,0 +1,37 @@
+<section class="brand-strip" aria-label="{{site.brand_strip_aria}}">
+  <div class="container brand-strip-inner">
+    <a class="brand-strip-label" href="/brands">
+      <span class="brand-strip-dot" aria-hidden="true"></span>
+      <span>{{site.brand_strip_label}}</span>
+    </a>
+    <div class="brand-marquee" id="brand-marquee" style="--dur: {{site.brand_strip_seconds}}s">
+      <div class="brand-marquee-track">
+        <ul class="brand-marquee-group" role="list">
+          {{#each site.brand_strip_track}}
+          <li>
+            <a class="brand-chip" href="{{url}}" style="--chip: {{accent}}"{{#if aria_hidden}} aria-hidden="true" tabindex="-1"{{/if}}>
+              {{#if has_logo}}<img class="brand-chip-logo" src="{{logo_url}}" alt="" width="28" height="28" loading="lazy">{{else}}<span class="brand-chip-mark" aria-hidden="true">{{initials}}</span>{{/if}}
+              <span class="brand-chip-name">{{name}}</span>
+            </a>
+          </li>
+          {{/each}}
+        </ul>
+        <ul class="brand-marquee-group brand-marquee-dup" role="list" aria-hidden="true">
+          {{#each site.brand_strip_dup}}
+          <li>
+            <a class="brand-chip" href="{{url}}" style="--chip: {{accent}}" aria-hidden="true" tabindex="-1">
+              {{#if has_logo}}<img class="brand-chip-logo" src="{{logo_url}}" alt="" width="28" height="28" loading="lazy">{{else}}<span class="brand-chip-mark" aria-hidden="true">{{initials}}</span>{{/if}}
+              <span class="brand-chip-name">{{name}}</span>
+            </a>
+          </li>
+          {{/each}}
+        </ul>
+      </div>
+    </div>
+    <button type="button" class="brand-strip-pause" id="brand-strip-pause" aria-pressed="false" aria-label="{{site.brand_strip_pause}}" title="{{site.brand_strip_pause}}">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path class="i-pause" d="M7 5h4v14H7zM13 5h4v14h-4z"/><path class="i-play" d="M8 5v14l11-7z"/></svg>
+    </button>
+    <a class="brand-strip-all" href="/brands">{{site.brand_strip_all}} {{{icons.arrow}}}</a>
+  </div>
+</section>
+<script src="/static/js/brand-strip.js" defer></script>

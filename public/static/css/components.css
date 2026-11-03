@@ -258,3 +258,48 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
 .plan-promo { margin: var(--space-2) 0 0 !important; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); font-size: var(--fs-xs) !important; }
 .plan-promo span { display: block; color: var(--ink-dim); }
 .plan-features li.is-off { opacity: .55; text-decoration: line-through; }
+
+/* ---- Brand strip (homepage, under the header) ----
+   A slowly moving, clickable band of "Powered by Lummet" brands. --chip is each brand's accent (validated server-side).
+   Motion pauses on hover, keyboard focus and via the pause button; reduced-motion users get a plain swipe-able row. */
+.brand-strip { position: relative; background: linear-gradient(180deg, var(--bg-soft), var(--bg)); border-bottom: 1px solid var(--border); }
+.brand-strip::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: var(--grad); opacity: .85; }
+.brand-strip-inner { display: flex; align-items: center; gap: var(--space-3); padding-block: 12px; min-width: 0; }
+.brand-strip-label { flex: none; display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-xs); font-weight: 800; letter-spacing: .02em; color: var(--ink); white-space: nowrap; padding: 7px 12px; border-radius: var(--radius-pill); background: var(--accent-soft); border: 1px solid var(--border); }
+.brand-strip-label:hover { text-decoration: none; border-color: var(--accent); }
+.brand-strip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--grad); box-shadow: 0 0 0 3px var(--accent-soft); }
+.brand-marquee { flex: 1 1 auto; min-width: 0; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%); }
+.brand-marquee-track { display: flex; width: max-content; animation: brand-marquee var(--dur, 60s) linear infinite; will-change: transform; }
+.brand-marquee:hover .brand-marquee-track, .brand-marquee:focus-within .brand-marquee-track, .brand-marquee.is-paused .brand-marquee-track { animation-play-state: paused; }
+.brand-marquee-group { display: flex; flex: none; align-items: center; gap: 10px; margin: 0; padding: 4px 5px; list-style: none; }
+.brand-marquee-group > li { flex: none; }
+@keyframes brand-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.brand-chip {
+  --chip: var(--accent);
+  display: inline-flex; align-items: center; gap: 9px; padding: 5px 16px 5px 5px; border-radius: var(--radius-pill);
+  color: var(--ink); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap;
+  background: color-mix(in srgb, var(--chip) 8%, var(--surface)); border: 1px solid color-mix(in srgb, var(--chip) 26%, var(--border));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--chip) 10%, transparent);
+  transition: border-color .15s, background .15s, box-shadow .15s, transform .15s;
+}
+.brand-chip:hover { text-decoration: none; transform: translateY(-1px); border-color: var(--chip); background: color-mix(in srgb, var(--chip) 14%, var(--surface)); box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--chip) 75%, transparent); }
+.brand-chip:focus-visible { outline: 2px solid var(--chip); outline-offset: 2px; }
+.brand-chip-mark, .brand-chip-logo { flex: none; width: 28px; height: 28px; border-radius: 50%; }
+.brand-chip-mark { display: inline-grid; place-items: center; color: #fff; font-size: .72rem; letter-spacing: .02em; background: linear-gradient(135deg, var(--chip), color-mix(in srgb, var(--chip) 55%, #000)); }
+.brand-chip-logo { object-fit: contain; background: #fff; border: 1px solid color-mix(in srgb, var(--chip) 25%, var(--border)); padding: 2px; }
+.brand-strip-pause { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--ink-dim); cursor: pointer; }
+.brand-strip-pause:hover { color: var(--ink); border-color: var(--accent); }
+.brand-strip-pause .i-play { display: none; }
+.brand-strip-pause[aria-pressed="true"] .i-play { display: inline; }
+.brand-strip-pause[aria-pressed="true"] .i-pause { display: none; }
+.brand-strip-all { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 700; color: var(--accent-ink); white-space: nowrap; }
+.brand-strip-all svg { width: 15px; height: 15px; }
+.brand-strip-all:hover { text-decoration: none; color: var(--ink); }
+@media (max-width: 640px) { .brand-strip-label span:last-child { display: none; } .brand-strip-all { display: none; } .brand-strip-inner { gap: var(--space-2); } }
+@media (prefers-reduced-motion: reduce) {
+  .brand-marquee { overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .brand-marquee::-webkit-scrollbar { display: none; }
+  .brand-marquee-track { animation: none; }
+  .brand-marquee-dup, .brand-strip-pause { display: none; }
+  .brand-chip { transition: none; }
+}

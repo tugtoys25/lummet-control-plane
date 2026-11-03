@@ -104,6 +104,9 @@ const SQL_COUNTS = `SELECT
        (SELECT COUNT(*) FROM lummet_partners WHERE status = 'published') AS partners,
        (SELECT COUNT(*) FROM lummet_faqs WHERE status = 'published') AS faqs,
        (SELECT MAX(COALESCE(published_at, created_at)) FROM lummet_updates WHERE status = 'published') AS latest_update`;
+// Only brands staff have published (new live sites start as drafts until an admin publishes them).
+// SELECT * so a database that has not run migration 0082 yet still serves the site: the strip just uses defaults.
+const SQL_BRAND_STRIP = `SELECT * FROM lummet_brands WHERE status = 'published' ORDER BY sort_order, name LIMIT 40`;
 const SQL_PAGE_SLUGS = `SELECT slug FROM lummet_pages WHERE status = 'published'`;
 const SQL_FORM_KEYS = `SELECT form_key FROM lummet_forms WHERE status = 'published'`;
 const SQL_ANCHORS = `SELECT section_key, kind, cta_href FROM lummet_homepage_sections
@@ -149,10 +152,10 @@ export function listHomepageAnchors(env) {
  * round trip. Replaces seven separate reads.
  */
 export async function loadSiteData(env) {
-  const [settings, nav, counts, pages, forms, anchors, ui] = await readBatch(env, "site", [
-    { sql: SQL_SETTINGS }, { sql: SQL_NAV }, { sql: SQL_COUNTS }, { sql: SQL_PAGE_SLUGS }, { sql: SQL_FORM_KEYS }, { sql: SQL_ANCHORS }, { sql: SQL_UI }
+  const [settings, nav, counts, pages, forms, anchors, ui, strip] = await readBatch(env, "site", [
+    { sql: SQL_SETTINGS }, { sql: SQL_NAV }, { sql: SQL_COUNTS }, { sql: SQL_PAGE_SLUGS }, { sql: SQL_FORM_KEYS }, { sql: SQL_ANCHORS }, { sql: SQL_UI }, { sql: SQL_BRAND_STRIP }
   ]);
-  return { settings: shapeSettings(settings), links: nav, counts: shapeCounts(counts[0], pages, forms), anchorRows: anchors, ui: shapeUi(ui) };
+  return { settings: shapeSettings(settings), links: nav, counts: shapeCounts(counts[0], pages, forms), anchorRows: anchors, ui: shapeUi(ui), brandRows: strip || [] };
 }
 
 // ---- Interface text ------------------------------------

@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased - New-tenant defaults, live sites on /brands, dashboard chrome
+
+Additive: migration 0081 (after 0080); no existing table is rewritten.
+
+- **Default announcement bar for every new tenant.** A site's first deploy (`provisioned` to live) now also applies
+  `provision_0001_default_site_announcement` (`worker/tenant-defaults.js`): `INSERT OR REPLACE INTO settings` for
+  `site_announce_enabled/text/link_text/url/tone/dismissible` (promo bar "Launch your own affiliate business with Lummet.com, ready in 5
+  minutes." linking to https://lummet.com). It is recorded in `site_migrations_applied`, so it runs once per site: redeploys, rollouts and
+  rollbacks never re-seed, and tenants that are already live are untouched. The customer can still edit or switch the bar off.
+- **Live sites become brand profiles, unpublished by default.** `worker/site-brands.js`, called from `transitionSiteStatus`, creates a **draft** brand row
+  when a site first goes `active`; it shows in the admin dashboard's Brand partners band as *Unpublished* and nowhere public until an admin
+  customizes and publishes it (Lummet Site > Brand profiles: status, accent colour, show in strip). Suspension/deletion takes a *published* brand
+  offline (`auto_hidden`) and reactivation restores only those; drafts are never published by the system. Staff edits are never overwritten;
+  organizations with `hide_lummet_branding` (white label) are never listed. Migration 0081 adds `site_id`, `source`, `auto_hidden` to
+  `lummet_brands` and backfills already-live sites as drafts.
+- **Moving brand strip on the public homepage** (below the header, not in dashboards): published brands with `show_in_strip` on scroll slowly as
+  clickable, accent-coloured chips (`components/brand-strip.html`, `models.brandStripModels`). Pauses on hover, keyboard focus and via a pause
+  button (`static/js/brand-strip.js`); reduced-motion users get a swipeable row; repeats are `aria-hidden`. Hidden when nothing is published.
+- **Dashboards.** Sidebar logo icon and name now come from the public site's logo and name (markers `site-brand`, `site-name`, fail-soft to
+  "Lummet"). Modern glass header with accent hairline. New "Brand partners" band under the header on the Overview pages: colourful, clickable
+  cards; staff get Manage / Add brand and edit links, customers get public brand links.
+- **Public menu scrolls properly:** `100dvh` sizing, scroll contained inside the menu, `<html>` scroll lock (iOS), pinned full-height sheet on
+  phones. `ASSET_VERSION` ui5.
+- Tests: `test/brand-marquee.test.js` (strip models + real homepage render); `test/new-tenant-defaults-and-brands.test.js`; `test/deployments.test.js` expectations updated for the first-deploy seed.
+- **Brand band, editable (migration 0082).** Brand profiles gain `accent_color` (#RRGGBB, validated; empty keeps the automatic colour) and
+  `show_in_strip` (0 hides a brand from customers' strip; staff still see it marked Hidden). The band reads `SELECT *`, so it still renders on a
+  database that has not run 0082. 0082 also adds the strip interface strings and a unique index (one automatic listing per tenant; earlier duplicates are unlinked, not deleted).
+- Brand slugs are accent-folded, capped at 60 and collision-proof (`base`, `base-<id>`, `base-<id>-2`...); a unique-index clash is reported, not swallowed.
+  The desktop nav bar scrolls the current page's link into view.
+- Tests: `test/brand-accent-and-seed.test.js` (also applies the seed to the real tenant schema).
+
 ## Unreleased - Staff plan & pricing manager
 
 `/platform/saas/plans` is no longer read-only. Staff manage the whole catalog from the console; everything below is additive

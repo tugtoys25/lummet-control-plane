@@ -36,7 +36,7 @@ test('migrations: applying everything twice never duplicates seeded rows', async
   const db = createTestDb();
   applyMigrations(db);
   applyMigrations(db);
-  for (const [table, expected] of [['lummet_brands', 6], ['lummet_faqs', 25], ['lummet_updates', 5], ['lummet_publications', 14], ['lummet_pages', 13]]) {
+  for (const [table, expected] of [['lummet_brands', 6], ['lummet_faqs', 33], ['lummet_updates', 5], ['lummet_publications', 20], ['lummet_pages', 26]]) {
     const row = await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first();
     assert.equal(row.n, expected, table);
   }
@@ -308,8 +308,9 @@ test('insights filter by type; filtered views are noindex', async () => {
     `INSERT INTO lummet_publications (slug, title, publication_type, status, published_at, source_name, source_url) VALUES ('press-1', 'Press piece', 'press', 'published', '2026-10-01', 'Some Outlet', 'https://outlet.example/story')`
   ).run();
   const all = await text(await get(handlePublicRoute, env, '/insights'));
-  const allP2 = await text(await get(handlePublicRoute, env, "/insights?page=2"));
-  assert.match(all + allP2, /Press piece/);
+  let allPages = all;
+  for (let n = 2; n <= 6; n++) allPages += await text(await get(handlePublicRoute, env, `/insights?page=${n}`));
+  assert.match(allPages, /Press piece/);
   assert.match(all, /class="chip is-active"/);
   const press = await text(await get(handlePublicRoute, env, '/insights?type=press'));
   assert.match(press, /Press piece/);

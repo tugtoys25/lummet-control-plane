@@ -36,7 +36,7 @@ test('migrations: applying everything twice never duplicates seeded rows', async
   const db = createTestDb();
   applyMigrations(db);
   applyMigrations(db);
-  for (const [table, expected] of [['lummet_brands', 6], ['lummet_faqs', 7], ['lummet_updates', 5], ['lummet_publications', 3], ['lummet_pages', 4]]) {
+  for (const [table, expected] of [['lummet_brands', 6], ['lummet_faqs', 19], ['lummet_updates', 5], ['lummet_publications', 11], ['lummet_pages', 10]]) {
     const row = await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first();
     assert.equal(row.n, expected, table);
   }

@@ -34,6 +34,7 @@ import { buildSiteBindings } from "./site-bindings.js";
 import * as siteResources from "./repositories/site-resources.js";
 import * as sites from "./sites.js";
 import { computeResourceNames } from "./provisioning.js";
+import { newTenantSeedMigrations } from "./tenant-defaults.js";
 import * as webhooks from "./webhooks.js";
 
 // The tenant application's own schedule (its wrangler.jsonc triggers): expired-session
@@ -248,7 +249,9 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
             if (!d1Resource) throw new Error("no D1 database resource recorded for this site — was it ever provisioned?");
 
             const applied = [];
-            for (const migration of migrations || []) {
+            // A site's first deploy also gets the platform defaults for new tenants (tenant-defaults.js); redeploys never do.
+            const toApply = [...(migrations || []), ...(isInitialDeploy ? newTenantSeedMigrations() : [])];
+            for (const migration of toApply) {
               const already = await env.LUMMET_DB.prepare(
                 `SELECT 1 FROM site_migrations_applied WHERE site_id = ? AND migration_name = ?`
               )

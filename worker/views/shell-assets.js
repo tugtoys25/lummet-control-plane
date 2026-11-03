@@ -495,6 +495,59 @@ export const STYLES = `
   input, textarea, select { border-color: var(--panel-border); }
   th { font-family: var(--font-sans); }
   @media (prefers-reduced-motion: reduce) { .btn, .btn-primary { transition: none; } }
+
+  /* Dashboard chrome refresh: sidebar logo and name come from the public site (marker replaced in site-chrome.js), a modern
+     glass header with an accent hairline, and the brand partners band. Tokens only, so both themes follow. */
+  .sidebar-head { padding: 16px 16px 10px; }
+  .brand { min-width: 0; flex: 1; font-size: 18px; }
+  .brand-icon { width: 32px; height: 32px; border-radius: 10px; flex: none; object-fit: contain; background: var(--panel-2); box-shadow: 0 6px 16px -6px var(--accent-soft), 0 0 0 1px var(--panel-border); }
+  .brand-icon-fallback { display: inline-grid; place-items: center; background: var(--grad); color: #fff; font: 700 13px/1 var(--font-display); letter-spacing: 0.02em; box-shadow: 0 6px 16px -6px var(--accent-soft); }
+  .brand-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-scroll { scrollbar-width: thin; scrollbar-color: var(--panel-border) transparent; -webkit-overflow-scrolling: touch; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+  .nav-scroll::-webkit-scrollbar { width: 8px; }
+  .nav-scroll::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 8px; }
+
+  .topbar { position: sticky; padding-top: calc(8px + env(safe-area-inset-top)); background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: saturate(160%) blur(14px); -webkit-backdrop-filter: saturate(160%) blur(14px); border-bottom-color: transparent; box-shadow: 0 10px 30px -22px rgba(0, 0, 0, 0.55); }
+  .topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(90deg, transparent, var(--accent) 18%, #1fa5c4 62%, transparent); opacity: 0.55; pointer-events: none; }
+  .topbar .icon-btn { border-radius: 12px; background: color-mix(in srgb, var(--panel) 80%, transparent); transition: background .15s ease, border-color .15s ease, transform .15s ease; }
+  .topbar .icon-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .page-crumb { display: flex; align-items: center; gap: 8px; font-size: 13px; letter-spacing: 0.01em; }
+  .page-crumb strong { font: 700 16px/1.2 var(--font-display); letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .view-site { border-radius: 999px; }
+  .topbar .switcher select { border-radius: 999px; background-color: color-mix(in srgb, var(--panel) 80%, transparent); }
+  .user-menu > summary { border-radius: 999px; padding: 3px 12px 3px 3px; border: 1px solid var(--panel-border); background: color-mix(in srgb, var(--panel) 80%, transparent); }
+  .user-menu > summary:hover { border-color: var(--accent); }
+  .user-menu .avatar { background: var(--grad); color: #fff; }
+
+  .brand-band { margin: 16px clamp(12px, 2.5vw, 28px) 0; padding: 16px 18px 18px; border: 1px solid var(--panel-border); border-radius: calc(var(--radius) + 2px); background:
+    radial-gradient(900px 160px at 0% 0%, var(--accent-soft), transparent 70%), var(--panel); box-shadow: var(--shadow); }
+  .bb-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .bb-head h2 { margin: 0; font-size: 17px; }
+  .bb-head p { margin: 2px 0 0; font-size: 12.5px; color: var(--text-dim); }
+  .bb-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .bb-list { list-style: none; margin: 0; padding: 2px 2px 8px; display: flex; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+  .bb-card { position: relative; flex: 0 0 auto; width: min(264px, 78vw); scroll-snap-align: start; border-radius: 14px; border: 1px solid hsl(var(--h) 60% 55% / 0.35);
+    background: linear-gradient(145deg, hsl(var(--h) 70% 55% / 0.16), hsl(calc(var(--h) + 40) 70% 50% / 0.06)); transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
+  .bb-card:hover, .bb-card:focus-within { transform: translateY(-2px); border-color: hsl(var(--h) 70% 60% / 0.75); box-shadow: 0 14px 28px -16px hsl(var(--h) 80% 50% / 0.7); }
+  .bb-card.is-off { opacity: 0.62; filter: saturate(0.6); }
+  .bb-main { display: flex; align-items: center; gap: 12px; padding: 12px 14px; color: var(--text); text-decoration: none; border-radius: inherit; min-height: 64px; }
+  .bb-main:hover { text-decoration: none; }
+  .bb-main:focus-visible, .bb-visit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .bb-avatar { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; overflow: hidden; color: #fff; font: 700 14px/1 var(--font-display);
+    background: linear-gradient(135deg, var(--c, hsl(var(--h) 75% 52%)), color-mix(in srgb, var(--c, hsl(calc(var(--h) + 45) 75% 45%)) 62%, #000)); box-shadow: 0 8px 18px -8px hsl(var(--h) 80% 45% / 0.8); }
+  .bb-avatar img { width: 100%; height: 100%; object-fit: cover; background: var(--panel); }
+  .bb-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .bb-text strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bb-text small { color: var(--text-dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bb-state { flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
+  .bb-state.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+  .bb-state.off { color: var(--text-dim); background: var(--panel-2); }
+  .bb-visit { position: absolute; right: 10px; bottom: 8px; font-size: 11.5px; font-weight: 600; color: var(--text-dim); padding: 2px 8px; border-radius: 999px; }
+  .bb-visit:hover { color: var(--text); background: var(--accent-soft); text-decoration: none; }
+  .bb-card:has(.bb-visit) .bb-main { padding-bottom: 26px; }
+  .bb-empty { margin: 0; color: var(--text-dim); font-size: 13.5px; }
+  @media (max-width: 560px) { .brand-band { padding: 14px 12px 14px; } .page-crumb strong { font-size: 15px; } }
+  @media (prefers-reduced-motion: reduce) { .bb-card, .topbar .icon-btn { transition: none; } .bb-card:hover { transform: none; } }
 `;
 
 // Extra rules for the customer portal (customer-layout.js). Everything above is shared with the staff

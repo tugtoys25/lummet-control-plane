@@ -169,10 +169,11 @@ test('migrations are applied once, recorded in the ledger, and skipped on a late
 
   const appliedAfterFirst = await env.LUMMET_DB.prepare(`SELECT migration_name FROM site_migrations_applied WHERE site_id = ? ORDER BY migration_name`)
     .bind(siteId).all();
-  assert.deepEqual(appliedAfterFirst.results.map((r) => r.migration_name), ['0001_init', '0002_seed']);
+  // A site's first deploy also records the platform's new-tenant seed (tenant-defaults.js) after the release's own migrations.
+  assert.deepEqual(appliedAfterFirst.results.map((r) => r.migration_name), ['0001_init', '0002_seed', 'provision_0001_default_site_announcement']);
 
   const queryCallsAfterFirst = infra._calls.filter((c) => c.method === 'runD1Query').length;
-  assert.equal(queryCallsAfterFirst, 2);
+  assert.equal(queryCallsAfterFirst, 3, '2 release migrations + the new-tenant seed');
 
   // A second deployment lists the SAME two migrations plus one new
   // one -- only the new one should actually run.
@@ -184,11 +185,11 @@ test('migrations are applied once, recorded in the ledger, and skipped on a late
   await deploymentService.runJob(env, second.jobId);
 
   const queryCallsAfterSecond = infra._calls.filter((c) => c.method === 'runD1Query').length;
-  assert.equal(queryCallsAfterSecond, 3, 'only the one new migration should have actually run');
+  assert.equal(queryCallsAfterSecond, 4, 'only the one new migration should have actually run (the seed never repeats)');
 
   const appliedAfterSecond = await env.LUMMET_DB.prepare(`SELECT migration_name FROM site_migrations_applied WHERE site_id = ? ORDER BY migration_name`)
     .bind(siteId).all();
-  assert.equal(appliedAfterSecond.results.length, 3);
+  assert.equal(appliedAfterSecond.results.length, 4);
 });
 
 // -----------------------------------------------------
@@ -211,7 +212,7 @@ test('retrying a failed deployment job does not re-run steps that already succee
   assert.equal(firstRun.failedStep, 'deploy_worker_script');
 
   const migrationCallsAfterFailure = infra._calls.filter((c) => c.method === 'runD1Query').length;
-  assert.equal(migrationCallsAfterFailure, 1);
+  assert.equal(migrationCallsAfterFailure, 2, '1 release migration + the new-tenant seed');
 
   // Site failed (this was the first deploy) -- but the job itself
   // can still be resumed directly via runJob (a "retry" route would
@@ -221,7 +222,7 @@ test('retrying a failed deployment job does not re-run steps that already succee
   assert.equal(secondRun.ok, true, JSON.stringify(secondRun));
 
   const migrationCallsAfterRetry = infra._calls.filter((c) => c.method === 'runD1Query').length;
-  assert.equal(migrationCallsAfterRetry, 1, 'run_migrations must not re-run on resume -- it already succeeded');
+  assert.equal(migrationCallsAfterRetry, 2, 'run_migrations must not re-run on resume -- it already succeeded');
 });
 
 // -----------------------------------------------------

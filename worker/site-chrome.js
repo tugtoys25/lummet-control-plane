@@ -10,6 +10,9 @@
 //   <!--lummet:site-footer-->          the public site footer, without its marketing call to action (sign-in pages)
 //   <!--lummet:site-footer-compact-->  a slim footer using the same text and links (dashboard)
 //   <!--lummet:cookie-banner-->        the cookie consent banner (see cookie-consent.js)
+//   <!--lummet:site-brand-->           the dashboard sidebar logo icon and site name (same logo and name as the public header)
+//   <!--lummet:site-name-->            the site name as plain text (dashboard breadcrumb)
+//   <!--lummet:brand-band-->           the customer dashboard's brand partners strip (staff render theirs directly, see layout.js)
 //
 // Editing the footer text, links or cookie text in the staff console therefore changes every page at once. Fail soft: if the site data
 // cannot be read, markers become a minimal header/footer and the page still works.
@@ -18,12 +21,16 @@
 import { loadSite } from "./public-site/context.js";
 import { renderTemplate } from "./public-site/template.js";
 import { renderCookieBannerWithScript, cookieSettingsButton } from "./cookie-consent.js";
+import { loadBrandBand, renderBrandBand } from "./brand-band.js";
 
 export const MARKERS = {
   header: "<!--lummet:site-header-->",
   footer: "<!--lummet:site-footer-->",
   footerCompact: "<!--lummet:site-footer-compact-->",
-  cookie: "<!--lummet:cookie-banner-->"
+  cookie: "<!--lummet:cookie-banner-->",
+  brand: "<!--lummet:site-brand-->",
+  siteName: "<!--lummet:site-name-->",
+  brandBand: "<!--lummet:brand-band-->"
 };
 export const CHROME_HEADER = "x-lummet-chrome";
 
@@ -51,6 +58,14 @@ function compactFooter(site, ui) {
 </footer>`;
 }
 
+function brandMark(site) {
+  const icon = site.has_logo
+    ? `<img class="brand-icon" src="${esc(site.logo_url)}" alt="" width="30" height="30">`
+    : `<span class="brand-icon brand-icon-fallback" aria-hidden="true">${esc(site.initials || "L")}</span>`;
+  return `${icon}<span class="brand-label">${esc(site.name)}</span>`;
+}
+const FALLBACK_BRAND = `<span class="brand-icon brand-icon-fallback" aria-hidden="true">L</span><span class="brand-label">Lummet</span>`;
+
 const FALLBACK_HEADER = `<header class="site-header"><div class="container header-inner"><a class="brand" href="/" aria-label="Home"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Lummet</span></a></div></header>`;
 const FALLBACK_FOOTER = `<footer class="lummet-app-footer"><span>&copy; ${new Date().getUTCFullYear()} Lummet</span></footer>`;
 
@@ -71,6 +86,13 @@ export async function injectSiteChrome(htmlText, env, url) {
   await fill(MARKERS.header, (c) => renderTemplate(env, "layout/header", { site: c.site, icons: c.icons, ui: c.ui }), FALLBACK_HEADER);
   await fill(MARKERS.footer, (c) => renderTemplate(env, "layout/footer", { site: { ...c.site, footer_cta: null }, icons: c.icons, ui: c.ui }), FALLBACK_FOOTER);
   await fill(MARKERS.footerCompact, (c) => compactFooter(c.site, c.ui), FALLBACK_FOOTER);
+  await fill(MARKERS.brand, (c) => brandMark(c.site), FALLBACK_BRAND);
+  await fill(MARKERS.siteName, (c) => esc(c.site.name), "Lummet");
+  if (wants(MARKERS.brandBand)) {
+    let band = "";
+    try { band = renderBrandBand(await loadBrandBand(env), { manage: false }); } catch (err) { console.error(JSON.stringify({ msg: "site_chrome_render_failed", marker: MARKERS.brandBand, error: err?.message || String(err) })); }
+    out = out.split(MARKERS.brandBand).join(band);
+  }
   await fill(MARKERS.cookie, (c) => renderCookieBannerWithScript(env, c.ui), "");
   return out;
 }

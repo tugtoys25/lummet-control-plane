@@ -17,6 +17,7 @@ import { isSuperAdmin, loadPermissionMap, getAdminTenantIds } from "../rbac.js";
 import { ICONS, BOOT_SCRIPT } from "./shell-assets.js";
 import { SHELL_CSS_URL, SHELL_JS_URL } from "../perf/shell-bundle.js";
 import { renderCustomerAuthShell } from "./customer-auth-shell.js";
+import { loadBrandBand, renderBrandBand } from "../brand-band.js";
 
 // Every item below (besides Overview/AI Chat, always visible) can
 // declare `area` + `resource` to be gated by rbac.js's permission
@@ -354,6 +355,11 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
   // soon as the session was known (prefetchShellData), they have been running while the page itself was being built.
   const [allTenants, permMap, accessibleIds] = await ((admin && SHELL_PREFETCH.get(admin)) || loadShellData(env, admin, isSuper));
   const accessible = accessibleIds ? new Set(accessibleIds) : null;
+  // Brand partners band: shown under the header on the Overview page. Staff manage it when they may write Brand profiles.
+  const cmsBrands = permMap === null ? { read: true, write: true } : permMap?.cms?.brands || {};
+  const brandBand = env && activeKey === "dashboard"
+    ? renderBrandBand(await loadBrandBand(env, { includeDrafts: !!cmsBrands.read }), { manage: !!cmsBrands.read, canAdd: !!cmsBrands.write })
+    : "";
   const tenants = accessible ? allTenants.filter((t) => accessible.has(t.id)) : allTenants;
 
   return `<!DOCTYPE html>
@@ -374,7 +380,7 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
   <div class="app">
     <aside class="sidebar" id="sidebar" aria-label="Main navigation">
       <div class="sidebar-head">
-        <a class="brand" href="/dashboard"><span class="dot"></span> Lummet</a>
+        <a class="brand" href="/dashboard" aria-label="Dashboard home"><!--lummet:site-brand--></a>
         <button type="button" class="icon-btn nav-close" id="nav-close" aria-label="Close menu">${ICONS.close}</button>
       </div>
       <div class="nav-filter-wrap">
@@ -389,7 +395,7 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
     <div class="main">
       <header class="topbar">
         <button type="button" class="icon-btn" id="nav-toggle" aria-controls="sidebar" aria-expanded="true" aria-label="Toggle menu">${ICONS.menu}</button>
-        <div class="page-crumb">Lummet <span aria-hidden="true">/</span> <strong>${escapeHtml(title)}</strong></div>
+        <div class="page-crumb"><!--lummet:site-name--> <span aria-hidden="true">/</span> <strong>${escapeHtml(title)}</strong></div>
         <div class="topbar-right">
           <a class="btn btn-secondary btn-small view-site" href="/" target="_blank" rel="noopener">View site</a>
           <button type="button" class="icon-btn theme-toggle" id="theme-toggle" aria-label="Switch color theme"><span class="icon sun">${ICONS.sun}</span><span class="icon moon">${ICONS.moon}</span></button>
@@ -397,6 +403,7 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
         </div>
         ${admin ? renderTenantSwitcher(tenants, admin.activeTenantId) : ""}
       </header>
+      ${brandBand}
       <main class="content" id="main-content">
         ${admin && !admin.two_factor_enabled && admin.two_factor_enabled !== undefined ? `<div class="flash flash-error">Your account has no second factor. <a href="/account/2fa">Turn on two-factor authentication</a>: staff accounts can reach every customer.</div>` : ""}
         ${bodyHtml}

@@ -11,6 +11,7 @@ import { safeUrl, safeCssColor, initials } from "./format.js";
 import { iconSvg } from "./icons.js";
 import { isLiveHref } from "./links.js";
 import { cookieSettingsLabel } from "../cookie-consent.js";
+import { brandStripModels } from "./models.js";
 
 // Column titles come from lummet_ui_strings (footer_<name>_title).
 const FOOTER_COLUMNS = [
@@ -82,7 +83,7 @@ function anchorOf(href) {
 
 export async function loadSite(env, url) {
   // One D1 round trip for everything the layout needs (was seven parallel reads: seven chances to hit a transient error).
-  const { settings, counts, links, anchorRows, ui } = await loadSiteData(env);
+  const { settings, counts, links, anchorRows, ui, brandRows } = await loadSiteData(env);
 
   const contactEmail = (settings.contact_email && settings.contact_email.trim()) || env.CONTACT_EMAIL || "";
   const hasContact = Boolean(contactEmail);
@@ -109,6 +110,8 @@ export async function loadSite(env, url) {
   const footerColumns = FOOTER_COLUMNS.map((c) => ({ title: ui[c.titleKey] || "", links: byPlacement(c.placement) })).filter(
     (c) => c.links.length
   );
+
+  const brandStrip = brandStripModels(brandRows);
 
   const name = (settings.site_name && settings.site_name.trim()) || "Lummet";
   const logo = safeUrl(settings.logo_url);
@@ -155,6 +158,15 @@ export async function loadSite(env, url) {
       nav_main: navMain,
       nav_cta: navCta,
       nav_mobile_all: [...navMain, ...navCta],
+      brand_strip: brandStrip.items,
+      brand_strip_track: brandStrip.track,
+      brand_strip_dup: brandStrip.dup,
+      brand_strip_seconds: brandStrip.seconds,
+      has_brand_strip: brandStrip.items.length > 0,
+      brand_strip_label: ui.brand_strip_label || "Powered by Lummet",
+      brand_strip_aria: ui.brand_strip_aria || "Brands powered by Lummet",
+      brand_strip_all: ui.brand_strip_all || "All brands",
+      brand_strip_pause: ui.brand_strip_pause || "Pause scrolling brands",
       footer_cta: footerCta,
       footer_columns: footerColumns,
       has_footer_columns: footerColumns.length > 0,

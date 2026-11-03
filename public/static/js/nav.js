@@ -11,7 +11,9 @@
     toggle.setAttribute("aria-label", (open ? toggle.getAttribute("data-label-close") : toggle.getAttribute("data-label-open")) || "");
     menu.hidden = !open;
     // Only the full-screen mobile sheet locks page scrolling; the desktop panel is a small popover.
-    document.body.style.overflow = open && !window.matchMedia("(min-width: 900px)").matches ? "hidden" : "";
+    // A class on <html> (not just body) is what actually stops background scrolling on iOS Safari.
+    document.documentElement.classList.toggle("menu-open", open && !window.matchMedia("(min-width: 900px)").matches);
+    if (open) menu.scrollTop = 0;
   }
 
   if (toggle && menu) {
@@ -30,6 +32,13 @@
     window.matchMedia("(min-width: 900px)").addEventListener("change", function () {
       if (toggle.getAttribute("aria-expanded") === "true") setMenu(true);
     });
+  }
+
+  // Desktop bar scrolls sideways when it has many links: keep the current page's link visible.
+  var current = document.querySelector(".bar-links a[aria-current='page']");
+  if (current) {
+    var bar = current.parentElement;
+    if (bar && bar.scrollWidth > bar.clientWidth) bar.scrollLeft = Math.max(0, current.offsetLeft - 24);
   }
 
   if (themeBtn) {

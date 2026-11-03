@@ -63,6 +63,7 @@ export async function renderPage(ctx, { template, data = {}, head = "", status =
     cookie_banner_html: renderCookieBanner(env, siteCtx.ui),
     content,
     body_class: bodyClass,
+    show_brand_strip: bodyClass === "page-home",
     current_path: url.pathname
   });
   const html = versionStaticUrls(rendered);

@@ -246,3 +246,39 @@ test('migration 0075 is additive only', async () => {
   assert.match(sql, /CREATE TABLE IF NOT EXISTS platform_settings/);
   assert.match(sql, /CREATE TABLE IF NOT EXISTS platform_setting_events/);
 });
+
+// ---- speed: an expired copy of the settings must not make a request wait for the database ----
+test('settings: an expired copy is used at once while a fresh one is read in the background; fresh:true and no ctx still read first', async () => {
+  const env = makeEnv({});
+  ps.invalidateSettingsCache(env);
+  await set(env, 'BILLING_GRACE_DAYS', '21');
+  ps.invalidateSettingsCache(env);
+  const base = Date.now(); const realNow = Date.now;
+  const pending = []; const bg = { waitUntil: (p) => pending.push(p) };
+  try {
+    assert.equal((await ps.loadStaffValues(env, { ctx: bg })).get('BILLING_GRACE_DAYS'), '21', 'first read waits (nothing known yet)');
+    assert.equal(pending.length, 0);
+    await set(env, 'BILLING_GRACE_DAYS', '30'); // same isolate: visible at once
+    ps.invalidateSettingsCache(env);
+    assert.equal((await ps.loadStaffValues(env, { ctx: bg })).get('BILLING_GRACE_DAYS'), '30');
+    // another isolate changes it directly in the database
+    await env.LUMMET_DB.prepare("UPDATE platform_settings SET value = '45' WHERE key = 'BILLING_GRACE_DAYS'").run();
+    Date.now = () => base + 20_000; // older than 15 s, younger than 2 min
+    const stale = await ps.loadStaffValues(env, { ctx: bg });
+    assert.equal(stale.get('BILLING_GRACE_DAYS'), '30', 'answered from the old copy, no wait');
+    assert.equal(pending.length, 1, 'the refresh runs in the background');
+    await Promise.all(pending);
+    assert.equal((await ps.loadStaffValues(env, { ctx: bg })).get('BILLING_GRACE_DAYS'), '45', 'the next request has the new value');
+    // without ctx the caller waits for the fresh read, as before
+    await env.LUMMET_DB.prepare("UPDATE platform_settings SET value = '50' WHERE key = 'BILLING_GRACE_DAYS'").run();
+    Date.now = () => base + 40_000;
+    assert.equal((await ps.loadStaffValues(env)).get('BILLING_GRACE_DAYS'), '50');
+    // fresh:true never uses an old copy
+    await env.LUMMET_DB.prepare("UPDATE platform_settings SET value = '55' WHERE key = 'BILLING_GRACE_DAYS'").run();
+    assert.equal((await ps.loadStaffValues(env, { fresh: true, ctx: bg })).get('BILLING_GRACE_DAYS'), '55');
+    // older than 2 minutes: too old to use, so it waits again
+    await env.LUMMET_DB.prepare("UPDATE platform_settings SET value = '60' WHERE key = 'BILLING_GRACE_DAYS'").run();
+    Date.now = () => base + 400_000;
+    assert.equal((await ps.loadStaffValues(env, { ctx: bg })).get('BILLING_GRACE_DAYS'), '60');
+  } finally { Date.now = realNow; }
+});

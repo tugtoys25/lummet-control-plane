@@ -446,7 +446,7 @@ export default {
   // Routes that read the staff settings fresh (not the 15 s isolate cache): a console toggle is live on the very next request.
     const freshSettings = (request.method === "GET" && (pathname === "/app/login" || pathname === "/app/signup" || pathname === "/app/forgot-password" || /^\/(?:contact|demo|forms\/[^/]+)$/.test(pathname))) ||
       (request.method === "POST" && (pathname === "/api/customer/login" || pathname === "/api/customer/signup" || pathname === "/api/customer/password/forgot" || /^\/(?:contact|demo|forms\/[^/]+)$/.test(pathname)));
-    const rawEnv = anonStatusCheck ? baseEnv : await platformSettings.withPlatformSettings(baseEnv, { fresh: freshSettings });
+    const rawEnv = anonStatusCheck ? baseEnv : await platformSettings.withPlatformSettings(baseEnv, { fresh: freshSettings, ctx });
     installConsoleRedaction(rawEnv);     // LOG_REDACTION=on only; a no-op by default
     const requestId = crypto.randomUUID();
     const startedAt = Date.now();

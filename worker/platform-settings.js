@@ -218,26 +218,45 @@ function readableValues(rows) {
   return values;
 }
 
+// A copy older than CACHE_MS is still used at once (while a fresh one is read in the background) for up to this long, when the caller
+// can hand work to ctx.waitUntil. Without it, the first request in every isolate every 15 s waited for a database read before the
+// page (even one served from the edge cache) could start.
+const STALE_OK_MS = 120_000;
+
 /** The staff-set values as a Map. Cached per isolate; {fresh:true} bypasses the cache. Never throws. */
-export async function loadStaffValues(env, { fresh = false } = {}) {
+export async function loadStaffValues(env, { fresh = false, ctx = null } = {}) {
   const db = baseEnvOf(env)?.LUMMET_DB;
   if (!db) return new Map();
-  let entry = caches.get(db);
+  const entry = caches.get(db);
   const now = Date.now();
-  if (!fresh && entry && (entry.promise || now - entry.at < entry.ttl)) return entry.promise ? entry.promise : entry.values;
+  if (!fresh && entry) {
+    if (entry.refreshing) return entry.values; // a background read is under way: keep using what is known
+    if (entry.promise) return entry.promise;
+    if (now - entry.at < entry.ttl) return entry.values;
+    if (entry.loaded && now - entry.at < STALE_OK_MS && ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(read(env, db, entry, now, true));
+      return entry.values;
+    }
+  }
+  return read(env, db, entry, now, false);
+}
+
+function read(env, db, entry, now, background) {
   const promise = (async () => {
     try {
       const values = readableValues(await repo.listAll(baseEnvOf(env)));
-      caches.set(db, { at: Date.now(), ttl: CACHE_MS, values, promise: null });
+      caches.set(db, { at: Date.now(), ttl: CACHE_MS, values, promise: null, loaded: true });
       return values;
     } catch (error) {
       console.error(JSON.stringify({ msg: "platform_settings_unreadable", error: String(error?.message || error).slice(0, 200) }));
       const values = entry?.values || new Map(); // keep the last good values if there were any
-      caches.set(db, { at: Date.now(), ttl: FAILURE_MS, values, promise: null });
+      caches.set(db, { at: Date.now(), ttl: FAILURE_MS, values, promise: null, loaded: Boolean(entry?.loaded) });
       return values;
     }
   })();
-  caches.set(db, { at: now, ttl: CACHE_MS, values: entry?.values || new Map(), promise });
+  caches.set(db, background
+    ? { ...entry, refreshing: true }
+    : { at: now, ttl: CACHE_MS, values: entry?.values || new Map(), promise, loaded: false });
   return promise;
 }
 
@@ -247,9 +266,9 @@ export function invalidateSettingsCache(env) {
 }
 
 /** env with the staff values laid over it (wrangler value stays underneath). Returns env itself when nothing is set. */
-export async function withPlatformSettings(env, { fresh = false } = {}) {
+export async function withPlatformSettings(env, { fresh = false, ctx = null } = {}) {
   if (!env || !env.LUMMET_DB) return env;
-  const values = await loadStaffValues(env, { fresh });
+  const values = await loadStaffValues(env, { fresh, ctx });
   if (!values.size) return env;
   const base = baseEnvOf(env);
   const overlay = { ...base };

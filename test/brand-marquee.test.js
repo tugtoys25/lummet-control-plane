@@ -46,7 +46,7 @@ test('homepage renders the moving strip below the header for published brands on
   assert.match(home, /href="\/brands\/live-one"/);
   assert.doesNotMatch(home, /hidden-draft|Hidden Draft/);
   assert.ok(home.indexOf('class="brand-strip"') > home.indexOf('</header>') && home.indexOf('class="brand-strip"') < home.indexOf('id="main"'), 'strip sits between the header and main');
-  assert.match(home, /\/static\/js\/brand-strip\.js\?v=ui5/);
+  assert.match(home, /\/static\/js\/brand-strip\.js\?v=ui\d+/);
   assert.doesNotMatch(await page(env, '/brands'), /class="brand-marquee"/);
 });
 

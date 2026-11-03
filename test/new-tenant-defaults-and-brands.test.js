@@ -160,11 +160,12 @@ test('dashboard sidebar shows the public site logo/name via marker; brand band m
   assert.match(out, /href="\/brands\/live-brand"/);
 });
 
-test('public nav: menu scrolls inside its own box and locks page scroll via <html>', () => {
+test('public nav: original markup and nav.js untouched; the menu scrolls smoothly and clears the bottom edge with CSS only', () => {
   const css = readFileSync(new URL('../public/static/css/base.css', import.meta.url), 'utf8');
   const js = readFileSync(new URL('../public/static/js/nav.js', import.meta.url), 'utf8');
   assert.match(css, /\.mobile-menu \{[^}]*overscroll-behavior: contain/);
   assert.match(css, /100dvh/);
-  assert.match(css, /html\.menu-open/);
-  assert.match(js, /classList\.toggle\("menu-open"/);
+  assert.match(css, /\.mobile-menu nav \{ padding-bottom: calc\(var\(--space-6\) \+ env\(safe-area-inset-bottom/);
+  assert.doesNotMatch(css, /menu-open/);
+  assert.doesNotMatch(js, /menu-open/);
 });

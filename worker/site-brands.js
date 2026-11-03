@@ -11,8 +11,6 @@
 // Best effort by design: a failure here must never block or roll back a site's status change, so every error is logged and swallowed.
 // =====================================================
 
-import * as brands from "./repositories/brands.js";
-
 export const BRAND_CATEGORY = "Powered by Lummet";
 const LIVE_STATUSES = new Set(["active"]);
 
@@ -27,42 +25,52 @@ async function freeSlug(env, site) {
   const base = brandSlugFor(site);
   const tag = String(site.id || "").replace(/[^a-z0-9]/gi, "").slice(0, 6).toLowerCase() || "x";
   for (const candidate of [base, `${base}-${tag}`, ...Array.from({ length: 8 }, (_, i) => `${base}-${tag}-${i + 2}`)]) {
-    if (!(await brands.slugTaken(env, candidate))) return candidate;
+    const taken = await env.LUMMET_DB.prepare(`SELECT 1 AS x FROM lummet_brands WHERE slug = ?`).bind(candidate).first();
+    if (!taken) return candidate;
   }
   return `${base}-${tag}-${Date.now().toString(36)}`;
 }
 
+async function hidesLummetBranding(env, organizationId) {
+  const row = await env.LUMMET_DB.prepare(`SELECT hide_lummet_branding FROM organization_branding WHERE organization_id = ?`).bind(organizationId).first();
+  return Boolean(row && Number(row.hide_lummet_branding) === 1);
+}
 
 /** Creates, publishes or takes offline the brand row for one site. Returns { action } and never throws. */
 export async function syncSiteBrand(env, siteId) {
   try {
-    const site = await brands.getSiteForBrand(env, siteId);
+    const site = await env.LUMMET_DB.prepare(
+      `SELECT id, organization_id, tenant_id, name, slug, status, primary_domain FROM sites WHERE id = ?`
+    ).bind(siteId).first();
     if (!site) return { action: "none", reason: "site_not_found" };
 
-    const existing = await brands.findBySite(env, siteId);
-    const visible = LIVE_STATUSES.has(site.status) && !(await brands.hidesLummetBranding(env, site.organization_id));
+    const existing = await env.LUMMET_DB.prepare(`SELECT id, status, auto_hidden, website_url FROM lummet_brands WHERE site_id = ?`).bind(siteId).first();
+    const visible = LIVE_STATUSES.has(site.status) && !(await hidesLummetBranding(env, site.organization_id));
     const website = site.primary_domain ? `https://${site.primary_domain}` : null;
 
     if (!existing) {
       if (!visible) return { action: "none" };
       const slug = await freeSlug(env, site);
-      const written = await brands.insertSiteBrand(env, {
-        tenantId: site.tenant_id, name: site.name, slug, category: BRAND_CATEGORY, tagline: BRAND_CATEGORY, websiteUrl: website, siteId: site.id
-      });
+      const ins = await env.LUMMET_DB.prepare(
+        `INSERT OR IGNORE INTO lummet_brands (tenant_id, name, slug, tagline, category, website_url, status, sort_order, source, site_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'published', 100, 'site', ?)`
+      ).bind(site.tenant_id || null, site.name, slug, BRAND_CATEGORY, BRAND_CATEGORY, website, site.id).run();
       // INSERT OR IGNORE swallows a unique-index clash (same site or tenant already listed): report it honestly.
-      if (written === 0) return { action: "none", reason: "already_listed" };
+      if (ins?.meta && ins.meta.changes === 0) return { action: "none", reason: "already_listed" };
       return { action: "created", slug };
     }
 
     if (visible && existing.status !== "published" && Number(existing.auto_hidden) === 1) {
-      await brands.republish(env, existing.id, { tenantId: site.tenant_id, websiteUrl: website });
+      await env.LUMMET_DB.prepare(
+        `UPDATE lummet_brands SET status = 'published', auto_hidden = 0, tenant_id = COALESCE(?, tenant_id), website_url = COALESCE(website_url, ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).bind(site.tenant_id || null, website, existing.id).run();
       return { action: "republished" };
     }
     if (visible && !existing.website_url && website) {
-      await brands.fillWebsiteUrl(env, existing.id, website);
+      await env.LUMMET_DB.prepare(`UPDATE lummet_brands SET website_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (website_url IS NULL OR website_url = '')`).bind(website, existing.id).run();
     }
     if (!visible && existing.status === "published") {
-      await brands.autoHide(env, existing.id);
+      await env.LUMMET_DB.prepare(`UPDATE lummet_brands SET status = 'draft', auto_hidden = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(existing.id).run();
       return { action: "unpublished" };
     }
     return { action: "none" };

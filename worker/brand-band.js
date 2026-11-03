@@ -10,8 +10,6 @@
 // colour from its slug so the same brand always has the same colour without storing anything.
 // =====================================================
 
-import { listForBand } from "./repositories/brands.js";
-
 const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 export const BAND_LIMIT = 24;
@@ -56,9 +54,12 @@ function httpsOrEmpty(value) {
 /** includeDrafts: staff see offline brands too (marked), customers never do. */
 export async function loadBrandBand(env, { includeDrafts = false } = {}) {
   try {
+    const where = includeDrafts ? "" : "WHERE status = 'published'";
+    const result = await env.LUMMET_DB.prepare(
+      `SELECT * FROM lummet_brands ${where} ORDER BY (status = 'published') DESC, sort_order, name LIMIT ${BAND_LIMIT * 2}`
+    ).all();
     // Customers only see brands that are switched on for the strip; staff see all of them (hidden ones are marked).
-    const all = await listForBand(env, { includeDrafts, limit: BAND_LIMIT * 2 });
-    const rows = all.filter((b) => includeDrafts || inStrip(b));
+    const rows = (result.results || []).filter((b) => includeDrafts || inStrip(b));
     return rows.slice(0, BAND_LIMIT);
   } catch (error) {
     console.error(JSON.stringify({ msg: "brand_band_load_failed", error: error?.message || String(error) }));

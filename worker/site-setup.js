@@ -37,8 +37,11 @@ const SECTION_RE = /^[A-Za-z0-9._-]{1,60}$/;
 
 const SETUP_PATH = "/en/api/super/site-setup";
 const EXPORT_PATH = "/en/api/super/site-config-export";
+const SYSTEM_PATH = "/en/api/super/site-system";
 const CLONE_TIMEOUT_MS = 20000;
 const ERROR_CODE_RE = /^[a-z0-9_]{1,60}$/;
+/** Tenant answers (HTTP 409 `reason`) that mean "leave the tenant as it is" and end the request as skipped, never failed. */
+export const SKIP_REASONS = Object.freeze(["setup_not_pending", "already_configured", "config_system_off"]);
 
 export const presetLabel = (id) => SITE_PRESETS.find((p) => p.id === id)?.label || null;
 
@@ -205,7 +208,8 @@ function describeFailure(res, prefix = "") {
  * Applies one request on its tenant. Safe to call again: an applied or skipped request is answered without calling the tenant, and
  * the tenant itself treats a repeat of the same preset as "alreadyApplied". Never throws; the outcome is recorded on the request.
  *   200 / alreadyApplied                      -> applied
- *   409 setup_not_pending | already_configured -> skipped  (the tenant keeps what it has; this is not an error)
+ *   409 setup_not_pending | already_configured | config_system_off -> skipped  (the tenant keeps what it has; this is not an error.
+ *       config_system_off: the owner switched the configurable platform off for that site, so there is nothing to apply and nothing to retry)
  *   anything else                              -> failed, with a short code in last_error (retry later)
  * opts.request replaces requestTenant (tests); env.SETUP_TENANT_REQUEST does the same for route tests.
  */
@@ -217,7 +221,10 @@ export async function applySetup(env, requestId, opts = {}) {
     if (!row) return { ok: false, status: "not_found", error: "request_not_found", requestId };
     if (row.status === "applied" || row.status === "skipped") return { ok: true, status: row.status, alreadyDone: true, requestId };
 
-    await repo.bumpAttempts(env, requestId);
+    // The sweep passes the updated_at it read: if another driver already counted an attempt for this request, step aside (the tenant
+    // call is idempotent, but the attempts count must not double). Deploy and manual retry pass nothing and always run.
+    const counted = await repo.bumpAttempts(env, requestId, opts.expectedUpdatedAt || null);
+    if (!counted) return { ok: true, status: "busy", busy: true, requestId };
 
     let tenantId = row.tenant_id;
     if (!tenantId && row.site_id) {
@@ -248,7 +255,7 @@ export async function applySetup(env, requestId, opts = {}) {
 
     const res = await request(env, tenantId, { method: "POST", path: SETUP_PATH, body, timeoutMs });
     if (res && res.ok) return await finish(env, requestId, "applied", null);
-    if (res && res.status === 409 && (res.reason === "setup_not_pending" || res.reason === "already_configured")) {
+    if (res && res.status === 409 && SKIP_REASONS.includes(res.reason)) {
       return await finish(env, requestId, "skipped", res.reason);
     }
     return await finish(env, requestId, "failed", describeFailure(res));
@@ -301,4 +308,129 @@ export async function getSetupForSite(env, siteId, { staff = false } = {}) {
 
 export async function getSetupRequestView(env, requestId, { staff = false } = {}) {
   return publicView(await getRequest(env, requestId), { staff });
+}
+
+// -----------------------------------------------------
+// Picker (what the create-site screen offers)
+// -----------------------------------------------------
+
+/**
+ * What a customer may choose when creating a site: every preset, the one that applies if they choose nothing (explicit > plan >
+ * product > full), and their own active sites they may copy from. Read-only, names only.
+ */
+export async function getSetupOptions(env, { organizationId, productId = null } = {}) {
+  const resolved = await resolveDefaultPreset(env, { organizationId, productId });
+  const sources = organizationId ? await repo.listCloneSources(env, organizationId) : [];
+  return {
+    presets: SITE_PRESETS.map((p) => ({ id: p.id, label: p.label })),
+    default: { presetId: resolved.presetId, label: presetLabel(resolved.presetId), source: resolved.source },
+    cloneSources: sources.map((s) => ({ id: s.id, name: s.name, productName: s.product_name || null }))
+  };
+}
+
+/** Newest setup request per site for an organization, as { [siteId]: view } (customer view, no staff fields). */
+export async function getSetupViewsForOrganization(env, organizationId) {
+  const out = {};
+  for (const row of await repo.latestRequestsForOrganization(env, organizationId)) out[row.site_id] = publicView(row);
+  return out;
+}
+
+// -----------------------------------------------------
+// Retry sweep (runs on the 5 minute tick)
+// -----------------------------------------------------
+
+export const SWEEP_MAX_ATTEMPTS = 6;
+export const SWEEP_MAX_PER_TICK = 5;
+export const SWEEP_GRACE_MINUTES = 10;       // a request that was never attempted waits this long before the sweep takes it (the deploy path normally applies it first)
+export const SWEEP_BASE_MINUTES = 5;
+export const SWEEP_MAX_BACKOFF_MINUTES = 360;
+const SWEEP_OFF = new Set(["off", "0", "false", "disabled", "no"]);
+
+/** The sweep is on unless env.SETUP_RETRY_SWEEP says off. Anything else, or nothing, means on. */
+export const sweepEnabled = (env) => !SWEEP_OFF.has(String(env?.SETUP_RETRY_SWEEP ?? "").trim().toLowerCase());
+
+/** Minutes to wait after the last attempt: none yet -> grace; then 5, 10, 20, 40, 80 ... capped at 6 hours. */
+export function backoffMinutes(attempts) {
+  const n = Number(attempts) || 0;
+  if (n <= 0) return SWEEP_GRACE_MINUTES;
+  return Math.min(SWEEP_BASE_MINUTES * 2 ** (n - 1), SWEEP_MAX_BACKOFF_MINUTES);
+}
+
+// "YYYY-MM-DD HH:MM:SS" (SQLite CURRENT_TIMESTAMP, UTC) or ISO. NaN when unreadable, which counts as NOT due (never guess).
+const stamp = (v) => { const s = String(v || ""); const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s.replace(" ", "T") : `${s.replace(" ", "T")}Z`); return t; };
+
+export function isDue(row, now = Date.now()) {
+  if (!row || (row.status !== "pending" && row.status !== "failed")) return false;
+  if ((Number(row.attempts) || 0) >= SWEEP_MAX_ATTEMPTS) return false;
+  const since = Number(row.attempts) > 0 ? stamp(row.updated_at) : stamp(row.requested_at);
+  return Number.isFinite(since) && now - since >= backoffMinutes(row.attempts) * 60000;
+}
+
+/**
+ * Retries pending and failed setup requests with exponential backoff, at most SWEEP_MAX_PER_TICK per run and SWEEP_MAX_ATTEMPTS
+ * attempts per request (the deploy-time apply counts as attempt 1). A request that used every attempt stays "failed" and is shown to
+ * staff as given up; staff or the customer can still retry it by hand. Never throws. Disabled with SETUP_RETRY_SWEEP=off.
+ * opts.request / env.SETUP_TENANT_REQUEST replace the tenant call (tests); opts.now is a ms timestamp.
+ */
+export async function sweepSetupRetries(env, opts = {}) {
+  const summary = { enabled: sweepEnabled(env), looked: 0, due: 0, applied: 0, skipped: 0, failed: 0, busy: 0 };
+  if (!summary.enabled) return summary;
+  try {
+    const now = opts.now ?? Date.now();
+    const candidates = await repo.listRetryCandidates(env, { maxAttempts: SWEEP_MAX_ATTEMPTS, limit: 50 });
+    summary.looked = candidates.length;
+    const due = candidates.filter((c) => isDue(c, now)).slice(0, opts.max ?? SWEEP_MAX_PER_TICK);
+    summary.due = due.length;
+    for (const c of due) {
+      const r = await applySetup(env, c.id, { ...opts, expectedUpdatedAt: c.updated_at });
+      if (r.status === "busy") { summary.busy += 1; continue; }
+      if (r.status === "applied") summary.applied++; else if (r.status === "skipped") summary.skipped++; else summary.failed++;
+    }
+  } catch (_) { summary.error = "sweep_failed"; }
+  return summary;
+}
+
+/** Numbers for the staff screen. */
+export async function getSetupOverview(env) {
+  const c = await repo.countByStatus(env, SWEEP_MAX_ATTEMPTS);
+  return { ...c, sweep: { enabled: sweepEnabled(env), maxAttempts: SWEEP_MAX_ATTEMPTS, maxPerTick: SWEEP_MAX_PER_TICK, graceMinutes: SWEEP_GRACE_MINUTES } };
+}
+
+export async function listRecentSetupRequests(env, opts = {}) {
+  const status = SETUP_STATUSES.includes(opts.status) ? opts.status : null;
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+  return (await repo.listRecentRequests(env, { status, limit })).map((r) => ({
+    id: r.id, siteId: r.site_id, siteName: r.site_name || null, tenantId: r.tenant_id, kind: r.kind, presetId: r.preset_id, presetLabel: presetLabel(r.preset_id),
+    status: r.status, attempts: r.attempts, lastError: r.last_error, gaveUp: r.status === "failed" && r.attempts >= SWEEP_MAX_ATTEMPTS,
+    requestedAt: r.requested_at, appliedAt: r.applied_at, updatedAt: r.updated_at
+  }));
+}
+
+// -----------------------------------------------------
+// Master switch of a site (Phase 10 B7). Read-only: the control plane only LOOKS at the tenant's switch (Super API v17), it never
+// flips it. The tenant must run a release that has v17 first; an older tenant answers 404/405/501, which is reported as
+// "tenant_not_updated" (deploy the release first), not as a failure of the site.
+// -----------------------------------------------------
+
+const SYSTEM_SOURCES = Object.freeze(["env", "setting", "default"]);
+const NOT_UPDATED_STATUSES = Object.freeze([404, 405, 501]);
+
+/** { ok: true, system: { enabled, source, envOverride } } or { ok: false, httpStatus, error }. Never throws; keeps no tenant body. */
+export async function getSiteSystem(env, siteId, opts = {}) {
+  const request = opts.request || env.SETUP_TENANT_REQUEST || realRequestTenant;
+  try {
+    const site = await repo.findSite(env, siteId);
+    if (!site) return { ok: false, httpStatus: 404, error: "not_found" };
+    if (!site.tenant_id) return { ok: false, httpStatus: 409, error: "site_has_no_tenant" };
+    const res = await request(env, site.tenant_id, { method: "GET", path: SYSTEM_PATH, timeoutMs: opts.timeoutMs || 8000 });
+    if (res && res.ok) {
+      const sys = res.data?.system;
+      if (!sys || typeof sys.enabled !== "boolean") return { ok: false, httpStatus: 502, error: "unexpected_answer" };
+      return { ok: true, system: { enabled: sys.enabled, source: SYSTEM_SOURCES.includes(sys.source) ? sys.source : "unknown", envOverride: sys.envOverride === true } };
+    }
+    if (res && NOT_UPDATED_STATUSES.includes(Number(res.status))) return { ok: false, httpStatus: 409, error: "tenant_not_updated" };
+    return { ok: false, httpStatus: 502, error: describeFailure(res) };
+  } catch (_) {
+    return { ok: false, httpStatus: 502, error: "internal_error" };
+  }
 }

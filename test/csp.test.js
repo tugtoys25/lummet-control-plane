@@ -244,7 +244,7 @@ test('real pages: staff console, customer portal and public site all satisfy the
   const staff = cookieOf((await get(e, '/api/auth/login', null, 'POST', { email: 'root@example.com', password: 'Correct-Horse-Battery-9' })).res);
   const cust = await get(e, '/api/customer/signup', null, 'POST', { email: 'c@example.com', password: 'Correct-Horse-Battery-9', organizationName: 'Acme <b>x</b>' });
   const ccookie = cookieOf(cust.res);
-  for (const p of ['/platform/saas', '/platform/saas/organizations', '/platform/saas/plans', '/platform/saas/coupons', '/platform/saas/jobs', '/platform/saas/tenant-template', '/platform/saas/alerts', '/tenants', '/dashboard']) pages.push(['staff ' + p, await get(e, p, staff)]);
+  for (const p of ['/platform/saas', '/platform/saas/organizations', '/platform/saas/plans', '/platform/saas/coupons', '/platform/saas/jobs', '/platform/saas/tenant-template', '/platform/saas/alerts', '/platform/saas/site-presets', '/tenants', '/dashboard']) pages.push(['staff ' + p, await get(e, p, staff)]);
   for (const p of ['/app', '/app/sites', '/app/billing', '/app/team', '/app/domains', '/app/usage', '/app/developer', '/app/settings', '/app/account', '/app/backups', '/app/automations', '/app/deployments']) pages.push(['customer ' + p, await get(e, p, ccookie)]);
   let withScripts = 0, checked = 0;
   for (const [label, page] of pages) {

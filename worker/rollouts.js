@@ -32,6 +32,28 @@ export const LOCK_MS = 90_000;
 export const ITEM_TIMEOUT_MINUTES = 45;
 export const MAX_SKIPS_PER_STEP = 25;
 const MAX_SITE_IDS = 200;
+export const CANARY_PREFIX = "canary:";
+const ON = new Set(["on", "1", "true", "yes", "enforce", "required"]);
+
+/** ROLLOUT_REQUIRE_CANARY=on: a rollout to every site is refused until a canary of the same release has finished. Off unless set. */
+export const canaryRequired = (env) => ON.has(String(env?.ROLLOUT_REQUIRE_CANARY ?? "").trim().toLowerCase());
+
+/**
+ * Has the release `version` been proven on a canary? Passed = the newest canary rollout of that version completed and its site is
+ * on the version (updated now, or already on it). Anything else (running, failed, cancelled, no canary) is not passed.
+ * Returns { passed, rolloutId, status, siteId }.
+ */
+export async function canaryState(env, version) {
+  const row = version ? await repo.latestCanaryRollout(env, version) : null;
+  if (!row) return { passed: false, rolloutId: null, status: null, siteId: null };
+  const siteId = String(row.notes || "").slice(CANARY_PREFIX.length).split(" ")[0] || null;
+  let passed = false;
+  if (row.status === "completed") {
+    const items = await repo.listItems(env, row.id, 5);
+    passed = items.some((i) => i.status === "succeeded" || (i.status === "skipped" && i.detail === "already_on_version"));
+  }
+  return { passed, rolloutId: row.id, status: row.status, siteId };
+}
 
 function parseDbTime(s) {
   if (!s) return NaN;
@@ -73,6 +95,13 @@ export async function startRollout(env, { version = null, siteIds = null, notes 
   const release = version ? await templates.getReleaseByVersion(env, String(version)) : await templates.getCurrentRelease(env);
   if (!release.ok) return { ok: false, status: release.status || 409, error: release.error };
 
+  // Canary-first policy (off unless ROLLOUT_REQUIRE_CANARY=on): a rollout to EVERY site needs a finished canary of this release.
+  const toEveryone = !siteIds || !siteIds.length;
+  if (toEveryone && canaryRequired(env)) {
+    const canary = await canaryState(env, release.version);
+    if (!canary.passed) return { ok: false, status: 409, error: "canary_required", canary };
+  }
+
   const id = crypto.randomUUID();
   if (!(await repo.insertRollout(env, { id, version: release.version, startedBy, notes }))) {
     const running = await repo.getRunning(env);
@@ -83,6 +112,21 @@ export async function startRollout(env, { version = null, siteIds = null, notes 
   await repo.setTotal(env, id, counts.pending);
   if (counts.pending === 0) await repo.finishRollout(env, id, "completed");
   return { ok: true, ...(await summarize(env, await repo.getById(env, id))), nothingToDo: counts.pending === 0 };
+}
+
+/**
+ * Canary first: deploy the release to ONE chosen live site, using the same rollout (same table, same one-at-a-time, stop-on-failure
+ * and resume rules). The rollout is marked by its notes ("canary:<siteId>"). When it has completed, start a normal rollout: it skips
+ * the canary site (already on the version) and does the rest. { ok: true, ...summary } or { ok: false, status, error }.
+ */
+export async function startCanaryRollout(env, { version = null, canarySiteId, notes = null, startedBy = "system" } = {}, deps = {}) {
+  if (typeof canarySiteId !== "string" || !canarySiteId || canarySiteId.length > 64) return { ok: false, status: 422, error: "canary_site_required" };
+  const extra = notes === null || notes === undefined ? "" : String(notes);
+  if (extra.length > 200) return { ok: false, status: 422, error: "notes_too_long" };
+  const site = await sites.getSite(env, canarySiteId);
+  if (!site) return { ok: false, status: 404, error: "canary_site_not_found" };
+  if (site.status !== "active" || !site.tenant_id) return { ok: false, status: 409, error: "canary_site_not_live" };
+  return startRollout(env, { version, siteIds: [canarySiteId], notes: `${CANARY_PREFIX}${canarySiteId}${extra ? ` ${extra}` : ""}`, startedBy }, deps);
 }
 
 async function classify(env, item, now) {
@@ -228,7 +272,13 @@ export async function dashboard(env) {
   const total = fleet.reduce((n, r) => n + r.n, 0);
   const current = fleet.filter((r) => r.version === activeVersion).reduce((n, r) => n + r.n, 0);
   const shown = running || recent[0] || null;
+  const canary = {
+    required: canaryRequired(env),
+    state: activeVersion ? await canaryState(env, activeVersion) : null,
+    candidates: activeVersion ? (await repo.canaryCandidates(env, activeVersion)).map((c) => ({ id: c.id, name: c.name, slug: c.slug, version: c.app_version || null })) : []
+  };
   return {
+    canary,
     active, fleet, totalLive: total, onActive: current, outdated: total - current,
     running: running || null,
     shown: shown ? { ...(await summarize(env, shown)), startedBy: shown.started_by, createdAt: shown.created_at, completedAt: shown.completed_at, items: await repo.listItems(env, shown.id, 100) } : null,

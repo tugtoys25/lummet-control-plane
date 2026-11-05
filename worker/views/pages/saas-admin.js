@@ -50,6 +50,26 @@ function act(url, body, confirmMsg) {
     .then(function (r) { return r.json(); })
     .then(function (d) { if (d.success) location.reload(); else alert('Failed: ' + (d.error || 'unknown')); });
 }
+// Canary first (Phase 10 B7): roll the active release out to ONE chosen site, then check it, then roll out to the rest.
+function lummetCanaryStart() {
+  var sel = document.getElementById('canary-site');
+  if (!sel || !sel.value) { alert('Choose a site first.'); return; }
+  act('/api/platform/saas/rollouts', { canarySiteId: sel.value }, 'Roll out the active release to this one site first? Nothing else is touched.');
+}
+// Master switch of one site (Phase 10 B7), read from the tenant on demand. Built with textContent: nothing from the answer is parsed as HTML.
+function lummetCheckSwitch(siteId, outId) {
+  var out = document.getElementById(outId);
+  if (out) { out.textContent = 'Checking...'; }
+  fetch('/api/platform/saas/sites/' + encodeURIComponent(siteId) + '/site-system')
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!out) { return; }
+      if (d.success) { out.textContent = d.data.enabled ? 'Configurable platform: ON (' + d.data.source + ')' : 'Configurable platform: OFF (' + d.data.source + ')'; }
+      else if (d.error === 'tenant_not_updated') { out.textContent = 'This site runs an older release. Deploy the tenant release first.'; }
+      else { out.textContent = 'Could not read it: ' + (d.error || 'unknown'); }
+    })
+    .catch(function () { if (out) { out.textContent = 'Could not read it.'; } });
+}
 // Handlers that used to be inline code. Each is a named function the delegated runtime calls.
 function actReason(url, status, label) { var r = prompt(label); if (r) act(url, { status: status, reason: r }); }
 function actDrift(url, decision) { var r = prompt("Required audit reason for this reconciliation decision:"); if (r && r.trim()) act(url, { decision: decision, reason: r.trim() }); }
@@ -198,7 +218,8 @@ export async function renderOrganizationDetailPage(env, admin, id) {
       <input name="amount" type="number" min="1" placeholder="credits" required /><input name="reason" placeholder="reason (required)" required /><button class="btn">Grant credits</button></form>
     <h2>Usage this month</h2>${table(["Metric", "Quantity"], Object.entries(d.usage).map(([k, v]) => [h(k), h(v)]), "No metered usage yet.")}
     <h2>Sites</h2>
-    ${table(["Name", "Status", "Reason", ""], d.sites.map((s) => [h(s.name), badge(s.status), h(s.suspension_reason || ""),
+    ${table(["Name", "Status", "Reason", "Configurable platform", ""], d.sites.map((s) => [h(s.name), badge(s.status), h(s.suspension_reason || ""),
+      s.tenant_id && s.status !== "deleted" ? `<button class="btn"${onClick("lummetCheckSwitch", [s.id, `switch-${s.id}`])}>Check switch</button> <span id="switch-${h(s.id)}" aria-live="polite"></span>` : "—",
       s.status === "active" ? `<button class="btn" ${onClick("actReason", [`/api/platform/saas/sites/${s.id}/status`, "suspended", "Reason (required)"])}>Suspend</button>`
       : s.status === "suspended" ? `<button class="btn"${onClick("act", [`/api/platform/saas/sites/${s.id}/status`, {status: "active"}, "Reactivate site?"])}>Reactivate</button>` : ""]), "No sites.")}
     <h2>Team</h2>${table(["Email", "Role", "Joined"], d.members.map((m) => [h(m.email), h(m.role), h(m.created_at)]))}
@@ -442,7 +463,18 @@ function renderRolloutSection(d) {
       <div id="rollout-drive" data-rollout="${h(d.running.id)}" data-progress="${h(d.shown ? d.shown.progress : "")}" style="display:none"></div>
       <p style="color:var(--text-dim)">This page keeps the rollout moving while it is open; it also continues from the scheduled maintenance tick if you close it.</p>`;
   } else if (d.outdated > 0) {
-    controls = `<p><button class="btn"${onClick("act", ["/api/platform/saas/rollouts", {}, `Roll out ${d.active.version} to ${d.outdated} site(s), one at a time? It stops at the first failure.`])}>Roll out ${h(d.active.version)} to ${h(d.outdated)} site${d.outdated === 1 ? "" : "s"}</button></p>`;
+    const cn = d.canary || { required: false, state: null, candidates: [] };
+    const passed = cn.state && cn.state.passed;
+    const canaryNote = passed
+      ? `<p>Canary passed: ${h(cn.state.siteId || "")} is on ${h(d.active.version)}. Check that site, then roll out to the rest.</p>`
+      : cn.required
+        ? `<p><strong>Canary first is required.</strong> Roll out to one site, check it, then to the rest. A rollout to every site is refused until a canary has finished.</p>`
+        : `<p style="color:var(--text-dim)">Safer: roll out to one site first, check it, then to the rest.</p>`;
+    const canaryForm = !passed && cn.candidates.length
+      ? `<p><label for="canary-site">Canary site</label> <select id="canary-site">${cn.candidates.map((c) => `<option value="${h(c.id)}">${h(c.name || c.slug || c.id)}${c.version ? ` (${h(c.version)})` : ""}</option>`).join("")}</select> <button class="btn"${onClick("lummetCanaryStart", [])}>Roll out to this site first</button></p>`
+      : "";
+    const canBlocked = cn.required && !passed;
+    controls = `${canaryNote}${canaryForm}<p><button class="btn"${canBlocked ? " disabled" : ""}${onClick("act", ["/api/platform/saas/rollouts", {}, `Roll out ${d.active.version} to ${d.outdated} site(s), one at a time? It stops at the first failure.`])}>Roll out ${h(d.active.version)} to ${h(d.outdated)} site${d.outdated === 1 ? "" : "s"}</button></p>`;
   } else {
     controls = `<p style="color:var(--text-dim)">Every live site is on the active release.</p>`;
   }

@@ -119,6 +119,7 @@ import { renderCustomerShell } from "./views/customer-layout.js";
 import { renderCustomerLoginPage } from "./views/customer-pages/login.js";
 import { renderOverviewPage } from "./views/customer-pages/overview.js";
 import { renderSitesPage } from "./views/customer-pages/sites.js";
+import { renderSitePresetsPage } from "./views/pages/site-presets-admin.js";
 import { renderAccountPage } from "./views/customer-pages/account.js";
 import { renderBillingPage } from "./views/customer-pages/billing.js";
 import { renderDomainsPage } from "./views/customer-pages/domains.js";
@@ -1803,6 +1804,14 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return json({ success: true, siteId: result.siteId, slug: result.slug, setup: result.setup ? { kind: result.setup.kind, presetId: result.setup.presetId, status: result.setup.status } : null });
           }
 
+          // Phase 10 A1: what the create-site screen offers (presets, the default that applies, this organization's own sites to copy from).
+          // Any member may read it; it lists names only and never another organization's site.
+          if (method === "GET" && subPath === "/site-setup/options") {
+            const rawProductId = url.searchParams.get("productId");
+            if (rawProductId !== null && rawProductId !== "" && !/^[A-Za-z0-9._:-]{1,120}$/.test(rawProductId)) return json({ success: false, error: "invalid_product" }, 422);
+            return json({ success: true, data: await siteSetup.getSetupOptions(env, { organizationId, productId: rawProductId || null }) });
+          }
+
           // Phase 9: how this site was (or will be) first configured. Any member may read it; an admin may retry a failed apply.
           const setupReadMatch = subPath.match(/^\/sites\/([^/]+)\/setup$/);
           if (method === "GET" && setupReadMatch) {
@@ -2774,6 +2783,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         // A running tenant release rollout takes its next step (docs/TENANT_RELEASES.md).
         ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
         ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
+        // Phase 10 A4: failed or never-applied first-configuration requests are retried with backoff (SETUP_RETRY_SWEEP=off disables).
+        ctx.waitUntil(runSetupRetrySweep(env));
         ctx.waitUntil(requestErrorsRepo.purgeOlderThanDays(env, 14).catch(() => {}));
         ctx.waitUntil(cryptoBilling.expireLapsedPeriods(env).catch(logLifecycleFailure).then(() => billingLifecycle.sweep(env, Date.now(), { billingService: billing })).catch(logLifecycleFailure));
         ctx.waitUntil(billingReminders.sweepReminders(env).then(() => billingNotifications.drain(env)).then(() => flushOutbox(env)).then(() => billingNotifications.drain(env)).catch(logNotificationFailure));
@@ -2829,8 +2840,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (method === "POST" && rest === "rollouts") {
           const denied = needScope("rollout:run"); if (denied) return denied;
           const b = await ciBody();
-          const r = await rollouts.startRollout(env, { version: b.version || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: ciActor });
-          await ciAudit("tenant_rollout", r.rolloutId || "none", "start", r);
+          const r = b.canarySiteId
+            ? await rollouts.startCanaryRollout(env, { version: b.version || null, canarySiteId: b.canarySiteId, notes: b.notes || null, startedBy: ciActor })
+            : await rollouts.startRollout(env, { version: b.version || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: ciActor });
+          await ciAudit("tenant_rollout", r.rolloutId || "none", b.canarySiteId ? "start_canary" : "start", r);
           if (!r.ok) return reply(r);
           // Take the first step now, so the first site starts without waiting for anything else.
           const first = r.nothingToDo ? r : await rollouts.advanceRollout(env, r.rolloutId, { dispatch: makeRolloutDispatch(env, ctx, { inline: true }) });
@@ -3218,11 +3231,17 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             sites.listSitesForOrganization(env, activeOrgId),
             plans.listProducts(env)
           ]);
+          // Phase 10 A2/A3: picker data and the newest setup request per site (one query each). Fail-open: if either read fails,
+          // the page still shows the sites and the plain create form.
+          const [setupOptions, setupViews] = await Promise.all([
+            siteSetup.getSetupOptions(env, { organizationId: activeOrgId, productId: products[0]?.id || null }).catch(() => null),
+            siteSetup.getSetupViewsForOrganization(env, activeOrgId).catch(() => ({}))
+          ]);
           return html(
             shell({
               title: "Sites", activeKey: "sites", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderSitesPage({ sites: sitesList, products, canManage })
+              bodyHtml: renderSitesPage({ sites: sitesList, products, canManage, setupOptions, setupViews })
             })
           );
         }
@@ -4608,6 +4627,29 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status || 400);
           }
 
+          // Phase 10 B7: the master switch of one site's configurable platform (Super API v17, read-only). One tenant call, only when
+          // asked for; never fans out over a list. 409 tenant_not_updated = deploy the tenant release that has v17 first.
+          const siteSystemParams = method === "GET" ? matchPath("/api/platform/saas/sites/:id/site-system", path) : null;
+          if (siteSystemParams) {
+            const r = await siteSetup.getSiteSystem(env, siteSystemParams.id);
+            if (!r.ok) return json({ success: false, error: r.error }, r.httpStatus || 502);
+            return json({ success: true, data: r.system });
+          }
+
+          // Phase 10 A5: overview counts + recent first-configuration requests for the staff Site presets screen. Super admin only
+          // (this whole block is), read-only, ids and short codes only. ?status=pending|applied|failed|skipped&limit=1..200
+          if (method === "GET" && path === "/api/platform/saas/site-setups") {
+            const q = new URL(request.url).searchParams;
+            const wantedStatus = q.get("status");
+            if (wantedStatus && !siteSetup.SETUP_STATUSES.includes(wantedStatus)) return json({ success: false, error: "invalid_status" }, 422);
+            return json({
+              success: true,
+              overview: await siteSetup.getSetupOverview(env),
+              data: await siteSetup.listRecentSetupRequests(env, { status: wantedStatus || null, limit: q.get("limit") }),
+              presets: siteSetup.SITE_PRESETS
+            });
+          }
+
           // Phase 9: read, apply or retry the first configuration of a site. Not under /api/sites/ because that prefix is the
           // customer API (customer session only). POST { preset } | { cloneFromTenantId, sections } | { retry: true }.
           const siteSetupParams = matchPath("/api/platform/saas/sites/:id/setup", path);
@@ -4838,8 +4880,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             };
             if (path === "/api/platform/saas/rollouts") {
               const b = await staffBody();
-              const r = await rollouts.startRollout(env, { version: b.version || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: `admin:${admin.id}` });
-              return rolloutAudit(r.rolloutId || "none", "start", r);
+              const r = b.canarySiteId
+                ? await rollouts.startCanaryRollout(env, { version: b.version || null, canarySiteId: b.canarySiteId, notes: b.notes || null, startedBy: `admin:${admin.id}` })
+                : await rollouts.startRollout(env, { version: b.version || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: `admin:${admin.id}` });
+              return rolloutAudit(r.rolloutId || "none", b.canarySiteId ? "start_canary" : "start", r);
             }
             const rolloutAct = matchPath("/api/platform/saas/rollouts/:id/:action", path);
             if (rolloutAct) {
@@ -5324,6 +5368,7 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas/settings") return html(await renderPlatformSettingsPage(env, admin));
         if (path === "/platform/saas/notifications") return html(await renderNotificationsPage(env, admin, { organization: url.searchParams.get("organization") || "", kind: url.searchParams.get("kind") || "", state: url.searchParams.get("state") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/releases") return html(await renderTenantTemplatePage(env, admin));
+        if (path === "/platform/saas/site-presets") return html(await renderSitePresetsPage(env, admin, { status: url.searchParams.get("status") || "" }));
         const opStatus = url.searchParams.get("status") || "";
         if (path === "/platform/saas/key-rotation") return html(await renderKeyRotationPage(env, admin));
         if (path === "/platform/saas/cp-backups") return html(await renderCpBackupsPage(env, admin));
@@ -5496,11 +5541,22 @@ async function runScheduled(event, env, ctx) {
   ctx.waitUntil(webhooksModule.sweepDeliveries(env).catch(() => {}));
   ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
   ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
+  // Phase 10 A4: retry first-configuration requests that failed or were never applied (backoff, at most 6 attempts, SETUP_RETRY_SWEEP=off disables).
+  ctx.waitUntil(runSetupRetrySweep(env));
   ctx.waitUntil(requestErrorsRepo.purgeOlderThanDays(env, 14).catch(() => {}));
   // Billing lifecycle (Phase 1.2). Failures are logged, never swallowed: this path decides who keeps access.
   ctx.waitUntil(cryptoBilling.expireLapsedPeriods(env).catch(logLifecycleFailure).then(() => billingLifecycle.sweep(env, Date.now(), { billingService: billing })).catch(logLifecycleFailure));
   // Billing emails (Phase 2.1): finish unqueued notifications, then deliver, then record what was delivered.
   ctx.waitUntil(billingReminders.sweepReminders(env).then(() => billingNotifications.drain(env)).then(() => flushOutbox(env)).then(() => billingNotifications.drain(env)).catch(logNotificationFailure));
+}
+
+// Phase 10 A4. The retry sweep never throws (siteSetup.sweepSetupRetries catches everything); this wrapper only logs a one-line summary
+// when something happened, and never logs an envelope, a tenant answer or a request body.
+async function runSetupRetrySweep(env) {
+  try {
+    const r = await siteSetup.sweepSetupRetries(env);
+    if (r && (r.due || r.error)) console.log(JSON.stringify({ msg: "site_setup_retry_sweep", due: r.due, applied: r.applied, skipped: r.skipped, failed: r.failed, error: r.error || undefined }));
+  } catch (_) { /* fail-open: the sweep is best effort */ }
 }
 
 // Round 6.5A. Probes first, so the alert check sees this tick's result. A failure of the probe run itself is logged and must not stop the

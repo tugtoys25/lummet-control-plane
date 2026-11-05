@@ -38,7 +38,7 @@ export async function getOrganizationDetail(env, organizationId) {
   if (!org) return null;
   const [members, orgSites, subs, overrides, entitlements, usage, ai, jobs] = await Promise.all([
     env.LUMMET_DB.prepare(`SELECT u.email, ou.role, ou.created_at FROM organization_users ou JOIN customer_users u ON u.id = ou.user_id WHERE ou.organization_id = ? ORDER BY ou.created_at`).bind(organizationId).all(),
-    env.LUMMET_DB.prepare(`SELECT id, name, status, suspension_reason, created_at FROM sites WHERE organization_id = ? ORDER BY created_at`).bind(organizationId).all(),
+    env.LUMMET_DB.prepare(`SELECT id, name, status, suspension_reason, tenant_id, created_at FROM sites WHERE organization_id = ? ORDER BY created_at`).bind(organizationId).all(),
     env.LUMMET_DB.prepare(`SELECT s.id, s.status, s.trial_ends_at, s.current_period_end, s.created_at, p.name AS plan, p.key AS plan_key FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.organization_id = ? ORDER BY s.created_at DESC`).bind(organizationId).all(),
     env.LUMMET_DB.prepare(`SELECT o.subscription_id, o.key, o.value, o.reason FROM subscription_entitlement_overrides o JOIN subscriptions s ON s.id = o.subscription_id WHERE s.organization_id = ?`).bind(organizationId).all(),
     entitlementsService.resolveForOrganization(env, organizationId),

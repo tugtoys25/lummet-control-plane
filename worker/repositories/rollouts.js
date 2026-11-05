@@ -185,3 +185,20 @@ export async function activeRelease(env) {
     `SELECT version, created_at, notes FROM tenant_template_releases WHERE status = 'active' ORDER BY created_at DESC, rowid DESC LIMIT 1`
   ).first();
 }
+
+/** The newest rollout of a version that was started as a canary (notes begin "canary:"), or null. */
+export async function latestCanaryRollout(env, version) {
+  return env.LUMMET_DB.prepare(
+    `SELECT * FROM tenant_rollouts WHERE release_version = ? AND notes LIKE 'canary:%' ORDER BY created_at DESC, rowid DESC LIMIT 1`
+  ).bind(version).first();
+}
+
+/** Live sites that are not on `version`: who could be the canary. Names only. */
+export async function canaryCandidates(env, version, limit = 50) {
+  const r = await env.LUMMET_DB.prepare(
+    `SELECT id, name, slug, app_version FROM sites
+      WHERE status = 'active' AND tenant_id IS NOT NULL AND (app_version IS NULL OR app_version <> ?)
+      ORDER BY created_at, id LIMIT ?`
+  ).bind(version, limit).all();
+  return r.results || [];
+}

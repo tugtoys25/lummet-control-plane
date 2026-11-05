@@ -65,12 +65,70 @@ export const getRequest = (env, id) => env.LUMMET_DB.prepare(`SELECT * FROM site
 export const latestRequestForSite = (env, siteId) =>
   env.LUMMET_DB.prepare(`SELECT * FROM site_setup_requests WHERE site_id = ? ORDER BY requested_at DESC, rowid DESC LIMIT 1`).bind(siteId).first();
 
-export async function bumpAttempts(env, id) {
-  await env.LUMMET_DB.prepare(`UPDATE site_setup_requests SET attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(id).run();
+/**
+ * Counts one attempt. With `expectedUpdatedAt` it is a compare-and-swap: the row is changed only if its updated_at is still the value
+ * the caller read, so two drivers (the tick and alert-check) that picked the same request count ONE attempt between them.
+ * Returns true when this call counted the attempt, false when another driver got there first. Without it, always counts (deploy, manual retry).
+ */
+export async function bumpAttempts(env, id, expectedUpdatedAt = null) {
+  const r = expectedUpdatedAt
+    ? await env.LUMMET_DB.prepare(`UPDATE site_setup_requests SET attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND updated_at = ? AND status IN ('pending', 'failed')`).bind(id, expectedUpdatedAt).run()
+    : await env.LUMMET_DB.prepare(`UPDATE site_setup_requests SET attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(id).run();
+  return Number(r?.meta?.changes ?? 0) > 0;
 }
 
 export async function setOutcome(env, id, status, lastError) {
   await env.LUMMET_DB.prepare(
     `UPDATE site_setup_requests SET status = ?, last_error = ?, applied_at = CASE WHEN ? = 'applied' THEN CURRENT_TIMESTAMP ELSE applied_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
   ).bind(status, lastError || null, status, id).run();
+}
+
+/** Active sites of one organization that could be copied from (they have a tenant). Names only; nothing from the tenant. */
+export async function listCloneSources(env, organizationId) {
+  const r = await env.LUMMET_DB.prepare(
+    `SELECT s.id, s.name, p.name AS product_name FROM sites s LEFT JOIN products p ON p.id = s.product_id
+     WHERE s.organization_id = ? AND s.status = 'active' AND s.tenant_id IS NOT NULL ORDER BY s.created_at`
+  ).bind(organizationId).all();
+  return r.results || [];
+}
+
+/** The newest setup request of every site of one organization, in one query (no per-site lookups). */
+export async function latestRequestsForOrganization(env, organizationId) {
+  const r = await env.LUMMET_DB.prepare(
+    `SELECT q.* FROM site_setup_requests q JOIN sites s ON s.id = q.site_id
+     WHERE s.organization_id = ? AND s.status != 'deleted'
+       AND q.rowid = (SELECT q2.rowid FROM site_setup_requests q2 WHERE q2.site_id = q.site_id ORDER BY q2.requested_at DESC, q2.rowid DESC LIMIT 1)`
+  ).bind(organizationId).all();
+  return r.results || [];
+}
+
+/**
+ * Requests the retry sweep may look at: the NEWEST request of a site (older ones are superseded), still pending or failed, below the
+ * attempt cap, whose site is live and has a tenant. Oldest update first, capped. Whether one is due (backoff) is decided by the caller.
+ */
+export async function listRetryCandidates(env, { maxAttempts, limit }) {
+  const r = await env.LUMMET_DB.prepare(
+    `SELECT q.id, q.site_id, q.status, q.attempts, q.requested_at, q.updated_at FROM site_setup_requests q JOIN sites s ON s.id = q.site_id
+     WHERE q.status IN ('pending', 'failed') AND q.attempts < ? AND s.status IN ('active', 'maintenance') AND s.tenant_id IS NOT NULL
+       AND q.rowid = (SELECT q2.rowid FROM site_setup_requests q2 WHERE q2.site_id = q.site_id ORDER BY q2.requested_at DESC, q2.rowid DESC LIMIT 1)
+     ORDER BY q.updated_at ASC LIMIT ?`
+  ).bind(maxAttempts, limit).all();
+  return r.results || [];
+}
+
+/** Counts for the staff screen: how many requests are in each status, and how many failed ones have used every automatic attempt. */
+export async function countByStatus(env, maxAttempts) {
+  const r = await env.LUMMET_DB.prepare(`SELECT status, COUNT(*) AS n FROM site_setup_requests GROUP BY status`).all();
+  const gave = await env.LUMMET_DB.prepare(`SELECT COUNT(*) AS n FROM site_setup_requests WHERE status = 'failed' AND attempts >= ?`).bind(maxAttempts).first();
+  return { byStatus: Object.fromEntries((r.results || []).map((x) => [x.status, Number(x.n)])), gaveUp: Number(gave?.n || 0) };
+}
+
+/** Staff list of recent requests with the site name, newest first. */
+export async function listRecentRequests(env, { status = null, limit = 50 } = {}) {
+  const where = status ? `WHERE q.status = ?` : ``;
+  const stmt = env.LUMMET_DB.prepare(
+    `SELECT q.id, q.site_id, q.tenant_id, q.kind, q.preset_id, q.status, q.attempts, q.last_error, q.requested_at, q.applied_at, q.updated_at, s.name AS site_name
+     FROM site_setup_requests q LEFT JOIN sites s ON s.id = q.site_id ${where} ORDER BY q.requested_at DESC, q.rowid DESC LIMIT ?`
+  );
+  return ((status ? await stmt.bind(status, limit).all() : await stmt.bind(limit).all()).results) || [];
 }

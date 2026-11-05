@@ -81,3 +81,9 @@ BILLING_SAVE_FLOW=off
 PUBLIC_FORMS_TURNSTILE_REQUIRED=off
 # Catalog rows stay inactive until real Stripe price IDs and owner-approved policies are verified.
 # ADDON_PURCHASES_ENABLED=off
+
+# Phase 10 (both optional, defaults shown; see docs/CONFIGURATION.md).
+# First-configuration retry sweep on the 5 minute tick: on unless one of off, 0, false, disabled, no.
+# SETUP_RETRY_SWEEP=on
+# Canary-first rollouts: a rollout to every site is refused until a canary of the release has completed. Off unless on, 1, true, yes, enforce, required.
+# ROLLOUT_REQUIRE_CANARY=off

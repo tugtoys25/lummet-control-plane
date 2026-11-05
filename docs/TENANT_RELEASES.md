@@ -161,3 +161,11 @@ Staff session API (super admin): `GET/POST /api/platform/saas/rollouts`, `GET ..
 Written against the deployment engine as it is and tested with a fake Cloudflare provider, like the custom domain work. First
 live check: publish a release from CI without `AUTO_ROLLOUT`, roll out to one site with `siteIds`, confirm its CSS loads, then
 roll out to the rest.
+
+## Canary first, stop and rollback (Phase 10 B7, NOT run live)
+
+* **Canary.** Deployments page > Release rollout > "Roll out to this site first" (API: `canarySiteId` on `POST /api/platform/saas/rollouts`, or on the CI rollout start). It is an ordinary rollout limited to one site, marked by notes `canary:<siteId>`. When it has completed, "Canary passed" shows; then press the normal Roll out button (the canary site is skipped as already current).
+* **Require it.** `ROLLOUT_REQUIRE_CANARY=on` refuses a rollout to every site (409 `canary_required`) until a canary of the same release has completed. Off by default. A CI job that rolls out to everyone must run the canary step first when this is on.
+* **Stop.** Cancel the running rollout (sites not yet updated stay as they are; a deployment already under way finishes). A failure stops it by itself.
+* **Rollback.** Publish or activate the earlier version and run a rollout with that `version` (canary first if you want). Migrations are never re-run.
+* **Switch state.** Organization detail > "Check switch" reads the tenant's master switch (Super API v17). Deploy the tenant release before relying on it.

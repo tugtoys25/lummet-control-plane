@@ -47,7 +47,8 @@ const NAV = [
       { label: "All Tenants", href: "/tenants", key: "tenants-all" },
       { label: "Add Tenant", href: "/tenants/new", key: "tenants-new" },
       { label: "Health", href: "/tenants/health", key: "tenants-health" },
-      { label: "Deployments", href: "/tenants/deployments", key: "tenants-deployments" }
+      { label: "Deployments", href: "/tenants/deployments", key: "tenants-deployments" },
+      { label: "Site presets", href: "/platform/saas/site-presets", key: "saas-site-presets" }
     ]
   },
   {

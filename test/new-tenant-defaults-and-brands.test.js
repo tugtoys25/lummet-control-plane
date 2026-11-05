@@ -12,7 +12,7 @@ import * as template from '../worker/tenant-template.js';
 import * as customerAuth from '../worker/customer-auth.js';
 import * as plans from '../worker/plans.js';
 import * as sites from '../worker/sites.js';
-import { defaultAnnouncementSql, newTenantSeedMigrations, DEFAULT_ANNOUNCEMENT_MIGRATION } from '../worker/tenant-defaults.js';
+import { defaultAnnouncementSql, newTenantSeedMigrations, DEFAULT_ANNOUNCEMENT_MIGRATION, SETUP_PENDING_MIGRATION, setupPendingSql } from '../worker/tenant-defaults.js';
 import { syncSiteBrand } from '../worker/site-brands.js';
 import { renderBrandBand, hueFor } from '../worker/brand-band.js';
 import { injectSiteChrome, MARKERS } from '../worker/site-chrome.js';
@@ -50,6 +50,12 @@ test('default announcement SQL matches the requested seed exactly', () => {
     "('site_announce_dismissible','true')"
   ]) assert.ok(sql.includes(row), row);
   assert.equal(newTenantSeedMigrations()[0].name, DEFAULT_ANNOUNCEMENT_MIGRATION);
+  // Phase 9: the second first-deploy seed puts a new tenant in the setup wizard.
+  assert.deepEqual(newTenantSeedMigrations().map((m) => m.name), [DEFAULT_ANNOUNCEMENT_MIGRATION, 'provision_0002_site_setup_pending']);
+  assert.equal(SETUP_PENDING_MIGRATION, 'provision_0002_site_setup_pending');
+  const pending = setupPendingSql();
+  assert.match(pending, /^INSERT OR REPLACE INTO settings \(key, value\) VALUES/);
+  assert.ok(pending.includes("('site_setup_state','pending')") && pending.includes("('site_setup_source','new')"));
 });
 
 test('a new tenant gets the seed on its first deploy, after the release migrations, and never again on a redeploy', async () => {

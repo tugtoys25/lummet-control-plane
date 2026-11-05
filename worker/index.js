@@ -83,6 +83,7 @@ import * as customerAuth from "./customer-auth.js";
 import * as orgSecurityPolicy from "./org-security-policy.js";
 import * as organizations from "./organizations.js";
 import * as sites from "./sites.js";
+import * as siteSetup from "./site-setup.js";
 import * as plans from "./plans.js";
 import * as entitlementsService from "./entitlements.js";
 import { roleAtLeast } from "./customer-rbac.js";
@@ -1789,7 +1790,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
             const body = await request.json().catch(() => ({}));
             const result = await sites.createSite(env, {
-              organizationId, name: body.name, productId: body.productId, actorUserId: customer.id
+              organizationId, name: body.name, productId: body.productId, actorUserId: customer.id,
+              preset: body.preset, cloneFromSiteId: body.cloneFromSiteId, cloneFromTenantId: body.cloneFromTenantId, sections: body.sections
             });
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -1798,7 +1800,33 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
             });
             if (!result.ok) return json({ success: false, error: result.error }, result.status);
-            return json({ success: true, siteId: result.siteId, slug: result.slug });
+            return json({ success: true, siteId: result.siteId, slug: result.slug, setup: result.setup ? { kind: result.setup.kind, presetId: result.setup.presetId, status: result.setup.status } : null });
+          }
+
+          // Phase 9: how this site was (or will be) first configured. Any member may read it; an admin may retry a failed apply.
+          const setupReadMatch = subPath.match(/^\/sites\/([^/]+)\/setup$/);
+          if (method === "GET" && setupReadMatch) {
+            const targetSite = await sites.getSite(env, setupReadMatch[1]);
+            if (!targetSite || targetSite.organization_id !== organizationId) return json({ success: false, error: "not_found" }, 404);
+            return json({ success: true, data: await siteSetup.getSetupForSite(env, targetSite.id) });
+          }
+
+          const setupRetryMatch = subPath.match(/^\/sites\/([^/]+)\/setup\/retry$/);
+          if (method === "POST" && setupRetryMatch) {
+            const guard = await requireOrgRole(organizationId, "admin");
+            if (guard) return guard;
+            const targetSite = await sites.getSite(env, setupRetryMatch[1]);
+            if (!targetSite || targetSite.organization_id !== organizationId) return json({ success: false, error: "not_found" }, 404);
+            const result = await siteSetup.retrySetup(env, targetSite.id);
+            const httpStatus = result.ok ? 200 : (result.httpStatus || 409);
+            await logAudit(env, {
+              actorType: "customer_user", customerUserId: customer.id, organizationId,
+              endpoint: path, method, resource: "site", resourceId: targetSite.id, action: "setup_retry",
+              success: result.ok, statusCode: httpStatus,
+              errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
+            });
+            if (!result.ok) return json({ success: false, error: result.error }, httpStatus);
+            return json({ success: true, data: await siteSetup.getSetupForSite(env, targetSite.id) });
           }
 
           // -------------------------------------------
@@ -3388,6 +3416,17 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           const guard = requireSuperAdmin();
           if (guard) return guard;
           const body = await request.json().catch(() => ({}));
+
+          // Phase 9: optional first configuration ({ preset } or { cloneFromTenantId, sections }). Checked BEFORE the tenant is
+          // registered, so a bad choice registers nothing. Without either field nothing is requested (a manual tenant is left as it is).
+          const wantsSetup = (body.preset !== undefined && body.preset !== null && body.preset !== "") || (body.cloneFromTenantId !== undefined && body.cloneFromTenantId !== null && body.cloneFromTenantId !== "");
+          let plannedSetup = null;
+          if (wantsSetup) {
+            const planned = await siteSetup.planSetup(env, { preset: body.preset, cloneFromTenantId: body.cloneFromTenantId, sections: body.sections, staff: true });
+            if (!planned.ok) return json({ success: false, error: planned.error }, planned.status);
+            plannedSetup = planned.plan;
+          }
+
           const result = await registry.createTenant(env, body);
 
           await logAudit(env, {
@@ -3407,7 +3446,25 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (!result.ok) {
             return json({ success: false, error: result.error, message: result.message }, result.status);
           }
-          return json({ success: true, data: result.tenant, credential: result.credential }, 201);
+
+          // Recorded either way. A tenant that is not reachable yet (its Worker has no credential secrets until the operator sets them)
+          // leaves the request "failed" with a short code, to be applied later from the site setup route; registration never fails for it.
+          let setupResult = null;
+          if (plannedSetup) {
+            try {
+              const requestIdForSetup = await siteSetup.storeSetupRequest(env, { tenantId: result.tenant.id, plan: plannedSetup, requestedBy: `staff:${admin.id}` });
+              const applied = await siteSetup.applySetup(env, requestIdForSetup, { timeoutMs: 8000 });
+              setupResult = { requestId: requestIdForSetup, kind: plannedSetup.kind, presetId: plannedSetup.presetId, status: applied.status, error: applied.error || null };
+              await logAudit(env, {
+                adminId: admin.id, tenantId: result.tenant.id, endpoint: path, method, resource: "tenant", resourceId: result.tenant.id,
+                action: "setup_" + plannedSetup.kind, success: applied.status !== "failed", statusCode: 201,
+                errorMessage: applied.status === "failed" ? applied.error : null, requestId, ipHash
+              });
+            } catch (_) {
+              setupResult = { requestId: null, kind: plannedSetup.kind, presetId: plannedSetup.presetId, status: "failed", error: "internal_error" };
+            }
+          }
+          return json({ success: true, data: result.tenant, credential: result.credential, ...(setupResult ? { setup: setupResult } : {}) }, 201);
         }
 
         const tenantIdParams = matchPath("/api/tenants/:id", path);
@@ -4376,6 +4433,26 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         // organization it touched. Not reachable with a customer session.
         // ---------------------------------------------
 
+        // Phase 9: the preset new sites start from, per plan or per product (no entry = "full"). Super admin only, validated, audited.
+        if (path === "/api/platform/site-presets/defaults" && (method === "GET" || method === "PUT")) {
+          const guard = requireSuperAdmin();
+          if (guard) return guard;
+          if (method === "GET") {
+            return json({ success: true, data: await siteSetup.listDefaults(env), presets: siteSetup.SITE_PRESETS, fallback: siteSetup.DEFAULT_PRESET_ID });
+          }
+          const b = await request.json().catch(() => ({}));
+          const result = await siteSetup.setDefault(env, {
+            scopeKind: b.scopeKind ?? b.scope_kind, scopeId: b.scopeId ?? b.scope_id, presetId: b.presetId ?? b.preset_id, updatedBy: `staff:${admin.id}`
+          });
+          await logAudit(env, {
+            adminId: admin.id, endpoint: path, method, resource: "site_preset_default", resourceId: result.ok ? `${result.scopeKind}:${result.scopeId}` : null,
+            action: result.ok ? (result.cleared ? "clear" : "set") : "set", success: result.ok, statusCode: result.ok ? 200 : result.status || 400,
+            errorMessage: result.ok ? null : result.error, requestId, ipHash
+          });
+          if (!result.ok) return json({ success: false, error: result.error }, result.status || 400);
+          return json({ success: true, data: await siteSetup.listDefaults(env) });
+        }
+
         if (path.startsWith("/api/platform/saas/")) {
           const guard = requireSuperAdmin();
           if (guard) return guard;
@@ -4529,6 +4606,44 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const result = await commercial.decideApproval(env, approvalId, { decision: approvalMatch[2], staffId: admin.id, reason: body.reason });
             await logAudit(env, { adminId: admin.id, organizationId: result.organizationId || null, endpoint: path, method, resource: "approval_request", resourceId: approvalId, action: approvalMatch[2], reason: String(body.reason || "").trim().slice(0, 500), success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
             return result.ok ? json({ success: true, data: result }) : json({ success: false, error: result.error }, result.status || 400);
+          }
+
+          // Phase 9: read, apply or retry the first configuration of a site. Not under /api/sites/ because that prefix is the
+          // customer API (customer session only). POST { preset } | { cloneFromTenantId, sections } | { retry: true }.
+          const siteSetupParams = matchPath("/api/platform/saas/sites/:id/setup", path);
+          if (siteSetupParams && (method === "GET" || method === "POST")) {
+            const setupSite = await sites.getSite(env, siteSetupParams.id);
+            if (!setupSite) return json({ success: false, error: "not_found" }, 404);
+            if (method === "GET") {
+              return json({ success: true, data: await siteSetup.getSetupForSite(env, setupSite.id, { staff: true }), presets: siteSetup.SITE_PRESETS });
+            }
+            const b = await staffBody();
+            let outcome;
+            if (b.retry === true) {
+              outcome = await siteSetup.retrySetup(env, setupSite.id);
+            } else if (!setupSite.tenant_id) {
+              outcome = { ok: false, status: 409, error: "site_has_no_tenant" };
+            } else {
+              const created = await siteSetup.createSetupRequest(env, {
+                siteId: setupSite.id, preset: b.preset, cloneFromTenantId: b.cloneFromTenantId, cloneFromSiteId: b.cloneFromSiteId, sections: b.sections,
+                organizationId: setupSite.organization_id, productId: setupSite.product_id, targetSiteId: setupSite.id, targetTenantId: setupSite.tenant_id,
+                staff: true, requestedBy: `staff:${admin.id}`
+              });
+              if (!created.ok) outcome = created;
+              else {
+                const applied = await siteSetup.applySetup(env, created.requestId);
+                outcome = { ok: applied.status !== "failed", status: applied.status, requestId: created.requestId, error: applied.error || null, httpStatus: applied.status === "failed" ? 502 : 200 };
+              }
+            }
+            const httpStatus = outcome.ok ? 200 : (typeof outcome.httpStatus === "number" ? outcome.httpStatus : (typeof outcome.status === "number" ? outcome.status : 502));
+            await logAudit(env, {
+              adminId: admin.id, organizationId: setupSite.organization_id, endpoint: path, method, resource: "site", resourceId: setupSite.id,
+              action: b.retry === true ? "setup_retry" : "setup_apply", success: !!outcome.ok, statusCode: httpStatus,
+              errorMessage: outcome.ok ? null : (outcome.error || "failed"), requestId, ipHash
+            });
+            const view = await siteSetup.getSetupForSite(env, setupSite.id, { staff: true });
+            if (!outcome.ok) return json({ success: false, error: typeof outcome.error === "string" && outcome.error ? outcome.error : "setup_failed", data: view }, httpStatus);
+            return json({ success: true, data: view });
           }
 
           if (method === "POST") {

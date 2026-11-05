@@ -31,7 +31,19 @@ export function defaultAnnouncementSql() {
   return `INSERT OR REPLACE INTO settings (key, value) VALUES\n${rows};`;
 }
 
+// Phase 9: a new tenant starts in the setup wizard. The tenant's own migration 0013 marks the setup of a database as complete (that is
+// right for sites that were already in use), so this seed, which runs AFTER the release's migrations on the first deploy only, puts the
+// two keys back to "pending / new". It is what makes the wizard appear even when applying the preset (site-setup.js) fails.
+export const SETUP_PENDING_MIGRATION = "provision_0002_site_setup_pending";
+
+export function setupPendingSql() {
+  return `INSERT OR REPLACE INTO settings (key, value) VALUES\n('site_setup_state','pending'),\n('site_setup_source','new');`;
+}
+
 /** Migrations applied only on a site's first deploy, after the release's own migrations. */
 export function newTenantSeedMigrations() {
-  return [{ name: DEFAULT_ANNOUNCEMENT_MIGRATION, sql: defaultAnnouncementSql() }];
+  return [
+    { name: DEFAULT_ANNOUNCEMENT_MIGRATION, sql: defaultAnnouncementSql() },
+    { name: SETUP_PENDING_MIGRATION, sql: setupPendingSql() }
+  ];
 }

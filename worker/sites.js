@@ -11,6 +11,7 @@
 import * as webhooks from "./webhooks.js";
 import { evaluateWriteGate, refusalFor } from "./access.js";
 import { syncSiteBrand } from "./site-brands.js";
+import { planSetup, storeSetupRequest } from "./site-setup.js";
 
 export const SITE_STATUSES = [
   "pending",
@@ -83,7 +84,7 @@ async function recordStatusEvent(env, { siteId, fromStatus, toStatus, reason, ac
  * customer; it is not a fake success for a deployment that hasn't
  * happened.
  */
-export async function createSite(env, { organizationId, name, productId, actorUserId }) {
+export async function createSite(env, { organizationId, name, productId, actorUserId, preset, cloneFromSiteId, cloneFromTenantId, sections }) {
   const gate = await evaluateWriteGate(env, { organizationId, method: "POST", subPath: "/sites" });
   if (gate.blocked) return { ok: false, status: 402, ...refusalFor(gate.access) };
   const trimmedName = (name || "").trim();
@@ -94,6 +95,11 @@ export async function createSite(env, { organizationId, name, productId, actorUs
     .bind(productId)
     .first();
   if (!product) return { ok: false, status: 422, error: "invalid_product" };
+
+  // Phase 9: how the new site is first configured. Checked BEFORE anything is written, so a bad preset or clone source creates no site.
+  // With no choice the request carries the default for the plan or product, and "full" when there is none: every new site starts the wizard.
+  const planned = await planSetup(env, { preset, cloneFromSiteId, cloneFromTenantId, sections, organizationId, productId, staff: false });
+  if (!planned.ok) return { ok: false, status: planned.status, error: planned.error };
 
   const id = crypto.randomUUID();
   const slug = await uniqueSlug(env, slugify(trimmedName));
@@ -112,9 +118,18 @@ export async function createSite(env, { organizationId, name, productId, actorUs
     actorId: actorUserId
   });
 
+  // The site exists either way: a failure to record the request must not lose it (the first-deploy seed still starts the wizard).
+  let setupRequestId = null;
+  try {
+    setupRequestId = await storeSetupRequest(env, { siteId: id, plan: planned.plan, requestedBy: actorUserId });
+  } catch (_) { /* fail-open */ }
+
   await webhooks.dispatchEvent(env, organizationId, "site.created", { siteId: id, name: trimmedName, slug });
 
-  return { ok: true, siteId: id, slug };
+  return {
+    ok: true, siteId: id, slug,
+    setup: { requestId: setupRequestId, kind: planned.plan.kind, presetId: planned.plan.presetId, presetSource: planned.plan.presetSource, status: "pending" }
+  };
 }
 
 export async function getSite(env, siteId) {

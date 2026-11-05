@@ -31,6 +31,7 @@ import * as webhooks from "./webhooks.js";
 import { deployments as realDeployments } from "./deployments.js";
 import * as tenantTemplate from "./tenant-template.js";
 import { evaluateWriteGate, refusalFor } from "./access.js";
+import * as siteSetupService from "./site-setup.js";
 
 export const PROVISIONING_STEPS = [
   "validate_entitlement",
@@ -57,7 +58,7 @@ export function computeResourceNames(site, env) {
   };
 }
 
-export function createProvisioningService(infra, { deploymentService = realDeployments, templateService = tenantTemplate } = {}) {
+export function createProvisioningService(infra, { deploymentService = realDeployments, templateService = tenantTemplate, setupService = siteSetupService } = {}) {
   async function getSiteResource(env, siteId, resourceType) {
     return env.LUMMET_DB.prepare(
       `SELECT * FROM site_resources WHERE site_id = ? AND resource_type = ? AND status = 'active'`
@@ -317,7 +318,17 @@ export function createProvisioningService(infra, { deploymentService = realDeplo
     });
     if (!started.ok) return { attempted: true, ok: false, error: started.error };
     const ran = await deploymentService.runJob(env, started.jobId);
-    return { attempted: true, ok: ran.ok, error: ran.ok ? undefined : ran.error, deploymentId: started.deploymentId };
+    // Phase 9: give the live tenant its first configuration (preset or copy). Only after a successful deploy, and fail-open: whatever
+    // happens here the site stays live (as the full platform with the setup wizard pending) and provisioning is still a success.
+    let setup;
+    if (ran.ok) {
+      try {
+        setup = await setupService.applyPendingSetupForSite(env, siteId);
+      } catch (error) {
+        setup = { attempted: true, ok: false, status: "failed", error: "internal_error" };
+      }
+    }
+    return { attempted: true, ok: ran.ok, error: ran.ok ? undefined : ran.error, deploymentId: started.deploymentId, ...(setup ? { setup } : {}) };
   }
 
   return { startProvisioning, retryProvisioning, runJob, attemptAutoDeploy };

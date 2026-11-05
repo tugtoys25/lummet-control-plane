@@ -8,7 +8,7 @@ import { createTestDb, applyMigrations } from './support/d1-shim.js';
 import { renderBrandBand, loadBrandBand, accentOf, hueOfHex } from '../worker/brand-band.js';
 import { syncSiteBrand, brandSlugFor } from '../worker/site-brands.js';
 import { CMS_RESOURCES } from '../worker/cms-resources.js';
-import { defaultAnnouncementSql, DEFAULT_SITE_ANNOUNCEMENT } from '../worker/tenant-defaults.js';
+import { defaultAnnouncementSql, DEFAULT_SITE_ANNOUNCEMENT, setupPendingSql } from '../worker/tenant-defaults.js';
 
 const env = () => { const db = createTestDb(); applyMigrations(db); return { LUMMET_DB: db }; };
 
@@ -86,4 +86,17 @@ test('new-tenant announcement seed applies to the tenant schema with the keys it
   assert.ok(get('site_announce_text').length <= 160);
   const schema = readFileSync(new URL('worker/header-hero/schema.js', TENANT), 'utf8');
   for (const [key] of DEFAULT_SITE_ANNOUNCEMENT) assert.ok(schema.includes(`"${key}"`), `${key} is a managed header-hero key`);
+});
+
+// Phase 9: on the real tenant schema the tenant's own migration 0013 marks a database's setup as complete (right for sites already in use);
+// the second first-deploy seed must run AFTER it and put a NEW tenant back in the wizard.
+test('setup-pending seed turns a freshly migrated tenant into a site that starts the setup wizard', { skip: !existsSync(new URL('migrations/', TENANT)) }, () => {
+  const db = new DatabaseSync(':memory:');
+  for (const f of readdirSync(new URL('migrations/', TENANT)).sort()) db.exec(readFileSync(new URL(`migrations/${f}`, TENANT), 'utf8'));
+  const get = (k) => db.prepare('SELECT value FROM settings WHERE key = ?').get(k)?.value;
+  if (get('site_setup_state') === undefined) return; // tenant without Phase 9 migration 0013: nothing to put back
+  assert.equal(get('site_setup_state'), 'complete', 'a database that is only migrated counts as set up');
+  db.exec(setupPendingSql());
+  assert.equal(get('site_setup_state'), 'pending');
+  assert.equal(get('site_setup_source'), 'new');
 });

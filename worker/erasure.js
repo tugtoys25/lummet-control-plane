@@ -19,7 +19,7 @@ import * as policy from "./retention-policy.js";
 import { verifyPassword, hashPassword } from "./auth.js";
 import * as cloudflareProvider from "./infra-cloudflare.js";
 
-const NOT_FOUND = /not\s*found|does\s*not\s*exist|no\s*such|could\s*not\s*find/i;
+const NOT_FOUND = /not\s*found|does\s*not\s*exist|no\s*such|could\s*not\s*(?:be\s*)?(?:find|found)/i;
 
 async function logErasure(env, kind, subjectId, status, summary) {
   await env.LUMMET_DB.prepare(`INSERT INTO erasure_log (id, kind, subject_id, status, summary) VALUES (?, ?, ?, ?, ?)`)

@@ -20,6 +20,11 @@
 - Every site that is not already `deleted` can be deleted, including one stuck in `provisioning`, `configuring`, `deploying`, `provisioned` or `failed`. Starting a deletion cancels the site's other jobs (setup, deploys, retries), so nothing can recreate what is being removed or be retried by the sweep. Every teardown step re-runs on each attempt and only acts on what is still recorded as active, so a resource a straggling job created late is caught by `finalize` (it refuses to finish while anything is recorded active) and removed on the retry.
 - New webhook event: `site.deleted`.
 
+## Pause / resume (customer)
+- Sites page: **Pause site** on live sites, **Resume site** on sites the customer paused. `POST /api/organizations/:id/sites/:siteId/pause|resume` (owner/admin). A pause is a `suspended` status plus the signed access state pushed to the tenant, the same machinery as a staff suspension; nothing is deleted.
+- Kept apart from staff suspension: the status history records who suspended the site. A customer can resume only a pause they made (`403 suspended_by_lummet` otherwise), so pausing cannot be used to get around a staff suspension. Staff can still reactivate any site. Only an `active` site can be paused, and a paused site can still be deleted.
+- Visitors of a paused site see whatever the tenant shows for a suspended site (not verified here).
+
 ## Verification (merged onto the current stable tree)
 - Full suite: 212 files, 2,667 tests, 2,663 pass. The 4 that do not pass fail identically on the untouched stable code: `load-d1-policies-6-5c` and `runbooks-restore-drill-6-5b` look for `PLACEHOLDERS.md` above the repository folder, `phase6-gate` expects no migration above 0072 and a `RELEASE_ID` file, and `staging-checks` passes on its own but the file-by-file runner force-exits it.
 - Existing tests that created several sites with the same name were changed to use distinct names, because an address already taken on a domain is now refused (it used to get a number added).

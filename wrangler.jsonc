@@ -266,6 +266,7 @@
 		"EMAIL_FROM": "Lummet <no-reply@lummet.com>",
 		"PAYMENT_GATEWAYS": "nowpayments",
 		"CF_WORKERS_DEV_SUBDOMAIN": "tugtoys25",
+                "TENANT_TURNSTILE_SITEKEY": "0x4AAAAAAFu7XNvU-gnTjL26",
                 "TURNSTILE_SITE_KEY": "0x4AAAAAAFu7XNvU-gnTjL26",
 		"WEBAUTHN_RP_ID": "lummet.com",
 		"WEBAUTHN_ORIGIN": "https://lummet.com"

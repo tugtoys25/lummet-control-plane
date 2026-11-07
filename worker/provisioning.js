@@ -321,7 +321,10 @@ export function createProvisioningService(infra, { deploymentService = realDeplo
    * in 'failed', exactly as deployments.js already documents).
    */
   async function attemptAutoDeploy(env, siteId, { actorType = "system" } = {}) {
-    const release = await templateService.getCurrentRelease(env);
+    // The release of the application this site's product runs (template line), not simply "the" release.
+    const release = typeof templateService.getCurrentReleaseForSite === "function"
+      ? await templateService.getCurrentReleaseForSite(env, siteId)
+      : await templateService.getCurrentRelease(env);
     if (!release.ok) {
       return { attempted: false, reason: release.error };
     }

@@ -92,15 +92,17 @@ export async function createSite(env, { organizationId, name, productId, actorUs
   if (!trimmedName) return { ok: false, status: 422, error: "name_required" };
   if (!productId) return { ok: false, status: 422, error: "product_required" };
 
-  const product = await env.LUMMET_DB.prepare(`SELECT id FROM products WHERE id = ? AND status = 'active'`)
+  const product = await env.LUMMET_DB.prepare(`SELECT id, template_line FROM products WHERE id = ? AND status = 'active'`)
     .bind(productId)
     .first();
   if (!product) return { ok: false, status: 422, error: "invalid_product" };
 
   // Phase 9: how the new site is first configured. Checked BEFORE anything is written, so a bad preset or clone source creates no site.
   // With no choice the request carries the default for the plan or product, and "full" when there is none: every new site starts the wizard.
-  const planned = await planSetup(env, { preset, cloneFromSiteId, cloneFromTenantId, sections, organizationId, productId, staff: false });
-  if (!planned.ok) return { ok: false, status: planned.status, error: planned.error };
+  // Only the casino application has a first-run wizard and presets; a brokerage site is set up by its own administrator.
+  const hasWizard = (product.template_line || "casino") === "casino";
+  const planned = hasWizard ? await planSetup(env, { preset, cloneFromSiteId, cloneFromTenantId, sections, organizationId, productId, staff: false }) : null;
+  if (planned && !planned.ok) return { ok: false, status: planned.status, error: planned.error };
 
   // Platform domain (migration 0085): validated server-side against what this organisation may choose, before anything is written.
   const chosen = await resolveCustomerChoice(env, { organizationId, platformDomainId });
@@ -126,14 +128,14 @@ export async function createSite(env, { organizationId, name, productId, actorUs
   // The site exists either way: a failure to record the request must not lose it (the first-deploy seed still starts the wizard).
   let setupRequestId = null;
   try {
-    setupRequestId = await storeSetupRequest(env, { siteId: id, plan: planned.plan, requestedBy: actorUserId });
+    if (planned) setupRequestId = await storeSetupRequest(env, { siteId: id, plan: planned.plan, requestedBy: actorUserId });
   } catch (_) { /* fail-open */ }
 
   await webhooks.dispatchEvent(env, organizationId, "site.created", { siteId: id, name: trimmedName, slug });
 
   return {
     ok: true, siteId: id, slug, platformDomain: { id: chosen.domain.id || null, hostname: chosen.domain.hostname, host: hostFor({ slug }, chosen.domain) },
-    setup: { requestId: setupRequestId, kind: planned.plan.kind, presetId: planned.plan.presetId, presetSource: planned.plan.presetSource, status: "pending" }
+    setup: planned ? { requestId: setupRequestId, kind: planned.plan.kind, presetId: planned.plan.presetId, presetSource: planned.plan.presetSource, status: "pending" } : null
   };
 }
 
@@ -143,7 +145,7 @@ export async function getSite(env, siteId) {
 
 export async function listSitesForOrganization(env, organizationId) {
   const result = await env.LUMMET_DB.prepare(
-    `SELECT s.*, p.name AS product_name, p.category AS product_category
+    `SELECT s.*, p.name AS product_name, p.category AS product_category, p.template_line AS template_line
      FROM sites s JOIN products p ON p.id = s.product_id
      WHERE s.organization_id = ? AND s.status != 'deleted'
      ORDER BY s.created_at`

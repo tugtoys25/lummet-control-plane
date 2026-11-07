@@ -54,6 +54,10 @@ function siteCard(site, deployments, latestVersion, canManage) {
     banner = `<p class="subtitle">Running ${escapeHtml(current.version)}${latestVersion && current.version === latestVersion ? " — up to date" : ""}.</p>`;
   }
 
+  if (canManage && site.status === "active" && site.template_line === "brokerage") {
+    banner += `<p><a class="btn" href="/app/sites/${encodeURIComponent(site.id)}/admin-setup">Admin setup</a></p>`;
+  }
+
   const rows = deployments.length
     ? deployments.map((d) => `
         <tr>
@@ -77,9 +81,9 @@ function siteCard(site, deployments, latestVersion, canManage) {
     </div>`;
 }
 
-export function renderDeploymentsPage({ sites, deploymentsBySite, latestVersion, canManage }) {
+export function renderDeploymentsPage({ sites, deploymentsBySite, latestVersion, latestByLine = null, canManage }) {
   const cards = sites.length
-    ? sites.map((s) => siteCard(s, deploymentsBySite[s.id] || [], latestVersion, canManage)).join("")
+    ? sites.map((s) => siteCard(s, deploymentsBySite[s.id] || [], (latestByLine && latestByLine[s.template_line || "casino"]) || latestVersion, canManage)).join("")
     : `<div class="card"><p class="empty">Create a site first. Its deployments will show up here.</p></div>`;
 
   return `

@@ -1,5 +1,6 @@
 // Staff console screens for the SaaS layer (master prompt section 45).
 // Super-admin only — the route layer enforces that; hiding nav is not security.
+import { LINE_KEYS, TEMPLATE_LINES } from "../../template-lines.js";
 import * as errorsRepo from "../../repositories/request-errors.js";
 import { configIssues, platformDomainIssues } from "../../config-check.js";
 import * as alertsModule from "../../alerts.js";
@@ -424,8 +425,8 @@ export async function renderTenantTemplatePage(env, admin) {
     <p style="color:var(--text-dim)">The shared build every newly-provisioned site automatically deploys.
     Publish a new release with the output of <code>scripts/build-tenant-worker.mjs</code>
     (see DEPLOYMENT.md). No release published yet means new sites stop at "provisioned" instead of going live.</p>
-    ${table(["Version", "Status", "Migrations", "Size", "Notes", "Published", ""], releases.map((r) => [h(r.version), badge(r.status), h(r.migration_count), h(Math.round(r.size_bytes / 1024) + " KB"), h(r.notes || ""), h(r.created_at),
-      r.status !== "active" ? `<button class="btn"${onClick("act", [`/api/platform/saas/tenant-template/${r.version}/activate`, {}, `Make ${r.version} the active release for all new sites?`])}>Activate</button>` : "current"]), "No releases published yet.")}
+    ${table(["Version", "Application", "Status", "Migrations", "Size", "Notes", "Published", ""], releases.map((r) => [h(r.version), h((TEMPLATE_LINES[r.template_line] || TEMPLATE_LINES.casino).label), badge(r.status), h(r.migration_count), h(Math.round(r.size_bytes / 1024) + " KB"), h(r.notes || ""), h(r.created_at),
+      r.status !== "active" ? `<button class="btn"${onClick("act", [`/api/platform/saas/tenant-template/${r.version}/activate`, {}, `Make ${r.version} the active release for all new sites of its application?`])}>Activate</button>` : "current"]), "No releases published yet.")}
     <h2>Publish a new release</h2>
     <p style="color:var(--text-dim)">Paste the JSON produced by <code>node scripts/build-tenant-worker.mjs</code> — it already has the right shape.</p>
     <form${onSubmit("actPublishTemplate", ["$el"], { prevent: true })}>
@@ -492,15 +493,16 @@ export async function renderDomainsAdminPage(env, admin, { status = "", page: ra
 
 const ROLLOUT_ITEM_BADGE = { pending: "waiting", running: "deploying", succeeded: "updated", skipped: "skipped", failed: "failed" };
 
-function renderRolloutSection(d) {
+function renderRolloutSection(d, label = "") {
+  const title = label ? `Release rollout: ${h(label)}` : "Release rollout";
   const intro = `<p style="color:var(--text-dim)">Publishing a release only stores it: sites keep running what they have until a deployment replaces it. A rollout deploys the active release to every live site <strong>one at a time</strong>. It waits for each site's health check before starting the next, <strong>stops at the first failure</strong> (the remaining sites are not touched, and a site that failed keeps serving its old version), and skips sites already on the release or not live. Details: docs/TENANT_RELEASES.md.</p>`;
-  if (!d.active) return `<h2>Release rollout</h2>${intro}<p style="color:var(--text-dim)">No tenant release has been published yet, so there is nothing to roll out.</p>`;
+  if (!d.active) return `<h2>${title}</h2>${intro}<p style="color:var(--text-dim)">No release has been published for this application yet, so there is nothing to roll out.</p>`;
   const fleet = d.fleet.length ? d.fleet.map((r) => `${h(r.version || "no version recorded")}: ${h(r.n)}`).join(" &middot; ") : "no live sites";
   const summary = `<p>Active release <strong>${h(d.active.version)}</strong> (published ${h(d.active.created_at || "")}). Live sites: ${h(d.totalLive)}, on the active release: ${h(d.onActive)}, behind: <strong>${h(d.outdated)}</strong>.<br><span style="color:var(--text-dim)">By version: ${fleet}</span></p>`;
   let controls = "";
   if (d.running) {
     controls = `<p><span id="rollout-progress">${h(d.shown ? d.shown.progress : "")}</span> <button class="btn btn-danger"${onClick("act", [`/api/platform/saas/rollouts/${d.running.id}/cancel`, {}, "Cancel this rollout? Sites not yet updated will stay on their current version. A deployment already under way finishes on its own."])}>Cancel rollout</button></p>
-      <div id="rollout-drive" data-rollout="${h(d.running.id)}" data-progress="${h(d.shown ? d.shown.progress : "")}" style="display:none"></div>
+      <div id="${d.line && d.line !== "casino" ? "rollout-drive-" + h(d.line) : "rollout-drive"}" data-rollout="${h(d.running.id)}" data-progress="${h(d.shown ? d.shown.progress : "")}" style="display:none"></div>
       <p style="color:var(--text-dim)">This page keeps the rollout moving while it is open; it also continues from the scheduled maintenance tick if you close it.</p>`;
   } else if (d.outdated > 0) {
     const cn = d.canary || { required: false, state: null, candidates: [] };
@@ -514,7 +516,7 @@ function renderRolloutSection(d) {
       ? `<p><label for="canary-site">Canary site</label> <select id="canary-site">${cn.candidates.map((c) => `<option value="${h(c.id)}">${h(c.name || c.slug || c.id)}${c.version ? ` (${h(c.version)})` : ""}</option>`).join("")}</select> <button class="btn"${onClick("lummetCanaryStart", [])}>Roll out to this site first</button></p>`
       : "";
     const canBlocked = cn.required && !passed;
-    controls = `${canaryNote}${canaryForm}<p><button class="btn"${canBlocked ? " disabled" : ""}${onClick("act", ["/api/platform/saas/rollouts", {}, `Roll out ${d.active.version} to ${d.outdated} site(s), one at a time? It stops at the first failure.`])}>Roll out ${h(d.active.version)} to ${h(d.outdated)} site${d.outdated === 1 ? "" : "s"}</button></p>`;
+    controls = `${canaryNote}${canaryForm}<p><button class="btn"${canBlocked ? " disabled" : ""}${onClick("act", ["/api/platform/saas/rollouts", { line: d.line || "casino" }, `Roll out ${d.active.version} to ${d.outdated} site(s), one at a time? It stops at the first failure.`])}>Roll out ${h(d.active.version)} to ${h(d.outdated)} site${d.outdated === 1 ? "" : "s"}</button></p>`;
   } else {
     controls = `<p style="color:var(--text-dim)">Every live site is on the active release.</p>`;
   }
@@ -528,13 +530,13 @@ function renderRolloutSection(d) {
       ${table(["Site", "Status", "Detail", "Started", "Finished"], r.items.map((i) => [h(i.site_name || i.site_slug || i.site_id), badge(ROLLOUT_ITEM_BADGE[i.status] || i.status), h(i.detail || ""), h(i.started_at || ""), h(i.completed_at || "")]), "No sites.")}`;
   }
   const history = d.recent.length > 1 ? `<h3>Earlier rollouts</h3>${table(["Version", "Status", "Sites", "Started by", "Started", "Note"], d.recent.slice(1).map((r) => [h(r.version), badge(r.status), h(r.total), h(r.startedBy || ""), h(r.createdAt), h(r.error || "")]), "")}` : "";
-  return `<h2>Release rollout</h2>${intro}${summary}${controls}${shown}${history}`;
+  return `<h2>${title}</h2>${intro}${summary}${controls}${shown}${history}`;
 }
 
 export async function renderDeploymentsAdminPage(env, admin, { status = "", page: rawPage } = {}) {
   const page = pageNumber(rawPage);
   const { rows, hasMore } = paged(await staff.listAllDeployments(env, { status, ...pageArgs(page) }));
-  const rollout = page === 1 && !status ? renderRolloutSection(await rolloutsModule.dashboard(env)) + "<h2>Deployments</h2>" : "";
+  const rollout = page === 1 && !status ? (await Promise.all(LINE_KEYS.map(async (line) => renderRolloutSection(await rolloutsModule.dashboard(env, line), TEMPLATE_LINES[line].label)))).join("") + "<h2>Deployments</h2>" : "";
   return shell(env, admin, "Deployments", "saas-deployments", `${rollout}${statusFilter(status, ["queued", "building", "migrating", "deploying", "checking", "active", "failed", "rolled_back"])}
     ${table(["Site", "Organization", "Version", "Type", "Status", "By", "Started", "Error"], rows.map((d) => [h(d.site), orgLink(d.organization_id, d.organization), h(d.version) + (d.is_current ? " (current)" : ""), d.is_rollback ? "rollback" : "deploy", badge(d.status), h(d.actor_type), h(d.created_at), h(d.error_message || "")]), "No deployments.")}${pager("/platform/saas/deployments", { status }, page, hasMore)}`);
 }

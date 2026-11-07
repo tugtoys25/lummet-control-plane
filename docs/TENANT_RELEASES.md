@@ -169,3 +169,43 @@ roll out to the rest.
 * **Stop.** Cancel the running rollout (sites not yet updated stay as they are; a deployment already under way finishes). A failure stops it by itself.
 * **Rollback.** Publish or activate the earlier version and run a rollout with that `version` (canary first if you want). Migrations are never re-run.
 * **Switch state.** Organization detail > "Check switch" reads the tenant's master switch (Super API v17). Deploy the tenant release before relying on it.
+
+## Template lines: more than one application (release 2.7.1)
+
+A **template line** is one application the platform releases and provisions. `casino` is lummet-tenant (the default for
+everything that does not name a line). `brokerage` is luminousagents. Everything above describes a line; what is new is that
+there is one of each:
+
+| | casino | brokerage |
+|---|---|---|
+| Product | every existing product | `brokerage_site` |
+| R2 key | `templates/<version>.json` | `templates/brokerage/<version>.json` |
+| Active release | one | one (publishing one never supersedes the other) |
+| Bindings | `DB`, `CACHE`, `MEDIA_BUCKET`, `AI` | `DB`, `CACHE`, `PRIVATE_FILES` (no `AI`) |
+| Cron | `0 */6 * * *` | `*/5 * * * *` |
+| Health check | `/` | `/healthz` |
+| Static files | platform rule (`/static/*` bypass) | the release's own `assetsConfig` (`run_worker_first` from `wrangler.jsonc`, `_headers`) |
+
+Rules that hold for every line:
+
+- **A site's line is its product's line** (`products.template_line`). A customer who creates a Brokerage Site is provisioned and
+  auto-deployed with the active **brokerage** release; a casino site is never touched by it.
+- **A release only reaches its own line.** A deployment that names a release of another line fails with a clear message and the
+  serving site keeps its version. A rollout seeds only the sites of its release's line, and `--line` naming a different line than
+  the release is refused (`release_line_mismatch`).
+- **One rollout per line** may run at a time, so a casino rollout and a brokerage rollout can proceed together.
+- **A release cannot change infrastructure.** Bindings, cron, runtime date and the health URL come from
+  `worker/template-lines.js`; a release carries code, migrations, static files and (for lines that define their own) the static
+  file rules only.
+- Brokerage sites get per-site `IP_HASH_SECRET` and `OTP_ENCRYPTION_KEY`, derived from the platform secret
+  **`TENANT_SECRET_ROOT`** and the site id. Set it once (at least 32 characters, e.g. `openssl rand -base64 48`) as the GitHub
+  secret `TENANT_SECRET_ROOT`; the deploy workflow pushes it to the Worker. **Never rotate it** once brokerage sites exist: the
+  keys it derives protect those sites' stored MFA secrets. Without it a brokerage deployment fails with a message naming it.
+
+Publishing a brokerage release, from the luminousagents repo root:
+
+```
+LUMMET_STAFF_TOKEN=lmst_... node tools/release/publish-tenant-release.mjs --base https://luminousagents.com \
+  --version 2026.11.1 --line brokerage --assets-root public --assets-dirs . --migrations-dir migrations \
+  [--rollout --wait] [--sites id1,id2]
+```

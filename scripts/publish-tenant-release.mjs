@@ -5,7 +5,12 @@
 // Run from the lummet-tenant repo root:
 //   LUMMET_STAFF_TOKEN=lmst_... node <path>/publish-tenant-release.mjs \
 //     --base https://your-control-plane.example.com --version 2026.10.20 [--notes "..."] \
-//     [--rollout [--wait] [--sites id1,id2]] [--allow-existing] [--dry-run]
+//     [--line brokerage] [--rollout [--wait] [--sites id1,id2]] [--allow-existing] [--dry-run]
+//
+// --line names the application the release belongs to (default casino = lummet-tenant; brokerage = luminousagents).
+// A release only ever reaches sites whose product runs that line. For brokerage, run from the luminousagents repo root:
+//   --line brokerage --assets-root public --assets-dirs . --migrations-dir migrations
+// and the static-file rules (assets.run_worker_first in wrangler.jsonc, plus public/_headers) travel with the release.
 //
 // Steps: (1) build the Worker script + migrations with build-tenant-worker.mjs; (2) upload every file under the
 // asset directories one at a time (the server recomputes each hash); (3) publish the release with the resulting
@@ -48,12 +53,14 @@ const TOKEN = process.env.LUMMET_STAFF_TOKEN || "";
 const COOKIE = process.env.LUMMET_STAFF_COOKIE || "";
 const ROOT = String(args["assets-root"] || "en");
 const DIRS = String(args["assets-dirs"] || "static,templates,lummet").split(",").map((d) => d.trim()).filter(Boolean);
+const LINE = String(args.line === undefined || args.line === true ? "casino" : args.line).toLowerCase();
 const TIMEOUT_MS = Math.max(1, Number(args["timeout-minutes"]) || 90) * 60000;
 if (!args.version || args.version === true || (!args["dry-run"] && (!BASE || !(TOKEN || COOKIE)))) {
   console.error("Usage: LUMMET_STAFF_TOKEN=... node publish-tenant-release.mjs --base <url> --version <tag> [--notes ...] [--rollout [--wait] [--sites a,b]] [--allow-existing] [--dry-run]");
   console.error("(LUMMET_STAFF_COOKIE=... still works instead of a token, for manual runs.)");
   process.exit(2);
 }
+if (!/^[a-z]{3,20}$/.test(LINE)) { console.error("--line must be a lowercase name such as casino or brokerage."); process.exit(2); }
 if (!/^[a-zA-Z0-9._-]{1,64}$/.test(String(args.version))) { console.error("--version may only contain letters, digits, dot, dash and underscore (max 64)."); process.exit(2); }
 
 // The token API and the session API have the same shape under different paths.
@@ -78,9 +85,25 @@ async function api(method, path, { body, json, retries = 3 } = {}) {
   }
 }
 
+// _headers and _redirects are Cloudflare configuration files, not served assets: _headers travels in assetsConfig instead.
+const CONFIG_FILES = new Set(["_headers", "_redirects"]);
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? walk(join(dir, e.name)) : e.name.startsWith(".") ? [] : [join(dir, e.name)]);
+    e.isDirectory() ? walk(join(dir, e.name)) : e.name.startsWith(".") || CONFIG_FILES.has(e.name) ? [] : [join(dir, e.name)]);
+}
+
+/** The static-file rules of an application that defines its own (every line but casino): wrangler.jsonc + _headers. */
+function readAssetsConfig() {
+  if (LINE === "casino") return null;
+  const config = {};
+  try {
+    const raw = readFileSync("wrangler.jsonc", "utf8")
+      .replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/,(\s*[}\]])/g, "$1");
+    const first = JSON.parse(raw)?.assets?.run_worker_first;
+    if (Array.isArray(first)) config.runWorkerFirst = first;
+  } catch { console.error("Could not read assets.run_worker_first from wrangler.jsonc; every request will go to the Worker first."); }
+  try { config.headers = readFileSync(join(ROOT, "_headers"), "utf8"); } catch { /* no _headers file */ }
+  return config;
 }
 
 // 1. Build script + migrations
@@ -99,6 +122,7 @@ if (typeof args["release-file"] === "string") {
 
 // 2. Collect assets
 const files = DIRS.flatMap((d) => walk(join(ROOT, d)));
+const assetsConfig = release.assetsConfig || readAssetsConfig();
 if (files.length > MAX_ASSET_FILES) { console.error(`${files.length} asset files exceeds the limit of ${MAX_ASSET_FILES}.`); process.exit(1); }
 const manifest = {};
 const uploads = [];
@@ -111,7 +135,7 @@ for (const file of files) {
   uploads.push({ urlPath, bytes, hash });
 }
 const totalKb = Math.round(files.reduce((n, f) => n + statSync(f).size, 0) / 1024);
-console.error(`Script ${(release.scriptContent.length / 1024).toFixed(1)} KB, ${release.migrations.length} migrations, ${files.length} asset files (${totalKb} KB).`);
+console.error(`Line ${LINE}. Script ${(release.scriptContent.length / 1024).toFixed(1)} KB, ${release.migrations.length} migrations, ${files.length} asset files (${totalKb} KB).`);
 if (args["dry-run"]) { console.error("Dry run: nothing uploaded."); process.exit(0); }
 console.error(`Authenticating with a ${TOKEN ? "staff API token" : "session cookie"}.`);
 
@@ -126,14 +150,14 @@ await Promise.all(Array.from({ length: 5 }, async () => {
 }));
 if (failed) { console.error(`${failed} asset upload(s) failed; release NOT published.`); process.exit(1); }
 
-const pub = await api("POST", API.publish, { json: { version: String(args.version), scriptContent: release.scriptContent, migrations: release.migrations, assets: manifest, notes: args.notes && args.notes !== true ? args.notes : null }, retries: 2 });
+const pub = await api("POST", API.publish, { json: { version: String(args.version), scriptContent: release.scriptContent, migrations: release.migrations, assets: manifest, line: LINE, assetsConfig, notes: args.notes && args.notes !== true ? args.notes : null }, retries: 2 });
 if (pub.res.status === 409 && pub.json.error === "version_already_exists" && args["allow-existing"]) {
   console.error(`Version ${args.version} is already published; continuing (--allow-existing).`);
 } else if (!pub.res.ok || pub.json.success === false) {
   console.error("Publish failed:", JSON.stringify(pub.json));
   process.exit(1);
 } else {
-  console.error(`Published ${args.version} (${Object.keys(manifest).length} assets). It is now the active release. No existing site was changed.`);
+  console.error(`Published ${args.version} to the ${LINE} line (${Object.keys(manifest).length} assets). It is now that line's active release. No existing site was changed.`);
 }
 
 // 4. Optional rollout
@@ -142,7 +166,7 @@ if (!args.rollout) {
   process.exit(0);
 }
 const siteIds = typeof args.sites === "string" ? args.sites.split(",").map((s) => s.trim()).filter(Boolean) : null;
-const started = await api("POST", API.rollouts, { json: { version: String(args.version), siteIds, notes: args.notes && args.notes !== true ? args.notes : null }, retries: 2 });
+const started = await api("POST", API.rollouts, { json: { version: String(args.version), line: LINE, siteIds, notes: args.notes && args.notes !== true ? args.notes : null }, retries: 2 });
 if (!started.res.ok || started.json.success === false) {
   console.error("Could not start the rollout:", JSON.stringify(started.json));
   process.exit(1);

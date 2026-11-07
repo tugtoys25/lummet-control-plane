@@ -58,6 +58,13 @@
       "tax_code": null
     },
     {
+      "key": "brokerage_site",
+      "name": "Brokerage Site",
+      "category": "business",
+      "status": "active",
+      "tax_code": null
+    },
+    {
       "key": "founder_license",
       "name": "Founder License",
       "category": "license",

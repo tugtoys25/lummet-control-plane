@@ -108,6 +108,21 @@ test('zone missing, zone inactive, missing token permission, grey-cloud wildcard
   assert.ok(t.infra._calls.some((c) => c.method === 'deleteWorkerRoute'), 'test route cleaned up after a failed probe');
 });
 
+test('routing: a 522 from the Worker fetching its own route passes only if the route is bound to this Worker', async () => {
+  // 522 and the route is bound to the platform Worker: pass
+  let t = setup({ probeOk: false }); let zid = t.infra._seedZone('self.com', { records: [{ id: 'r1', type: 'AAAA', name: '*.self.com', content: '100::', proxied: true }] });
+  t.infra._routes.set(zid, [{ id: 'rt1', pattern: 'platform-check.self.com/*', script: 'lummet-control-plane' }]);
+  let d = (await t.svc.addDomain(t.env, { hostname: 'self.com' })).domain;
+  let r = await t.svc.verify(t.env, d.id);
+  assert.equal(r.passed, true); assert.equal(stepsByKey(r).routing.state, 'ok'); assert.match(stepsByKey(r).routing.detail, /cannot fetch its own route/);
+  // 522 and the route is bound to a different Worker: still a failure
+  t = setup({ probeOk: false }); zid = t.infra._seedZone('other.com', { records: [{ id: 'r1', type: 'AAAA', name: '*.other.com', content: '100::', proxied: true }] });
+  t.infra._routes.set(zid, [{ id: 'rt1', pattern: 'platform-check.other.com/*', script: 'someone-else' }]);
+  d = (await t.svc.addDomain(t.env, { hostname: 'other.com' })).domain;
+  r = await t.svc.verify(t.env, d.id);
+  assert.equal(r.passed, false); assert.equal(stepsByKey(r).routing.state, 'fail');
+});
+
 test('a failed domain can pass on re-run; re-run never demotes the default', async () => {
   const { env, svc, infra } = setup();
   const d = (await svc.addDomain(env, { hostname: 'later.com' })).domain;

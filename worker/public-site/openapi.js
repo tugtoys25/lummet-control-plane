@@ -4,7 +4,7 @@
 // worker source (routes, scopes) and the webhook module (event types, header names), so it cannot drift silently.
 
 export const API_V1_SCOPES = ["sites:read", "domains:read", "analytics:read", "usage:read"];
-export const WEBHOOK_EVENT_TYPES = ["site.created", "site.provisioned", "site.deployed", "site.failed", "domain.verified", "subscription.changed", "payment.failed"];
+export const WEBHOOK_EVENT_TYPES = ["site.created", "site.provisioned", "site.deployed", "site.failed", "site.deleted", "domain.verified", "subscription.changed", "payment.failed"];
 
 const jsonBody = (schemaRef) => ({ "application/json": { schema: { $ref: schemaRef } } });
 const err = (description) => ({ description, content: jsonBody("#/components/schemas/Error") });

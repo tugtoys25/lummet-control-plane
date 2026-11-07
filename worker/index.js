@@ -145,6 +145,8 @@ import { exportOrganizationData } from "./export.js";
 import * as totp from "./totp.js";
 import * as branding from "./branding.js";
 import * as changeRequests from "./change-requests.js";
+import * as siteLabels from "./site-labels.js";
+import * as siteTeardown from "./site-teardown.js";
 import { listOrganizationAuditLog } from "./audit-log.js";
 import * as customerSessions from "./customer-sessions.js";
 import * as customerAuditCsv from "./customer-audit-csv.js";
@@ -1827,7 +1829,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const result = await sites.createSite(env, {
               organizationId, name: body.name, productId: body.productId, actorUserId: customer.id,
               preset: body.preset, cloneFromSiteId: body.cloneFromSiteId, cloneFromTenantId: body.cloneFromTenantId, sections: body.sections,
-              platformDomainId: body.platformDomainId
+              platformDomainId: body.platformDomainId, subdomain: body.subdomain
             });
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -1835,8 +1837,25 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               success: result.ok, statusCode: result.ok ? 200 : result.status,
               errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
             });
-            if (!result.ok) return json({ success: false, error: result.error }, result.status);
-            return json({ success: true, siteId: result.siteId, slug: result.slug, host: result.platformDomain?.host || null, setup: result.setup ? { kind: result.setup.kind, presetId: result.setup.presetId, status: result.setup.status } : null });
+            // A taken or unusable address comes back with what the customer can pick instead; nothing was created or renamed.
+            if (!result.ok) return json({ success: false, error: result.error, ...(result.reason ? { reason: result.reason, message: result.message, label: result.label, host: result.host, suggestions: result.suggestions || [], otherDomains: result.otherDomains || [] } : {}) }, result.status);
+            return json({ success: true, siteId: result.siteId, slug: result.slug, label: result.label, host: result.platformDomain?.host || null, setup: result.setup ? { kind: result.setup.kind, presetId: result.setup.presetId, status: result.setup.status } : null });
+          }
+
+          // Live address check for the create-site form: is <label>.<domain> free? Any member may ask. It says taken / not taken and
+          // offers other words and other domains; it never says who holds an address.
+          if (method === "GET" && subPath === "/sites/name-check") {
+            const raw = String(url.searchParams.get("label") ?? url.searchParams.get("name") ?? "");
+            if (raw.length > 200) return json({ success: false, error: "invalid_subdomain" }, 422);
+            const chosen = await platformDomainsModule.resolveCustomerChoice(env, { organizationId, platformDomainId: url.searchParams.get("platformDomainId") });
+            if (!chosen.ok) return json({ success: false, error: chosen.error }, 422);
+            const label = url.searchParams.has("label") ? siteLabels.normalizeLabel(raw) : siteLabels.slugifyLabel(raw);
+            const check = await siteLabels.checkLabel(env, { label, domain: chosen.domain });
+            let extra = { suggestions: [], otherDomains: [] };
+            if (!check.available && (check.reason === "taken" || check.reason === "reserved")) {
+              extra = await siteLabels.suggestLabels(env, { label, domain: chosen.domain, otherDomains: await platformDomainsModule.listChoosableDomains(env, { organizationId }) });
+            }
+            return json({ success: true, data: { available: check.available, label: check.label, host: check.host, reason: check.reason || null, message: check.reason ? siteLabels.REASON_TEXT[check.reason] : null, ...extra } });
           }
 
           // Phase 10 A1: what the create-site screen offers (presets, the default that applies, this organization's own sites to copy from).
@@ -2618,7 +2637,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const [, siteId] = siteDeleteMatch;
             const body = await request.json().catch(() => ({}));
             const result = await changeRequests.requestSiteDeletion(env, {
-              organizationId, siteId, actorUserId: customer.id, reason: body.reason
+              organizationId, siteId, actorUserId: customer.id, reason: body.reason, confirmName: body.confirmName
             });
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -2627,8 +2646,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               success: result.ok, statusCode: result.ok ? 200 : result.status,
               errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
             });
-            if (!result.ok) return json({ success: false, error: result.error }, result.status);
-            return json({ success: true, requiresApproval: result.requiresApproval, changeRequestId: result.changeRequestId });
+            if (!result.ok) return json({ success: false, error: result.error, ...(result.detail ? { detail: result.detail } : {}), ...(result.currentStatus ? { currentStatus: result.currentStatus } : {}) }, result.status);
+            // The teardown runs as a durable job (Queue when bound, otherwise waitUntil); the sweep resumes it if this Worker is evicted.
+            if (result.jobId) await jobRunner.dispatchJob(env, ctx, result.jobId);
+            return json({ success: true, requiresApproval: result.requiresApproval, changeRequestId: result.changeRequestId, jobId: result.jobId || null }, result.jobId ? 202 : 200);
           }
 
           if (method === "GET" && subPath === "/change-requests") {
@@ -2656,7 +2677,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
             });
             if (!result.ok) return json({ success: false, error: result.error }, result.status);
-            return json({ success: true });
+            if (result.jobId) await jobRunner.dispatchJob(env, ctx, result.jobId);
+            return json({ success: true, jobId: result.jobId || null });
           }
 
           // -------------------------------------------
@@ -4845,6 +4867,25 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               const b = await staffBody();
               return staffAudit("ai_credits", credits.id, `grant:${b.amount}`, await staffSaas.grantAiCredits(env, credits.id, b.amount, b.reason, admin.id), credits.id);
             }
+            // Staff delete: any site, whatever its organization's state. A written reason and the site's exact name are required, and the
+            // action is audited. It starts the same durable teardown a customer's delete does; re-sending it for a site stuck in
+            // `deleting` re-queues the teardown.
+            const siteDelete = matchPath("/api/platform/saas/sites/:id/delete", path);
+            if (siteDelete) {
+              const b = await staffBody();
+              const reason = String(b.reason || "").trim();
+              const targetSite = await sites.getSite(env, siteDelete.id);
+              if (!targetSite) return json({ success: false, error: "site_not_found" }, 404);
+              if (reason.length < 5) return json({ success: false, error: "reason_required" }, 422);
+              if (String(b.confirmName ?? "").trim() !== String(targetSite.name).trim()) return json({ success: false, error: "confirmation_required", detail: "Type the site's name exactly to confirm." }, 422);
+              const r = await siteTeardown.beginSiteDeletion(env, { siteId: siteDelete.id, actorType: "lummet_admin", actorId: String(admin.id), reason: `staff deletion: ${reason}` });
+              if (r.ok) await jobRunner.dispatchJob(env, ctx, r.jobId);
+              await logAudit(env, {
+                adminId: admin.id, endpoint: path, method, resource: "site", resourceId: siteDelete.id, action: "staff_delete", reason: reason.slice(0, 500),
+                success: r.ok, statusCode: r.ok ? 202 : r.status || 400, errorMessage: r.ok ? null : r.error, requestId, ipHash, organizationId: targetSite.organization_id
+              });
+              return r.ok ? json({ success: true, jobId: r.jobId }, 202) : json({ success: false, error: r.error, ...(r.currentStatus ? { currentStatus: r.currentStatus } : {}) }, r.status || 400);
+            }
             const siteStatus = matchPath("/api/platform/saas/sites/:id/status", path);
             if (siteStatus) {
               const b = await staffBody();
@@ -4893,6 +4934,12 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
                   await jobRunner.dispatchJob(env, ctx, r.jobId);
                 }
                 return staffAudit("job", jobRetry.id, "retry", r.ok ? { ok: true } : r, job.organization_id);
+              }
+              if (job.type === "site_teardown") {
+                // Safe to repeat: every teardown step is idempotent. A staff retry also gives a dead-lettered job a fresh set of automatic retries.
+                await jobRunner.requeueDeadLetter(env, jobRetry.id);
+                await jobRunner.dispatchJob(env, ctx, jobRetry.id);
+                return staffAudit("job", jobRetry.id, "retry", { ok: true }, job.organization_id);
               }
               if (job.type === "site_deployment") {
                 // The sweep never retries a failed deployment by itself; a staff member choosing to is the decision it was waiting for.

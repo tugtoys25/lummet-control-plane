@@ -1,6 +1,9 @@
 import { escapeHtml } from "../customer-layout.js";
 import { nonceToken, onClick } from "../../csp.js";
 
+// A site can be deleted from these states. Provisioning, configuring and deploying are jobs in flight: they must finish or fail first.
+const DELETABLE = new Set(["pending", "provisioned", "active", "suspended", "maintenance", "failed"]);
+
 function actionsFor(site) {
   const actions = [];
   if (site.status === "pending") {
@@ -8,6 +11,11 @@ function actionsFor(site) {
   }
   if (site.status === "failed") {
     actions.push(`<button class="btn"${onClick("lummetRetryProvision", [site.id])}>Retry provisioning</button>`);
+  }
+  if (DELETABLE.has(site.status)) {
+    actions.push(`<button class="btn btn-danger"${onClick("lummetOpenDelete", [site.id, site.name, site.primary_domain || ""])}>Delete</button>`);
+  } else if (site.status === "deleting") {
+    actions.push(`<span class="subtitle">Deleting…</span>`);
   }
   return actions.join(" ") || "—";
 }
@@ -85,11 +93,20 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
   const domainBlock = domainList.length
     ? `
           ${domainList.length > 1
-            ? `<label for="site-domain">Site address</label>
+            ? `<label for="site-domain">Domain</label>
           <select id="site-domain">${domainList.map((d) => `<option value="${escapeHtml(d.id)}" data-host="${escapeHtml(d.hostname)}"${d.isDefault ? " selected" : ""}>${escapeHtml(d.label)} (.${escapeHtml(d.hostname)})</option>`).join("")}</select>`
             : `<input type="hidden" id="site-domain" value="${escapeHtml(domainList[0].id)}" data-host="${escapeHtml(domainList[0].hostname)}" />`}
-          <p id="site-host-preview" class="subtitle" aria-live="polite"></p>`
+          `
     : "";
+
+  const addressBlock = `
+          <label for="site-subdomain">Site address</label>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <input type="text" id="site-subdomain" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="40" aria-describedby="site-address-status" style="flex:1;min-width:140px" />
+            <span id="site-address-suffix" class="mono"></span>
+          </div>
+          <p id="site-address-status" class="subtitle" aria-live="polite"></p>
+          <div id="site-address-suggest" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>`;
 
   const createForm = canManage
     ? `
@@ -99,16 +116,32 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
           <label for="site-name">Site name</label>
           <input type="text" id="site-name" required />
           <label for="site-product">Product</label>
-          <select id="site-product" required>${productOptions}</select>${domainBlock}${setupSection(setupOptions, products)}
+          <select id="site-product" required>${productOptions}</select>${domainBlock}${addressBlock}${setupSection(setupOptions, products)}
           <button class="btn" type="submit">Create site</button>
         </form>
       </div>`
     : "";
 
+  const deleteDialog = canManage
+    ? `
+    <dialog id="delete-site-dialog" aria-labelledby="delete-site-title" style="max-width:520px;width:calc(100% - 32px)">
+      <h2 id="delete-site-title">Delete this site?</h2>
+      <p>This permanently deletes <strong id="delete-site-name"></strong> and everything on it: its content, database, media files and stored backups. Its custom domains are disconnected. <strong>This cannot be undone.</strong></p>
+      <p>Its address <span class="mono" id="delete-site-host"></span> becomes available to anyone once the deletion finishes, usually within a few minutes.</p>
+      <label for="delete-site-confirm">Type <strong id="delete-site-name-again"></strong> to confirm</label>
+      <input type="text" id="delete-site-confirm" autocomplete="off" spellcheck="false" />
+      <p id="delete-site-error" class="subtitle" role="alert"></p>
+      <button type="button" class="btn" id="delete-site-cancel">Cancel</button>
+      <button type="button" class="btn btn-danger" id="delete-site-go" disabled>Delete site permanently</button>
+    </dialog>`
+    : "";
+  const deleting = sites.some((x) => x.status === "deleting");
+
   return `
     <h1>Sites</h1>
     <p class="subtitle">Every site this organization owns, and its current lifecycle status.</p>
 
+    ${deleting ? `<p class="subtitle">Sites marked <strong>deleting</strong> are being removed. This takes a few minutes; their addresses become available again when it finishes.</p>` : ""}
     <div class="card">
       <table>
         <thead><tr><th>Name</th><th>Product</th><th>Status</th><th>Domain</th><th>Version</th><th>Setup</th><th>Actions</th></tr></thead>
@@ -117,6 +150,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
     </div>
 
     ${createForm}
+    ${deleteDialog}
 
     <script nonce="${nonceToken()}">
       function lummetActiveOrgId() {
@@ -155,6 +189,8 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
         var body = { name: document.getElementById('site-name').value, productId: document.getElementById('site-product').value };
         var dom = document.getElementById('site-domain');
         if (dom && dom.value) { body.platformDomainId = dom.value; }
+        var sub = document.getElementById('site-subdomain');
+        if (sub && sub.value) { body.subdomain = sub.value; }
         var p = document.getElementById('site-preset');
         var c = document.getElementById('site-clone');
         if (c && c.value) { body.cloneFromSiteId = c.value; }
@@ -163,23 +199,85 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
       }
 
 
-      // Live preview of the site address: the same slug rule as the server (a taken name gets a number there).
-      function lummetSlug(n) { return String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 60) || 'site'; }
-      function lummetHostPreview() {
-        var out = document.getElementById('site-host-preview');
-        var dom = document.getElementById('site-domain');
-        var nameEl = document.getElementById('site-name');
-        if (!out || !dom || !nameEl) { return; }
-        var opt = dom.tagName === 'SELECT' ? dom.options[dom.selectedIndex] : dom;
-        var host = opt ? opt.getAttribute('data-host') : '';
-        out.textContent = host ? 'Your site will be at ' + lummetSlug(nameEl.value) + '.' + host + ' (a number is added if that name is taken).' : '';
+      // ---- Site address: follows the site name until the customer types their own, and is checked live against the database. ----
+      // A taken address is never changed for the customer: they see that it is taken, and pick another word or another domain.
+      function lummetSlug(n) { return String(n || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '').slice(0, 40).replace(/-+$/, ''); }
+      var addrTouched = false, addrOk = null, addrSeq = 0, addrTimer = null;
+      function lummetDomainEl() { return document.getElementById('site-domain'); }
+      function lummetDomainOpt() { var d = lummetDomainEl(); return d ? (d.tagName === 'SELECT' ? d.options[d.selectedIndex] : d) : null; }
+      function lummetDomainHost() { var o = lummetDomainOpt(); return o ? (o.getAttribute('data-host') || '') : ''; }
+      function lummetAddrStatus(text, kind) {
+        var out = document.getElementById('site-address-status');
+        if (!out) { return; }
+        out.textContent = text || '';
+        out.style.color = kind === 'bad' ? 'var(--danger, #b42318)' : kind === 'good' ? 'var(--success, #067647)' : '';
       }
+      function lummetChip(text, onPick) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'btn'; b.textContent = text;
+        b.addEventListener('click', onPick);
+        return b;
+      }
+      function lummetRenderSuggestions(d) {
+        var box = document.getElementById('site-address-suggest');
+        if (!box) { return; }
+        while (box.firstChild) { box.removeChild(box.firstChild); }
+        var subEl = document.getElementById('site-subdomain');
+        (d.suggestions || []).forEach(function (s) {
+          box.appendChild(lummetChip(s.host || s.label, function () { subEl.value = s.label; addrTouched = true; lummetCheckAddress(); }));
+        });
+        (d.otherDomains || []).forEach(function (o) {
+          box.appendChild(lummetChip('Keep ' + d.label + ' on ' + o.hostname, function () {
+            var dom = lummetDomainEl();
+            if (dom && dom.tagName === 'SELECT') { dom.value = o.id; }
+            lummetAfterDomainChange();
+          }));
+        });
+      }
+      function lummetApplyCheck(d) {
+        var host = d.host || ((d.label || '') + '.' + lummetDomainHost());
+        addrOk = !!d.available;
+        if (d.available) { lummetAddrStatus('\u2713 ' + host + ' is available.', 'good'); }
+        else if (d.reason === 'taken') {
+          var hasAlt = (d.suggestions && d.suggestions.length) || (d.otherDomains && d.otherDomains.length);
+          lummetAddrStatus('\u2717 ' + host + ' has already been taken. Try another name' + (hasAlt ? ', or pick one of these:' : '.'), 'bad');
+        } else { lummetAddrStatus('\u2717 ' + (d.message || 'That address cannot be used.'), 'bad'); }
+        lummetRenderSuggestions(d);
+      }
+      function lummetCheckAddress() {
+        var subEl = document.getElementById('site-subdomain');
+        var suffix = document.getElementById('site-address-suffix');
+        if (!subEl) { return; }
+        if (suffix) { var h = lummetDomainHost(); suffix.textContent = h ? '.' + h : ''; }
+        var label = subEl.value;
+        lummetRenderSuggestions({});
+        if (!label) { addrOk = null; lummetAddrStatus(''); return; }
+        var seq = ++addrSeq;
+        addrOk = null;
+        lummetAddrStatus('Checking\u2026');
+        var dom = lummetDomainEl();
+        var q = '?label=' + encodeURIComponent(label) + (dom && dom.value ? '&platformDomainId=' + encodeURIComponent(dom.value) : '');
+        fetch('/api/organizations/' + lummetActiveOrgId() + '/sites/name-check' + q)
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (seq !== addrSeq) { return; }
+            if (data && data.success) { lummetApplyCheck(data.data); }
+            else { addrOk = null; lummetAddrStatus(''); }
+          })
+          .catch(function () { if (seq === addrSeq) { addrOk = null; lummetAddrStatus(''); } });
+      }
+      function lummetCheckSoon() { clearTimeout(addrTimer); addrOk = null; addrTimer = setTimeout(lummetCheckAddress, 300); }
+      function lummetAfterDomainChange() { lummetCheckAddress(); }
       (function () {
-        var dom = document.getElementById('site-domain');
+        var dom = lummetDomainEl();
         var nameEl = document.getElementById('site-name');
-        if (dom) { dom.addEventListener('change', lummetHostPreview); }
-        if (nameEl) { nameEl.addEventListener('input', lummetHostPreview); }
-        lummetHostPreview();
+        var subEl = document.getElementById('site-subdomain');
+        if (!subEl) { return; }
+        if (dom) { dom.addEventListener('change', lummetAfterDomainChange); }
+        if (nameEl) { nameEl.addEventListener('input', function () { if (!addrTouched) { subEl.value = lummetSlug(nameEl.value); lummetCheckSoon(); } }); }
+        subEl.addEventListener('input', function () { addrTouched = true; subEl.value = subEl.value.toLowerCase().replace(/\s+/g, '-'); lummetCheckSoon(); });
+        var suffix = document.getElementById('site-address-suffix');
+        if (suffix) { var h = lummetDomainHost(); suffix.textContent = h ? '.' + h : ''; }
       })();
 
       var createForm = document.getElementById('create-site-form');
@@ -207,6 +305,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
       if (createForm) {
         createForm.addEventListener('submit', function (e) {
           e.preventDefault();
+          if (addrOk === false) { var se = document.getElementById('site-subdomain'); if (se) { se.focus(); } return; }
           fetch('/api/organizations/' + lummetActiveOrgId() + '/sites', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -215,10 +314,52 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
             .then(function (r) { return r.json(); })
             .then(function (data) {
               if (data.success) { location.reload(); }
-              else { alert('Could not create site: ' + (data.error === 'invalid_platform_domain' ? 'that site address is not available. Choose another.' : (data.error || 'unknown error'))); }
+              else if (data.reason) { lummetApplyCheck({ available: false, reason: data.reason, message: data.message, label: data.label, host: data.host, suggestions: data.suggestions, otherDomains: data.otherDomains }); var se2 = document.getElementById('site-subdomain'); if (se2) { se2.focus(); } }
+              else { alert('Could not create site: ' + (data.error === 'invalid_platform_domain' ? 'that domain is not available. Choose another.' : (data.error || 'unknown error'))); }
             });
         });
       }
+
+      // ---- Delete a site: typed-name confirmation, enforced again by the server. ----
+      var delState = { id: null, name: '' };
+      function lummetOpenDelete(siteId, siteName, host) {
+        var dlg = document.getElementById('delete-site-dialog');
+        if (!dlg) { return; }
+        delState = { id: siteId, name: String(siteName) };
+        ['delete-site-name', 'delete-site-name-again'].forEach(function (id) { document.getElementById(id).textContent = delState.name; });
+        document.getElementById('delete-site-host').textContent = host || '';
+        document.getElementById('delete-site-confirm').value = '';
+        document.getElementById('delete-site-error').textContent = '';
+        document.getElementById('delete-site-go').disabled = true;
+        if (typeof dlg.showModal === 'function') { dlg.showModal(); } else { dlg.setAttribute('open', ''); }
+        document.getElementById('delete-site-confirm').focus();
+      }
+      (function () {
+        var dlg = document.getElementById('delete-site-dialog');
+        if (!dlg) { return; }
+        var input = document.getElementById('delete-site-confirm');
+        var go = document.getElementById('delete-site-go');
+        var err = document.getElementById('delete-site-error');
+        function close() { if (typeof dlg.close === 'function') { dlg.close(); } else { dlg.removeAttribute('open'); } }
+        document.getElementById('delete-site-cancel').addEventListener('click', close);
+        input.addEventListener('input', function () { go.disabled = input.value.trim() !== delState.name.trim(); });
+        var MSG = { confirmation_required: 'The name you typed does not match.', site_busy: 'This site is still being set up. Wait until that finishes or fails, then delete it.', site_already_deleting: 'This site is already being deleted.', site_not_found: 'This site no longer exists.' };
+        go.addEventListener('click', function () {
+          go.disabled = true; err.textContent = '';
+          fetch('/api/organizations/' + lummetActiveOrgId() + '/sites/' + encodeURIComponent(delState.id), {
+            method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmName: input.value })
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (data.success) {
+                close();
+                if (data.requiresApproval) { alert('Deletion requested. Another admin of this organization must approve it before anything is removed.'); }
+                location.reload();
+              } else { err.textContent = MSG[data.error] || ('Could not delete the site: ' + (data.error || 'unknown error')); go.disabled = false; }
+            })
+            .catch(function () { err.textContent = 'Could not reach the server. Try again.'; go.disabled = false; });
+        });
+      })();
     </script>
   `;
 }

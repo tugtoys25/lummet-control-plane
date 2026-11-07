@@ -35,7 +35,7 @@ async function setUpOrgWithSite(env, email) {
   const signup = await customerAuth.signUp(fakeSignupRequest(email, 'Org'), env);
   await plans.startTrialSubscription(env, signup.organizationId, 'plan_casino_news_starter');
   const site = await sites.createSite(env, {
-    organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId
+    organizationId: signup.organizationId, name: 'Site ' + email.split('@')[0], productId: 'prod_casino_news', actorUserId: signup.userId
   });
   return { signup, siteId: site.siteId };
 }

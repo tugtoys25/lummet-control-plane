@@ -178,8 +178,8 @@ test('R.5 rollout modes: off never blocks, shadow never blocks but records one f
 test('R.5 site limit is enforced in the API, not only the UI: the plan allows exactly sites.max, the next create is refused and nothing is created', async () => {
   const e = newEnv('enforce'); const o = await org(e, 'plan_casino_news_pro');         // sites.max = 3
   await setSub(e, o, { status: 'active' });
-  for (let i = 1; i <= 3; i += 1) assert.equal((await call(e, 'POST', `${o.base}/sites`, { name: `S${i}`, productId: 'prod_casino_news' }, o.cookie)).status, 200, `site ${i}`);
-  const over = await call(e, 'POST', `${o.base}/sites`, { name: 'S4', productId: 'prod_casino_news' }, o.cookie);
+  for (let i = 1; i <= 3; i += 1) assert.equal((await call(e, 'POST', `${o.base}/sites`, { name: `Site ${i}`, productId: 'prod_casino_news' }, o.cookie)).status, 200, `site ${i}`);
+  const over = await call(e, 'POST', `${o.base}/sites`, { name: 'Site 4', productId: 'prod_casino_news' }, o.cookie);
   assert.equal(over.status, 403); assert.equal(over.json.error, 'site_limit_reached'); assert.equal(over.json.limit, 3);
   assert.equal(await countRows(e, 'sites', o), 3);
 });
@@ -198,11 +198,11 @@ test('R.5 seat limit (members plus pending invitations): enforced in enforce mod
 test('R.5 downgrade over the new limit: existing sites stay readable and are never deleted; only new creation is refused', async () => {
   const e = newEnv('enforce'); const o = await org(e, 'plan_casino_news_pro');
   await setSub(e, o, { status: 'active' });
-  for (let i = 1; i <= 3; i += 1) assert.equal((await call(e, 'POST', `${o.base}/sites`, { name: `S${i}`, productId: 'prod_casino_news' }, o.cookie)).status, 200);
+  for (let i = 1; i <= 3; i += 1) assert.equal((await call(e, 'POST', `${o.base}/sites`, { name: `Site ${i}`, productId: 'prod_casino_news' }, o.cookie)).status, 200);
   await e.LUMMET_DB.prepare('UPDATE subscriptions SET plan_id = ? WHERE organization_id = ?').bind('plan_casino_news_starter', o.organizationId).run();   // sites.max = 1
   const list = await call(e, 'GET', `${o.base}/sites`, null, o.cookie);
   assert.equal(list.status, 200); assert.equal(list.json.data.length, 3, 'all three still listed');
-  const more = await call(e, 'POST', `${o.base}/sites`, { name: 'S4', productId: 'prod_casino_news' }, o.cookie);
+  const more = await call(e, 'POST', `${o.base}/sites`, { name: 'Site 4', productId: 'prod_casino_news' }, o.cookie);
   assert.equal(more.status, 403); assert.equal(more.json.error, 'site_limit_reached');
   assert.equal(await countRows(e, 'sites', o), 3, 'nothing deleted');
 });
@@ -221,8 +221,8 @@ test('R.5 add-ons: a numeric add-on raises the limit by delta x quantity; an add
   assert.equal(val('sites.max'), 5, '1 + 2 x 2');
   assert.equal(val('api.enabled'), false, 'a numeric delta cannot enable a boolean');
   assert.equal(val('users.max'), 2, 'unrelated limits are untouched');
-  for (let i = 1; i <= 5; i += 1) assert.equal((await call(e, 'POST', `${o.base}/sites`, { name: `S${i}`, productId: 'prod_casino_news' }, o.cookie)).status, 200, `site ${i}`);
-  assert.equal((await call(e, 'POST', `${o.base}/sites`, { name: 'S6', productId: 'prod_casino_news' }, o.cookie)).status, 403);
+  for (let i = 1; i <= 5; i += 1) assert.equal((await call(e, 'POST', `${o.base}/sites`, { name: `Site ${i}`, productId: 'prod_casino_news' }, o.cookie)).status, 200, `site ${i}`);
+  assert.equal((await call(e, 'POST', `${o.base}/sites`, { name: 'Site 6', productId: 'prod_casino_news' }, o.cookie)).status, 403);
 });
 
 test('R.5 a restricted organization loses its add-on capacity along with its plan (the floor wins), and gets it back when it pays', async () => {
@@ -317,7 +317,7 @@ test('G2 a provider trial past its end date keeps its plan entitlements until th
   const e = newEnv('enforce'); const o = await org(e, 'plan_casino_news_pro');
   await setSub(e, o, { status: 'trialing', trial_ends_at: iso(-1 * DAY), provider_subscription_id: 'sub_provider' });
   assert.equal((await resolveAccess(e, o.organizationId)).canMutate, true, 'the state machine lets a provider trial keep working');
-  const site = await call(e, 'POST', `${o.base}/sites`, { name: 'S1', productId: 'prod_casino_news' }, o.cookie);
+  const site = await call(e, 'POST', `${o.base}/sites`, { name: 'Site 1', productId: 'prod_casino_news' }, o.cookie);
   assert.equal(site.status, 200, `a site create returned ${site.status} ${site.text.slice(0, 80)}`);
   const ent = (await call(e, 'GET', `${o.base}/entitlements`, null, o.cookie)).json;
   const val = (k) => ((ent.data || ent.entitlements)[k]?.value ?? (ent.data || ent.entitlements)[k]);

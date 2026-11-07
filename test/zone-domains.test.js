@@ -28,7 +28,7 @@ async function setup(env, ctx, infra, email, plan = 'plan_casino_news_starter') 
   const s = await call(env, ctx, 'POST', '/api/customer/signup', { body: { email, password: 'Correct-Horse-Battery-9', organizationName: 'Org', displayName: 'T' } });
   assert.equal(s.status, 200, s.text);
   await plans.startTrialSubscription(env, s.json.organizationId, plan);
-  const site = await sites.createSite(env, { organizationId: s.json.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: s.json.userId });
+  const site = await sites.createSite(env, { organizationId: s.json.organizationId, name: 'Site ' + s.json.organizationId.slice(0, 8), productId: 'prod_casino_news', actorUserId: s.json.userId });
   const prov = createProvisioningService(infra);
   const start = await prov.startProvisioning(env, site.siteId);
   await prov.runJob(env, start.jobId);

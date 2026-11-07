@@ -32,6 +32,7 @@ const VALID_EVENT_TYPES = [
   "site.provisioned",
   "site.deployed",
   "site.failed",
+  "site.deleted",
   "domain.verified",
   "subscription.changed",
   "payment.failed"

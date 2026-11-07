@@ -8,11 +8,12 @@
 // Worker/D1/KV/R2 for it (master prompt section 9).
 // =====================================================
 
-import { resolveCustomerChoice, hostFor } from "./platform-domains.js";
+import { resolveCustomerChoice, hostFor, listChoosableDomains } from "./platform-domains.js";
 import * as webhooks from "./webhooks.js";
 import { evaluateWriteGate, refusalFor } from "./access.js";
 import { syncSiteBrand } from "./site-brands.js";
 import { planSetup, storeSetupRequest } from "./site-setup.js";
+import * as siteLabels from "./site-labels.js";
 
 export const SITE_STATUSES = [
   "pending",
@@ -36,7 +37,7 @@ export const SITE_STATUSES = [
 const ALLOWED_TRANSITIONS = {
   pending: ["provisioning", "failed", "deleting"],
   provisioning: ["provisioned", "failed"],
-  provisioned: ["configuring", "failed"],
+  provisioned: ["configuring", "failed", "deleting"],   // a site that stopped here (no release published) holds real resources; it must be deletable
   configuring: ["deploying", "failed"],
   deploying: ["active", "failed"],
   active: ["suspended", "maintenance", "deleting"],
@@ -46,17 +47,6 @@ const ALLOWED_TRANSITIONS = {
   deleting: ["deleted"],
   deleted: []
 };
-
-function slugify(name) {
-  return (
-    (name || "")
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "")
-      .slice(0, 60) || "site"
-  );
-}
 
 async function uniqueSlug(env, base) {
   let slug = base;
@@ -77,6 +67,16 @@ async function recordStatusEvent(env, { siteId, fromStatus, toStatus, reason, ac
     .run();
 }
 
+/** The refusal for an unusable address: why, what it would have been, and what the customer can pick instead. */
+async function labelRefusal(env, { organizationId, label, domain, reason }) {
+  const base = { ok: false, status: reason === "taken" ? 409 : 422, label, host: label && domain?.hostname ? hostFor({ slug: label }, domain) : null, reason, message: siteLabels.REASON_TEXT[reason] || siteLabels.REASON_TEXT.invalid };
+  if (reason === "taken" || reason === "reserved") {
+    const others = await listChoosableDomains(env, { organizationId });
+    Object.assign(base, await siteLabels.suggestLabels(env, { label, domain, otherDomains: others }));
+  }
+  return { ...base, error: reason === "taken" ? "subdomain_taken" : reason === "reserved" ? "subdomain_reserved" : "invalid_subdomain" };
+}
+
 /**
  * Creates a site record in the "pending" state. This does NOT
  * provision any Cloudflare infrastructure — that is Phase 3
@@ -85,7 +85,7 @@ async function recordStatusEvent(env, { siteId, fromStatus, toStatus, reason, ac
  * customer; it is not a fake success for a deployment that hasn't
  * happened.
  */
-export async function createSite(env, { organizationId, name, productId, actorUserId, preset, cloneFromSiteId, cloneFromTenantId, sections, platformDomainId }) {
+export async function createSite(env, { organizationId, name, productId, actorUserId, preset, cloneFromSiteId, cloneFromTenantId, sections, platformDomainId, subdomain }) {
   const gate = await evaluateWriteGate(env, { organizationId, method: "POST", subPath: "/sites" });
   if (gate.blocked) return { ok: false, status: 402, ...refusalFor(gate.access) };
   const trimmedName = (name || "").trim();
@@ -108,14 +108,28 @@ export async function createSite(env, { organizationId, name, productId, actorUs
   const chosen = await resolveCustomerChoice(env, { organizationId, platformDomainId });
   if (!chosen.ok) return { ok: false, status: 422, error: chosen.error };
 
-  const id = crypto.randomUUID();
-  const slug = await uniqueSlug(env, slugify(trimmedName));   // still globally unique: Worker, D1, KV and R2 names derive from it
+  // The address label: what the customer typed, or their site name turned into one. It is checked against the chosen domain
+  // and NEVER changed on the customer's behalf: a taken or invalid label is refused with suggestions (no "-2" is added).
+  const hasTyped = subdomain !== undefined && subdomain !== null && String(subdomain).trim() !== "";
+  const label = hasTyped ? siteLabels.normalizeLabel(subdomain) : siteLabels.slugifyLabel(trimmedName);
+  const labelCheck = await siteLabels.checkLabel(env, { label, domain: chosen.domain });
+  if (!labelCheck.available) return await labelRefusal(env, { organizationId, label, domain: chosen.domain, reason: labelCheck.reason });
 
-  await env.LUMMET_DB.prepare(
-    `INSERT INTO sites (id, organization_id, name, slug, product_id, status, platform_domain_id) VALUES (?, ?, ?, ?, ?, 'pending', ?)`
-  )
-    .bind(id, organizationId, trimmedName, slug, productId, chosen.domain.id || null)
-    .run();
+  const id = crypto.randomUUID();
+  // The slug stays globally unique and internal: the Worker, D1, KV and R2 names derive from it. The customer never sees it.
+  const slug = await uniqueSlug(env, label);
+
+  try {
+    await env.LUMMET_DB.prepare(
+      `INSERT INTO sites (id, organization_id, name, slug, host_label, product_id, status, platform_domain_id) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`
+    )
+      .bind(id, organizationId, trimmedName, slug, label, productId, chosen.domain.id || null)
+      .run();
+  } catch (error) {
+    // Someone took the label between the check and the write: the unique index (migration 0088) decided.
+    if (/UNIQUE|constraint/i.test(String(error?.message))) return await labelRefusal(env, { organizationId, label, domain: chosen.domain, reason: "taken" });
+    throw error;
+  }
 
   await recordStatusEvent(env, {
     siteId: id,
@@ -134,7 +148,7 @@ export async function createSite(env, { organizationId, name, productId, actorUs
   await webhooks.dispatchEvent(env, organizationId, "site.created", { siteId: id, name: trimmedName, slug });
 
   return {
-    ok: true, siteId: id, slug, platformDomain: { id: chosen.domain.id || null, hostname: chosen.domain.hostname, host: hostFor({ slug }, chosen.domain) },
+    ok: true, siteId: id, slug, label, platformDomain: { id: chosen.domain.id || null, hostname: chosen.domain.hostname, host: hostFor({ slug, host_label: label }, chosen.domain) },
     setup: planned ? { requestId: setupRequestId, kind: planned.plan.kind, presetId: planned.plan.presetId, presetSource: planned.plan.presetSource, status: "pending" } : null
   };
 }

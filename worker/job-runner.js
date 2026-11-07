@@ -26,9 +26,11 @@
 // =====================================================
 
 import * as repo from "./repositories/job-sweep.js";
+import * as teardownRepo from "./repositories/site-teardown.js";
 import * as jobsModule from "./jobs.js";
 import { provisioning as realProvisioning } from "./provisioning.js";
 import { deployments as realDeployments } from "./deployments.js";
+import { siteTeardown as realTeardown } from "./site-teardown.js";
 
 export const MAX_AUTO_RETRIES = 5;
 /** Wait before automatic retry number n+1 (n = retries already made), measured from when the job failed. */
@@ -42,8 +44,16 @@ export function backoffMinutes(autoRetries) {
 }
 
 /** Policy per job type. `run` resumes a job; `retry` re-opens a failed one (only where that is safe). */
-export function defaultRunners({ provisioning = realProvisioning, deployments = realDeployments } = {}) {
+export function defaultRunners({ provisioning = realProvisioning, deployments = realDeployments, teardown = realTeardown } = {}) {
   return {
+    // Deleting a site (site-teardown.js): every step is idempotent and a provider that no longer has a resource counts as done,
+    // so resuming and retrying are always safe, and the site stays `deleting` (its address held) until the last step succeeds.
+    site_teardown: {
+      resumeLost: true,
+      retryFailed: true,
+      run: (env, job) => teardown.runJob(env, job.id),
+      retry: (env, job) => teardown.retryTeardown(env, job.id)
+    },
     tenant_provisioning: {
       resumeLost: true,
       retryFailed: true,
@@ -143,6 +153,17 @@ export async function sweepJobs(env, {
       await jobsModule.logJob(env, job.id, "error", `dead-lettered: ${reason}`);
       results.push({ jobId: job.id, type: job.type, action: "dead_lettered", reason });
     }
+  }
+
+  // 0. a site left in `deleting` with no teardown job (the old delete only changed the status): give it one, the stage below starts it
+  if (runners.site_teardown && realTeardown) {
+    try {
+      const orphans = await teardownRepo.sitesDeletingWithoutJob(env, "site_teardown", limit);
+      for (const o of orphans) {
+        const r = await realTeardown.beginSiteDeletion(env, { siteId: o.id, actorType: "system", reason: "adopted by the sweep (deleting without a teardown job)" });
+        if (r.ok) results.push({ jobId: r.jobId, type: "site_teardown", action: "adopted_orphan_deletion" });
+      }
+    } catch (_) { /* the next sweep tries again */ }
   }
 
   // 1. created but never started

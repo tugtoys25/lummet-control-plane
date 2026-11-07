@@ -27,8 +27,9 @@ async function org(e, email) {
   await plans.startTrialSubscription(e, s.json.organizationId, 'plan_casino_news_starter');
   return { id: s.json.organizationId, userId: s.json.userId, cookie: s.cookie, email };
 }
+let siteSeq = 0;
 async function liveSite(e, o, { status = 'active', tenant = true, d1 = true } = {}) {
-  const s = await sites.createSite(e, { organizationId: o.id, name: 'Main', productId: 'prod_casino_news', actorUserId: o.userId });
+  const s = await sites.createSite(e, { organizationId: o.id, name: 'Main ' + (++siteSeq), productId: 'prod_casino_news', actorUserId: o.userId });
   const db = e.LUMMET_DB;
   if (tenant) {
     const t = `t-${s.siteId}`;

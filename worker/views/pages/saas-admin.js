@@ -112,6 +112,14 @@ function lummetSiteMoves(siteId) {
   });
 }
 // Handlers that used to be inline code. Each is a named function the delegated runtime calls.
+// Staff delete of a whole site (removes its route, Worker, D1, KV, R2, backups, custom domains). Typed name plus a written reason; the server checks both.
+function lummetStaffDeleteSite(siteId, siteName) {
+  var typed = prompt('Permanently delete the site "' + siteName + '" and everything provisioned for it? Type the site name to confirm:');
+  if (typed === null) { return; }
+  var reason = prompt('Reason (required, at least 5 characters):');
+  if (!reason) { return; }
+  act('/api/platform/saas/sites/' + encodeURIComponent(siteId) + '/delete', { confirmName: typed, reason: reason });
+}
 function actReason(url, status, label) { var r = prompt(label); if (r) act(url, { status: status, reason: r }); }
 function actDrift(url, decision) { var r = prompt("Required audit reason for this reconciliation decision:"); if (r && r.trim()) act(url, { decision: decision, reason: r.trim() }); }
 function actOverrideForm(f, api, subscriptionId) {
@@ -261,7 +269,7 @@ export async function renderOrganizationDetailPage(env, admin, id) {
     <h2>Sites</h2>
     ${table(["Name", "Status", "Reason", "Configurable platform", ""], d.sites.map((s) => [h(s.name), badge(s.status), h(s.suspension_reason || ""),
       s.tenant_id && s.status !== "deleted" ? `<button class="btn"${onClick("lummetCheckSwitch", [s.id, `switch-${s.id}`])}>Check switch</button> <span id="switch-${h(s.id)}" aria-live="polite"></span>` : "—",
-      (s.tenant_id && s.status !== "deleted" ? `<button class="btn"${onClick("lummetMoveSite", [s.id])}>Move domain</button> <button class="btn"${onClick("lummetSiteMoves", [s.id])}>Moves</button> ` : "") + (s.status === "active" ? `<button class="btn" ${onClick("actReason", [`/api/platform/saas/sites/${s.id}/status`, "suspended", "Reason (required)"])}>Suspend</button>`
+      (s.tenant_id && s.status !== "deleted" ? `<button class="btn"${onClick("lummetMoveSite", [s.id])}>Move domain</button> <button class="btn"${onClick("lummetSiteMoves", [s.id])}>Moves</button> ` : "") + (s.status !== "deleted" && !["provisioning", "configuring", "deploying"].includes(s.status) ? `<button class="btn btn-danger"${onClick("lummetStaffDeleteSite", [s.id, s.name])}>${s.status === "deleting" ? "Re-run delete" : "Delete site"}</button> ` : "") + (s.status === "active" ? `<button class="btn" ${onClick("actReason", [`/api/platform/saas/sites/${s.id}/status`, "suspended", "Reason (required)"])}>Suspend</button>`
       : s.status === "suspended" ? `<button class="btn"${onClick("act", [`/api/platform/saas/sites/${s.id}/status`, {status: "active"}, "Reactivate site?"])}>Reactivate</button>` : "")]), "No sites.")}
     <h2>Team</h2>${table(["Email", "Role", "Joined"], d.members.map((m) => [h(m.email), h(m.role), h(m.created_at)]))}
     <h2>Recent jobs</h2>${table(["Type", "Status", "Progress", "Error", ""], d.jobs.map((j) => [h(j.type), badge(j.status), `${h(j.progress)}%`, h(j.error_message || ""), `<a href="/platform/saas/jobs/${h(j.id)}">view</a>`]), "No jobs.")}
@@ -294,7 +302,7 @@ export async function renderJobDetailPage(env, admin, id) {
   const d = await staff.getJobDetail(env, id);
   if (!d) return null;
   const { job, history } = d;
-  const canRetry = job.status === "failed" && ["tenant_provisioning", "deployment"].includes(job.type) && job.site_id;
+  const canRetry = job.status === "failed" && ["tenant_provisioning", "deployment", "site_deployment", "site_teardown"].includes(job.type) && job.site_id;
   return shell(env, admin, `Job ${job.type}`, "saas-jobs", `
     <p>${badge(job.status)} ${h(job.progress)}% · ${h(job.id)}</p>
     ${job.error_message ? `<div class="flash flash-error">${h(job.error_message)}</div>` : ""}

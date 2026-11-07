@@ -13,6 +13,7 @@
 import * as repo from "./repositories/site-domain-moves.js";
 import * as siteResources from "./repositories/site-resources.js";
 import * as pd from "./platform-domains.js";
+import * as siteLabels from "./site-labels.js";
 import * as domainsRepo from "./repositories/platform-domains.js";
 import { safeMessage } from "./platform-domains-admin.js";
 
@@ -56,6 +57,11 @@ export function createSiteDomainMoveService({ infra, redeploy }) {
       if (current.id && target.id === current.id) blockers.push("The site is already on that domain.");
     }
     if (await repo.findOpenMove(env, siteId)) blockers.push("An earlier move of this site is unfinished. Resume or roll it back first.");
+    // The label must be free on the target domain (another customer may already hold it there): the unique index would refuse the switch anyway.
+    if (target && target.status === "active" && (site.host_label || site.slug)) {
+      const free = await siteLabels.checkLabel(env, { label: site.host_label || site.slug, domain: target, excludeSiteId: siteId });
+      if (!free.available) blockers.push(`The address ${free.host || ""} is already taken on ${target.hostname}. Choose another domain.`);
+    }
     const oldHost = pd.hostFor(site, current);
     const newHost = target ? pd.hostFor(site, target) : null;
     const customPrimary = !!site.primary_domain && site.primary_domain !== oldHost;

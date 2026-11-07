@@ -31,6 +31,14 @@ async function enableApprovalWorkflows(env, organizationId) {
   await plans.startTrialSubscription(env, organizationId, 'plan_casino_news_starter');
 }
 
+// The workflow only applies when a second owner/admin exists who could approve.
+async function addSecondAdmin(env, organizationId, ownerUserId, email) {
+  const invitation = await organizations.createInvitation(env, { organizationId, email, role: 'admin', invitedBy: ownerUserId });
+  const second = await customerAuth.signUp(fakeSignupRequest(email), env);
+  await organizations.acceptInvitation(env, invitation.token, second.userId);
+  return second;
+}
+
 test('without the entitlement, requesting deletion deletes the site immediately (unchanged existing behavior)', async () => {
   const env = makeEnv();
   const signup = await customerAuth.signUp(fakeSignupRequest('no-approval@example.com'), env);
@@ -52,6 +60,7 @@ test('with the entitlement, requesting deletion creates a pending change request
   const env = makeEnv();
   const signup = await customerAuth.signUp(fakeSignupRequest('approval-required@example.com'), env);
   await enableApprovalWorkflows(env, signup.organizationId);
+  await addSecondAdmin(env, signup.organizationId, signup.userId, 'second1@example.com');
   const site = await sites.createSite(env, {
     organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId
   });
@@ -75,6 +84,7 @@ test('a second deletion request for the same pending site is refused, not duplic
   const env = makeEnv();
   const signup = await customerAuth.signUp(fakeSignupRequest('duplicate-request@example.com'), env);
   await enableApprovalWorkflows(env, signup.organizationId);
+  await addSecondAdmin(env, signup.organizationId, signup.userId, 'second2@example.com');
   const site = await sites.createSite(env, {
     organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId
   });
@@ -89,6 +99,7 @@ test('the requester cannot approve their own request (segregation of duties)', a
   const env = makeEnv();
   const signup = await customerAuth.signUp(fakeSignupRequest('self-approve@example.com'), env);
   await enableApprovalWorkflows(env, signup.organizationId);
+  await addSecondAdmin(env, signup.organizationId, signup.userId, 'second3@example.com');
   const site = await sites.createSite(env, {
     organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId
   });
@@ -147,4 +158,48 @@ test('a different admin approving the request actually deletes the site, and rej
   assert.equal(rejection.ok, true);
   const site2Row = await sites.getSite(env, site2.siteId);
   assert.equal(site2Row.status, 'pending', 'a rejected deletion request must not touch the site');
+});
+
+test('with the entitlement but no second owner/admin, the sole owner deletes directly (nobody could approve), still with the typed name', async () => {
+  const env = makeEnv();
+  const solo = await customerAuth.signUp(fakeSignupRequest('solo-owner@example.com'), env);
+  await enableApprovalWorkflows(env, solo.organizationId);
+  const site = await sites.createSite(env, { organizationId: solo.organizationId, name: 'Solo Site', productId: 'prod_casino_news', actorUserId: solo.userId });
+
+  const wrong = await changeRequests.requestSiteDeletion(env, { organizationId: solo.organizationId, siteId: site.siteId, actorUserId: solo.userId, confirmName: 'nope' });
+  assert.equal(wrong.error, 'confirmation_required');
+
+  const r = await changeRequests.requestSiteDeletion(env, { confirmName: 'Solo Site', organizationId: solo.organizationId, siteId: site.siteId, actorUserId: solo.userId });
+  assert.equal(r.ok, true); assert.equal(r.requiresApproval, false); assert.ok(r.jobId);
+  assert.equal((await sites.getSite(env, site.siteId)).status, 'deleting');
+});
+
+test('a viewer or editor does not count as an approver; a disabled admin does not either', async () => {
+  const env = makeEnv();
+  const owner = await customerAuth.signUp(fakeSignupRequest('count-owner@example.com'), env);
+  await enableApprovalWorkflows(env, owner.organizationId);
+  const inv = await organizations.createInvitation(env, { organizationId: owner.organizationId, email: 'editor@example.com', role: 'editor', invitedBy: owner.userId });
+  const editor = await customerAuth.signUp(fakeSignupRequest('editor@example.com'), env);
+  await organizations.acceptInvitation(env, inv.token, editor.userId);
+  const admin2 = await addSecondAdmin(env, owner.organizationId, owner.userId, 'disabled-admin@example.com');
+  await env.LUMMET_DB.prepare(`UPDATE customer_users SET status = 'disabled' WHERE id = ?`).bind(admin2.userId).run();
+  const site = await sites.createSite(env, { organizationId: owner.organizationId, name: 'Count Site', productId: 'prod_casino_news', actorUserId: owner.userId });
+  const r = await changeRequests.requestSiteDeletion(env, { confirmName: 'Count Site', organizationId: owner.organizationId, siteId: site.siteId, actorUserId: owner.userId });
+  assert.equal(r.requiresApproval, false, 'only one active owner/admin, so the workflow cannot apply');
+});
+
+test('a request filed while a second admin existed is closed, not left pending, when the owner later deletes directly', async () => {
+  const env = makeEnv();
+  const owner = await customerAuth.signUp(fakeSignupRequest('stale-owner@example.com'), env);
+  await enableApprovalWorkflows(env, owner.organizationId);
+  const second = await addSecondAdmin(env, owner.organizationId, owner.userId, 'stale-second@example.com');
+  const site = await sites.createSite(env, { organizationId: owner.organizationId, name: 'Stale Site', productId: 'prod_casino_news', actorUserId: owner.userId });
+  const pending = await changeRequests.requestSiteDeletion(env, { confirmName: 'Stale Site', organizationId: owner.organizationId, siteId: site.siteId, actorUserId: owner.userId });
+  assert.equal(pending.requiresApproval, true);
+
+  await env.LUMMET_DB.prepare(`UPDATE customer_users SET status = 'disabled' WHERE id = ?`).bind(second.userId).run();   // the second admin leaves
+  const direct = await changeRequests.requestSiteDeletion(env, { confirmName: 'Stale Site', organizationId: owner.organizationId, siteId: site.siteId, actorUserId: owner.userId });
+  assert.equal(direct.ok, true); assert.equal(direct.requiresApproval, false);
+  const row = await env.LUMMET_DB.prepare(`SELECT status FROM change_requests WHERE id = ?`).bind(pending.changeRequestId).first();
+  assert.equal(row.status, 'canceled');
 });

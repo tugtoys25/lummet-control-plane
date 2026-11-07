@@ -22,8 +22,13 @@ import * as sites from "./sites.js";
 import * as teardown from "./site-teardown.js";
 import * as requestsRepo from "./repositories/change-requests.js";
 
+// The workflow needs a SECOND person: the requester can never approve their own request, so with fewer than two active owners or
+// admins nobody could ever approve and the organization would be locked out of deleting its own sites. Below that, deletion is direct
+// (the typed-name confirmation still applies); it applies again as soon as a second admin joins.
+export const MIN_APPROVERS_FOR_WORKFLOW = 2;
 async function requiresApproval(env, organizationId) {
-  return (await checkEntitlement(env, organizationId, "approval_workflows.enabled")) === true;
+  if ((await checkEntitlement(env, organizationId, "approval_workflows.enabled")) !== true) return false;
+  return (await requestsRepo.countApprovers(env, organizationId)) >= MIN_APPROVERS_FOR_WORKFLOW;
 }
 
 /**
@@ -46,6 +51,8 @@ export async function requestSiteDeletion(env, { organizationId, siteId, actorUs
       siteId, organizationId, reason: reason || "customer-requested deletion", actorType: "customer_user", actorId: actorUserId
     });
     if (!result.ok) return result;
+    // A request filed earlier (while a second admin still existed) must not stay pending for a site that is already going.
+    await requestsRepo.cancelPendingSiteDeletions(env, organizationId, siteId, "site was deleted directly: no second admin is available to approve");
     return { ok: true, requiresApproval: false, jobId: result.jobId };
   }
 

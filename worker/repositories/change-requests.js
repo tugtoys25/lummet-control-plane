@@ -34,3 +34,20 @@ export async function markRejected(env, changeRequestId, approverUserId, reason)
     `UPDATE change_requests SET status = 'rejected', approved_by = ?, reason = COALESCE(?, reason), resolved_at = CURRENT_TIMESTAMP WHERE id = ?`
   ).bind(approverUserId || null, reason || null, changeRequestId).run();
 }
+
+/** Active people who could approve a deletion: owners and admins whose account is not disabled. */
+export async function countApprovers(env, organizationId) {
+  const row = await env.LUMMET_DB.prepare(
+    `SELECT COUNT(*) AS n FROM organization_users ou JOIN customer_users u ON u.id = ou.user_id
+      WHERE ou.organization_id = ? AND ou.role IN ('admin', 'owner') AND u.status = 'active'`
+  ).bind(organizationId).first();
+  return row?.n || 0;
+}
+
+/** Closes pending deletion requests for a site that was deleted another way, so none is left waiting on an approver who does not exist. */
+export async function cancelPendingSiteDeletions(env, organizationId, siteId, note) {
+  await env.LUMMET_DB.prepare(
+    `UPDATE change_requests SET status = 'canceled', reason = COALESCE(?, reason), resolved_at = CURRENT_TIMESTAMP
+      WHERE organization_id = ? AND resource_id = ? AND type = 'site_deletion' AND status = 'pending'`
+  ).bind(note || null, organizationId, siteId).run();
+}

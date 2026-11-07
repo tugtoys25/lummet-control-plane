@@ -84,6 +84,7 @@ import * as orgSecurityPolicy from "./org-security-policy.js";
 import * as organizations from "./organizations.js";
 import * as sites from "./sites.js";
 import * as siteSetup from "./site-setup.js";
+import { deriveAdminSetupCode } from "./site-bindings.js";
 import * as plans from "./plans.js";
 import * as entitlementsService from "./entitlements.js";
 import { roleAtLeast } from "./customer-rbac.js";
@@ -109,7 +110,7 @@ import { effectiveNow, cardRequiredTrial } from "./billing-config.js";
 import * as scheduler from "./scheduler.js";
 import { reconcileSubscriptions, resolveDrift, listDrift } from "./phase3-source-of-truth.js";
 import { stripeRequest } from "./billing-stripe.js";
-import { provisioning } from "./provisioning.js";
+import { provisioning, resolveResourceNames } from "./provisioning.js";
 import * as jobsModule from "./jobs.js";
 import * as jobRunner from "./job-runner.js";
 import { domains } from "./domains.js";
@@ -415,7 +416,7 @@ function makeRolloutDispatch(env, ctx, { inline }) {
  */
 function makeDomainRedeploy(env, ctx) {
   return async (siteId) => {
-    const release = await tenantTemplate.getCurrentRelease(env);
+    const release = await tenantTemplate.getCurrentReleaseForSite(env, siteId);
     if (!release.ok) return;
     const result = await deployments.startDeployment(env, {
       siteId, version: release.version, migrations: release.migrations, scriptContent: release.scriptContent, actorType: "system"
@@ -2174,7 +2175,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               // platform's published release. Anything a customer puts in the
               // request body is ignored, otherwise a customer could run
               // arbitrary code in the shared tenant Worker.
-              const release = await tenantTemplate.getCurrentRelease(env);
+              const release = await tenantTemplate.getCurrentReleaseForSite(env, siteId);
               if (!release.ok) return json({ success: false, error: release.error }, release.status || 409);
               const result = await deployments.startDeployment(env, {
                 siteId, version: release.version, migrations: release.migrations, scriptContent: release.scriptContent, actorUserId: customer.id
@@ -2205,7 +2206,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             if (!targetSite || targetSite.organization_id !== organizationId) {
               return json({ success: false, error: "not_found" }, 404);
             }
-            const release = await tenantTemplate.getCurrentRelease(env);
+            const release = await tenantTemplate.getCurrentReleaseForSite(env, siteId);
             if (!release.ok) return json({ success: false, error: release.error }, release.status || 409);
             const result = await deployments.startDeployment(env, {
               siteId, version: release.version, migrations: release.migrations, scriptContent: release.scriptContent, actorUserId: customer.id
@@ -2855,7 +2856,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
         if (method === "GET" && rest === "releases") {
           const denied = needScope("release:publish"); if (denied) return denied;
-          return json({ success: true, data: await tenantTemplate.listReleases(env) });
+          return json({ success: true, data: await tenantTemplate.listReleases(env, url.searchParams.get("line")) });
         }
         if (method === "PUT" && rest === "assets") {
           const denied = needScope("release:publish"); if (denied) return denied;
@@ -2867,16 +2868,16 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (method === "POST" && rest === "publish") {
           const denied = needScope("release:publish"); if (denied) return denied;
           const b = await ciBody();
-          const r = await tenantTemplate.publishRelease(env, { version: b.version, scriptContent: b.scriptContent, migrations: b.migrations, assets: b.assets, notes: b.notes, createdBy: ciActor });
+          const r = await tenantTemplate.publishRelease(env, { version: b.version, scriptContent: b.scriptContent, migrations: b.migrations, assets: b.assets, assetsConfig: b.assetsConfig, line: b.line, notes: b.notes, createdBy: ciActor });
           await ciAudit("tenant_template_release", b.version, "publish", r);
-          return reply(r, { version: b.version, assetCount: r.assetCount });
+          return reply(r, { version: b.version, line: r.line, assetCount: r.assetCount });
         }
         if (method === "POST" && rest === "rollouts") {
           const denied = needScope("rollout:run"); if (denied) return denied;
           const b = await ciBody();
           const r = b.canarySiteId
             ? await rollouts.startCanaryRollout(env, { version: b.version || null, canarySiteId: b.canarySiteId, notes: b.notes || null, startedBy: ciActor })
-            : await rollouts.startRollout(env, { version: b.version || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: ciActor });
+            : await rollouts.startRollout(env, { version: b.version || null, line: b.line || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: ciActor });
           await ciAudit("tenant_rollout", r.rolloutId || "none", b.canarySiteId ? "start_canary" : "start", r);
           if (!r.ok) return reply(r);
           // Take the first step now, so the first site starts without waiting for anything else.
@@ -3199,16 +3200,43 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           );
         }
 
+        // A brokerage site's first-administrator setup: the address of its one-time setup page and the code it asks for.
+        // Only members who can manage the organization see it, only for a live site of the brokerage application.
+        const adminSetup = /^\/app\/sites\/([^/]+)\/admin-setup$/.exec(path);
+        if (adminSetup) {
+          const site = (await sites.listSitesForOrganization(env, activeOrgId)).find((s) => s.id === adminSetup[1]);
+          if (!canManage || !site || site.template_line !== "brokerage" || site.status !== "active") return html("<h1>Not found</h1>", 404);
+          const code = await deriveAdminSetupCode(env, site.id);
+          const host = site.primary_domain || (await resolveResourceNames(env, site)).host;
+          const body = code
+            ? `<h1>Admin setup for ${escapeHtml(site.name)}</h1>
+               <p>Create the first administrator of your site.</p>
+               <ol><li>Open <a href="https://${escapeHtml(host)}/admin/setup">https://${escapeHtml(host)}/admin/setup</a>.</li>
+               <li>Enter your email, a password and this setup code:</li></ol>
+               <p><code style="user-select:all;word-break:break-all">${escapeHtml(code)}</code></p>
+               <p>Keep the code private: anyone who has it can set up an administrator. You can sign in at <a href="https://${escapeHtml(host)}/admin/login">https://${escapeHtml(host)}/admin/login</a> afterwards.</p>
+               <p><a href="/app/deployments">Back to deployments</a></p>`
+            : `<h1>Admin setup</h1><p>Admin setup is not available yet. Please contact support.</p>`;
+          const res = html(shell({ title: "Admin setup", activeKey: "deployments", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId, bodyHtml: `<div class="card">${body}</div>` }));
+          res.headers.set("Cache-Control", "no-store");
+          return res;
+        }
+
         if (path === "/app/deployments") {
           const sitesList = await sites.listSitesForOrganization(env, activeOrgId);
           const deploymentsBySite = {};
           for (const site of sitesList) deploymentsBySite[site.id] = await deployments.listDeploymentsForSite(env, site.id);
-          const latest = await tenantTemplate.getCurrentRelease(env);
+          // The newest release of each application the organization's sites run (a site is compared with its own line's).
+          const latestByLine = {};
+          for (const lineKey of new Set(sitesList.map((s) => s.template_line || "casino"))) {
+            const found = await tenantTemplate.getCurrentRelease(env, lineKey);
+            if (found.ok) latestByLine[lineKey] = found.version;
+          }
           return html(
             shell({
               title: "Deployments", activeKey: "deployments", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderCustomerDeploymentsPage({ sites: sitesList, deploymentsBySite, latestVersion: latest.ok ? latest.version : null, canManage })
+              bodyHtml: renderCustomerDeploymentsPage({ sites: sitesList, deploymentsBySite, latestVersion: latestByLine.casino || null, latestByLine, canManage })
             })
           );
         }
@@ -4925,7 +4953,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               const b = await staffBody();
               const r = b.canarySiteId
                 ? await rollouts.startCanaryRollout(env, { version: b.version || null, canarySiteId: b.canarySiteId, notes: b.notes || null, startedBy: `admin:${admin.id}` })
-                : await rollouts.startRollout(env, { version: b.version || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: `admin:${admin.id}` });
+                : await rollouts.startRollout(env, { version: b.version || null, line: b.line || null, siteIds: b.siteIds || null, notes: b.notes || null, startedBy: `admin:${admin.id}` });
               return rolloutAudit(r.rolloutId || "none", b.canarySiteId ? "start_canary" : "start", r);
             }
             const rolloutAct = matchPath("/api/platform/saas/rollouts/:id/:action", path);
@@ -4953,7 +4981,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             if (path === "/api/platform/saas/tenant-template/publish") {
               const b = await staffBody();
               const r = await tenantTemplate.publishRelease(env, {
-                version: b.version, scriptContent: b.scriptContent, migrations: b.migrations, assets: b.assets, notes: b.notes, createdBy: String(admin.id)
+                version: b.version, scriptContent: b.scriptContent, migrations: b.migrations, assets: b.assets, assetsConfig: b.assetsConfig, line: b.line, notes: b.notes, createdBy: String(admin.id)
               });
               return staffAudit("tenant_template_release", b.version, "publish", r);
             }
@@ -5020,14 +5048,14 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const page = await planPriceList(env, { planId: String(q.get("plan") || "").slice(0, 64), limit: 50, offset: (pageNo - 1) * 50 });
             return json({ success: true, data: page.rows, hasMore: page.hasMore, page: pageNo });
           }
-          if (method === "GET" && path === "/api/platform/saas/rollouts") return json({ success: true, data: await rollouts.dashboard(env) });
+          if (method === "GET" && path === "/api/platform/saas/rollouts") return json({ success: true, data: await rollouts.dashboard(env, url.searchParams.get("line") || undefined) });
           const rolloutGet = method === "GET" ? matchPath("/api/platform/saas/rollouts/:id", path) : null;
           if (rolloutGet) {
             const r = await rollouts.getRollout(env, rolloutGet.id);
             return r.ok ? json({ success: true, ...r }) : json({ success: false, error: r.error }, r.status || 404);
           }
           if (method === "GET" && path === "/api/platform/saas/tenant-template") {
-            return json({ success: true, data: await tenantTemplate.listReleases(env) });
+            return json({ success: true, data: await tenantTemplate.listReleases(env, url.searchParams.get("line")) });
           }
           return json({ success: false, error: "not_found" }, 404);
         }

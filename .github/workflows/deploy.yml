@@ -104,6 +104,17 @@ jobs:
         run: |
           printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY --env staging
           printf '%s' "$RESEND_WEBHOOK_SECRET" | npx wrangler secret put RESEND_WEBHOOK_SECRET --env staging
+      - name: Configure tenant secret root on staging Worker
+        env:
+          TENANT_SECRET_ROOT: ${{ secrets.TENANT_SECRET_ROOT }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$TENANT_SECRET_ROOT" ]; then
+            printf '%s' "$TENANT_SECRET_ROOT" | npx wrangler secret put TENANT_SECRET_ROOT --env staging
+          else
+            echo "TENANT_SECRET_ROOT not set; brokerage sites cannot be deployed until it is"
+          fi
       - name: Deploy staging Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -196,6 +207,17 @@ jobs:
         run: |
           printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY
           printf '%s' "$RESEND_WEBHOOK_SECRET" | npx wrangler secret put RESEND_WEBHOOK_SECRET
+      - name: Configure tenant secret root on production Worker
+        env:
+          TENANT_SECRET_ROOT: ${{ secrets.TENANT_SECRET_ROOT }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$TENANT_SECRET_ROOT" ]; then
+            printf '%s' "$TENANT_SECRET_ROOT" | npx wrangler secret put TENANT_SECRET_ROOT
+          else
+            echo "TENANT_SECRET_ROOT not set; brokerage sites cannot be deployed until it is"
+          fi
       - name: Deploy production Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

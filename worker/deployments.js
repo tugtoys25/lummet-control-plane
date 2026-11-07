@@ -35,12 +35,13 @@ import * as siteResources from "./repositories/site-resources.js";
 import * as sites from "./sites.js";
 import { resolveResourceNames } from "./provisioning.js";
 import { getDomainForSite, zoneIdFor } from "./platform-domains.js";
+import * as releaseRepo from "./repositories/tenant-releases.js";
+import { lineProfile } from "./template-lines.js";
 import { newTenantSeedMigrations } from "./tenant-defaults.js";
 import * as webhooks from "./webhooks.js";
 
-// The tenant application's own schedule (its wrangler.jsonc triggers): expired-session
-// and conversation cleanup plus the optional link-health checks.
-const TENANT_CRONS = ["0 */6 * * *"];
+// Each application's own cron schedule lives with its template line (template-lines.js): for the casino application the
+// expired-session and conversation cleanup plus the optional link-health checks, for brokerage its notification recovery.
 
 const INITIAL_DEPLOY_STEPS = ["validate_site_state", "run_migrations", "deploy_worker_script", "health_check"];
 const ROLLBACK_STEPS = ["validate_site_state", "deploy_worker_script", "health_check"];
@@ -61,10 +62,10 @@ export async function applyMigrationSql(infra, env, databaseId, sql) {
   }
 }
 
-function reachableUrl(site, workerName, env) {
-  if (site.primary_domain) return `https://${site.primary_domain}/`;
+function reachableUrl(site, workerName, env, path = "/") {
+  if (site.primary_domain) return `https://${site.primary_domain}${path}`;
   const subdomain = env.CF_WORKERS_DEV_SUBDOMAIN || "workers";
-  return `https://${workerName}.${subdomain}.workers.dev/`;
+  return `https://${workerName}.${subdomain}.workers.dev${path}`;
 }
 
 export function createDeploymentService(infra, { templateService = tenantTemplate } = {}) {
@@ -201,6 +202,9 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
 
     const names = await resolveResourceNames(env, site);
     const platformDomain = await getDomainForSite(env, site);
+    // The application this site runs (its product's template line) decides bindings, cron schedule, runtime date and health URL.
+    const siteLine = await releaseRepo.lineOfSite(env, site.id);
+    const profile = lineProfile(siteLine);
 
     async function failDeployment(step, message) {
       await jobsModule.failStep(env, jobId, step, message);
@@ -252,7 +256,8 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
 
             const applied = [];
             // A site's first deploy also gets the platform defaults for new tenants (tenant-defaults.js); redeploys never do.
-            const toApply = [...(migrations || []), ...(isInitialDeploy ? newTenantSeedMigrations() : [])];
+            // Those defaults are the casino application's own tables and content: another application (brokerage) has none of them.
+            const toApply = [...(migrations || []), ...(isInitialDeploy && profile.key === "casino" ? newTenantSeedMigrations() : [])];
             for (const migration of toApply) {
               const already = await env.LUMMET_DB.prepare(
                 `SELECT 1 FROM site_migrations_applied WHERE site_id = ? AND migration_name = ?`
@@ -285,12 +290,18 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
             // Bindings are rebuilt every deploy (an upload replaces them), and
             // the release's static assets, if it has any, ride along.
             const release = await templateService.getReleaseByVersion(env, version).catch(() => null);
+            // A release belongs to one application. Deploying another application's code to this site would replace its
+            // Worker with something that cannot use its database, so it is refused here whoever asked.
+            if (release && release.ok && (release.line || "casino") !== siteLine) {
+              throw new Error(`release ${version} is a ${release.line || "casino"} release but this site runs the ${siteLine} application`);
+            }
             const assetManifest = release && release.ok && release.assets ? release.assets : null;
             const bindings = await buildSiteBindings(env, {
-              site, deploymentId, host: site.primary_domain || names.host, hasAssets: !!assetManifest
+              site, deploymentId, host: site.primary_domain || names.host, hasAssets: !!assetManifest, line: siteLine
             });
             await infra.uploadWorkerScript(env, {
-              workerName: names.workerName, scriptContent, bindings,
+              workerName: names.workerName, scriptContent, bindings, profile,
+              assetsConfig: release && release.ok ? release.assetsConfig : null,
               assets: assetManifest ? { manifest: assetManifest, readAsset: (hash) => templateService.readAsset(env, hash) } : null
             });
 
@@ -324,7 +335,7 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
             // The tenant's cron triggers. Not fatal (the site works without
             // them), but never silent: the outcome is recorded on the step.
             let scheduleError = null;
-            try { await infra.setWorkerSchedule(env, { workerName: names.workerName, crons: TENANT_CRONS }); }
+            try { await infra.setWorkerSchedule(env, { workerName: names.workerName, crons: [...profile.crons] }); }
             catch (err) { scheduleError = String(err?.message || err).slice(0, 160); }
 
             await jobsModule.completeStep(env, jobId, step.step_key, { workerName: names.workerName, bindingCount: bindings.length, assetCount: assetManifest ? Object.keys(assetManifest).length : 0, routeId, ...(scheduleError ? { scheduleError } : {}) });
@@ -333,7 +344,7 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
 
           case "health_check": {
             await updateDeploymentStatus(env, deploymentId, "checking");
-            const url = reachableUrl(site, names.workerName, env);
+            const url = reachableUrl(site, names.workerName, env, profile.healthPath);
             const result = await infra.checkHealth(env, { url });
             if (!result.ok) {
               throw new Error(`health check failed for ${url} (status ${result.statusCode ?? "unreachable"})`);

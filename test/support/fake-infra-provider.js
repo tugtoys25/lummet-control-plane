@@ -121,8 +121,8 @@ export function createFakeInfraProvider() {
 
     // --- Phase 4 additions ---
 
-    async uploadWorkerScript(env, { workerName, scriptContent, bindings, assets }) {
-      calls.push({ method: "uploadWorkerScript", workerName, scriptContent, bindings, assetManifest: assets ? assets.manifest : null });
+    async uploadWorkerScript(env, { workerName, scriptContent, bindings, assets, profile = null, assetsConfig = null }) {
+      calls.push({ method: "uploadWorkerScript", workerName, scriptContent, bindings, profile, assetsConfig, assetManifest: assets ? assets.manifest : null });
       if (assets) {
         // Prove the readAsset supplier works for every manifest entry.
         for (const meta of Object.values(assets.manifest)) {

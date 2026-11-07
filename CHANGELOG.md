@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.1 - Template lines: brokerage (luminousagents) as the second tenant application
+
+- A product now runs on a **template line** (`products.template_line`): `casino` (lummet-tenant, every existing product) or `brokerage` (luminousagents). Releases, rollouts, auto-deploy, bindings, cron schedule and health URL are all per line; see docs/TENANT_RELEASES.md.
+- New product `brokerage_site` (no plan seeded: set price and trial in the staff Plan and pricing manager). Migration 0087 is additive; existing behaviour is unchanged.
+- Release publish and rollout routes and `publish-tenant-release.mjs --line brokerage`; the static-file rules and `_headers` travel with a brokerage release.
+- New platform secret `TENANT_SECRET_ROOT` (pushed by deploy.yml when set) derives each brokerage site's own `IP_HASH_SECRET` and `OTP_ENCRYPTION_KEY`.
+- Staff Deployments page shows one rollout section per application; the releases table shows each release's application.
+
 ## Unreleased - New-tenant defaults, live sites on /brands, dashboard chrome
 
 Additive: migration 0081 (after 0080); no existing table is rewritten.

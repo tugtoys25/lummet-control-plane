@@ -23,6 +23,8 @@
 import * as repo from "./repositories/rollouts.js";
 import * as tenantTemplate from "./tenant-template.js";
 import * as sites from "./sites.js";
+import { DEFAULT_LINE, normalizeLine } from "./template-lines.js";
+import * as releaseRepo from "./repositories/tenant-releases.js";
 // provisioning.js and deployments.js import each other; loading provisioning first is the order that works
 // (job-runner.js does the same).
 import "./provisioning.js";
@@ -68,6 +70,7 @@ async function summarize(env, rollout, extra = {}) {
     ok: true,
     rolloutId: rollout.id,
     version: rollout.release_version,
+    line: rollout.template_line || DEFAULT_LINE,
     status: rollout.status,
     done: rollout.status !== "running",
     total: rollout.total_sites,
@@ -84,7 +87,9 @@ async function summarize(env, rollout, extra = {}) {
  * Starts a rollout of the ACTIVE release (or an explicit version) to every live site that is not already on it.
  * siteIds limits it to chosen sites: roll out to one site first as a canary, then to everyone.
  */
-export async function startRollout(env, { version = null, siteIds = null, notes = null, startedBy = "system" } = {}, { templates = tenantTemplate } = {}) {
+export async function startRollout(env, { version = null, line = null, siteIds = null, notes = null, startedBy = "system" } = {}, { templates = tenantTemplate } = {}) {
+  const wantedLine = normalizeLine(line);
+  if (!wantedLine) return { ok: false, status: 422, error: "invalid_template_line" };
   if (siteIds !== null && siteIds !== undefined) {
     if (!Array.isArray(siteIds) || siteIds.length > MAX_SITE_IDS || siteIds.some((s) => typeof s !== "string" || !s || s.length > 64)) {
       return { ok: false, status: 422, error: "invalid_site_ids" };
@@ -92,8 +97,11 @@ export async function startRollout(env, { version = null, siteIds = null, notes 
   }
   if (notes !== null && notes !== undefined && String(notes).length > 300) return { ok: false, status: 422, error: "notes_too_long" };
 
-  const release = version ? await templates.getReleaseByVersion(env, String(version)) : await templates.getCurrentRelease(env);
+  const release = version ? await templates.getReleaseByVersion(env, String(version)) : await templates.getCurrentRelease(env, wantedLine);
   if (!release.ok) return { ok: false, status: release.status || 409, error: release.error };
+  // A rollout belongs to the release's application. Naming a line that is not the release's own is a mistake, not a hint.
+  const releaseLine = release.line || DEFAULT_LINE;
+  if (line && releaseLine !== wantedLine) return { ok: false, status: 422, error: "release_line_mismatch" };
 
   // Canary-first policy (off unless ROLLOUT_REQUIRE_CANARY=on): a rollout to EVERY site needs a finished canary of this release.
   const toEveryone = !siteIds || !siteIds.length;
@@ -103,11 +111,11 @@ export async function startRollout(env, { version = null, siteIds = null, notes 
   }
 
   const id = crypto.randomUUID();
-  if (!(await repo.insertRollout(env, { id, version: release.version, startedBy, notes }))) {
-    const running = await repo.getRunning(env);
+  if (!(await repo.insertRollout(env, { id, version: release.version, line: releaseLine, startedBy, notes }))) {
+    const running = await repo.getRunning(env, releaseLine);
     return { ok: false, status: 409, error: "rollout_in_progress", rolloutId: running ? running.id : null };
   }
-  await repo.seedItems(env, { rolloutId: id, version: release.version, siteIds: siteIds && siteIds.length ? siteIds : null });
+  await repo.seedItems(env, { rolloutId: id, version: release.version, line: releaseLine, siteIds: siteIds && siteIds.length ? siteIds : null });
   const counts = await repo.itemCounts(env, id);
   await repo.setTotal(env, id, counts.pending);
   if (counts.pending === 0) await repo.finishRollout(env, id, "completed");
@@ -126,7 +134,9 @@ export async function startCanaryRollout(env, { version = null, canarySiteId, no
   const site = await sites.getSite(env, canarySiteId);
   if (!site) return { ok: false, status: 404, error: "canary_site_not_found" };
   if (site.status !== "active" || !site.tenant_id) return { ok: false, status: 409, error: "canary_site_not_live" };
-  return startRollout(env, { version, siteIds: [canarySiteId], notes: `${CANARY_PREFIX}${canarySiteId}${extra ? ` ${extra}` : ""}`, startedBy }, deps);
+  // The canary belongs to its site's application: a release of another application is refused (release_line_mismatch).
+  const line = await releaseRepo.lineOfSite(env, canarySiteId);
+  return startRollout(env, { version, line, siteIds: [canarySiteId], notes: `${CANARY_PREFIX}${canarySiteId}${extra ? ` ${extra}` : ""}`, startedBy }, deps);
 }
 
 async function classify(env, item, now) {
@@ -225,9 +235,12 @@ export async function advanceRollout(env, rolloutId, { dispatch = async () => {}
 
 /** What the maintenance tick calls: continue whatever rollout is running, if any. */
 export async function advanceRunning(env, opts = {}) {
-  const running = await repo.getRunning(env);
-  if (!running) return { ok: true, idle: true };
-  return advanceRollout(env, running.id, opts);
+  // One rollout per template line can be running; the tick carries every one of them forward.
+  const running = await repo.getRunningAll(env);
+  if (!running.length) return { ok: true, idle: true };
+  let last = null;
+  for (const rollout of running) last = await advanceRollout(env, rollout.id, opts);
+  return last;
 }
 
 export async function getRollout(env, rolloutId) {
@@ -264,9 +277,10 @@ export async function resumeRollout(env, rolloutId) {
 }
 
 /** Everything the staff Deployments page shows about releases and rollouts. */
-export async function dashboard(env) {
+export async function dashboard(env, line = DEFAULT_LINE) {
+  const lineKey = normalizeLine(line) || DEFAULT_LINE;
   const [active, fleet, running, recent] = await Promise.all([
-    repo.activeRelease(env), repo.fleetVersions(env), repo.getRunning(env), repo.listRecent(env, 8)
+    repo.activeRelease(env, lineKey), repo.fleetVersions(env, lineKey), repo.getRunning(env, lineKey), repo.listRecent(env, 8, lineKey)
   ]);
   const activeVersion = active ? active.version : null;
   const total = fleet.reduce((n, r) => n + r.n, 0);
@@ -275,11 +289,11 @@ export async function dashboard(env) {
   const canary = {
     required: canaryRequired(env),
     state: activeVersion ? await canaryState(env, activeVersion) : null,
-    candidates: activeVersion ? (await repo.canaryCandidates(env, activeVersion)).map((c) => ({ id: c.id, name: c.name, slug: c.slug, version: c.app_version || null })) : []
+    candidates: activeVersion ? (await repo.canaryCandidates(env, activeVersion, lineKey)).map((c) => ({ id: c.id, name: c.name, slug: c.slug, version: c.app_version || null })) : []
   };
   return {
     canary,
-    active, fleet, totalLive: total, onActive: current, outdated: total - current,
+    line: lineKey, active, fleet, totalLive: total, onActive: current, outdated: total - current,
     running: running || null,
     shown: shown ? { ...(await summarize(env, shown)), startedBy: shown.started_by, createdAt: shown.created_at, completedAt: shown.completed_at, items: await repo.listItems(env, shown.id, 100) } : null,
     recent: recent.map((r) => ({ id: r.id, version: r.release_version, status: r.status, total: r.total_sites, startedBy: r.started_by, createdAt: r.created_at, error: r.error_message }))

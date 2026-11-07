@@ -9,23 +9,30 @@ export async function getById(env, id) {
   return env.LUMMET_DB.prepare(`SELECT * FROM tenant_rollouts WHERE id = ?`).bind(id).first();
 }
 
-export async function getRunning(env) {
+/** The running rollout (of one template line when given). At most one per line runs at a time. */
+export async function getRunning(env, line = null) {
+  if (line) return env.LUMMET_DB.prepare(`SELECT * FROM tenant_rollouts WHERE status = 'running' AND template_line = ? LIMIT 1`).bind(line).first();
   return env.LUMMET_DB.prepare(`SELECT * FROM tenant_rollouts WHERE status = 'running' LIMIT 1`).first();
 }
 
-export async function listRecent(env, limit = 10) {
-  const r = await env.LUMMET_DB.prepare(
-    `SELECT * FROM tenant_rollouts ORDER BY created_at DESC, rowid DESC LIMIT ?`
-  ).bind(limit).all();
+/** Every running rollout: one per template line at most. */
+export async function getRunningAll(env) {
+  return (await env.LUMMET_DB.prepare(`SELECT * FROM tenant_rollouts WHERE status = 'running' ORDER BY created_at`).all()).results || [];
+}
+
+export async function listRecent(env, limit = 10, line = null) {
+  const where = line ? `WHERE template_line = ?` : ``;
+  const stmt = env.LUMMET_DB.prepare(`SELECT * FROM tenant_rollouts ${where} ORDER BY created_at DESC, rowid DESC LIMIT ?`);
+  const r = await (line ? stmt.bind(line, limit) : stmt.bind(limit)).all();
   return r.results || [];
 }
 
 /** false when another rollout is already running (the partial unique index refused the insert). */
-export async function insertRollout(env, { id, version, startedBy, notes }) {
+export async function insertRollout(env, { id, version, line = "casino", startedBy, notes }) {
   try {
     await env.LUMMET_DB.prepare(
-      `INSERT INTO tenant_rollouts (id, release_version, status, started_by, notes) VALUES (?, ?, 'running', ?, ?)`
-    ).bind(id, version, startedBy || null, notes || null).run();
+      `INSERT INTO tenant_rollouts (id, release_version, template_line, status, started_by, notes) VALUES (?, ?, ?, 'running', ?, ?)`
+    ).bind(id, version, line, startedBy || null, notes || null).run();
     return true;
   } catch (error) {
     if (isUniqueViolation(error)) return false;
@@ -39,9 +46,10 @@ export async function insertRollout(env, { id, version, startedBy, notes }) {
  * its own first deployment, and a suspended or deleting site must not be touched. Sites already on the version
  * are recorded as skipped, so the rollout page shows the whole fleet.
  */
-export async function seedItems(env, { rolloutId, version, siteIds = null }) {
+export async function seedItems(env, { rolloutId, version, line = "casino", siteIds = null }) {
   const filter = siteIds && siteIds.length ? `AND s.id IN (SELECT value FROM json_each(?))` : "";
-  const binds = [rolloutId, version, version];
+  // Only sites whose product runs this release's application: a casino release is never rolled out to a brokerage site.
+  const binds = [rolloutId, version, version, line];
   if (filter) binds.push(JSON.stringify(siteIds));
   await env.LUMMET_DB.prepare(
     `INSERT INTO tenant_rollout_items (rollout_id, site_id, position, status, detail)
@@ -49,7 +57,8 @@ export async function seedItems(env, { rolloutId, version, siteIds = null }) {
             CASE WHEN s.app_version = ? THEN 'skipped' ELSE 'pending' END,
             CASE WHEN s.app_version = ? THEN 'already_on_version' ELSE NULL END
        FROM sites s
-      WHERE s.status = 'active' AND s.tenant_id IS NOT NULL ${filter}`
+      WHERE s.status = 'active' AND s.tenant_id IS NOT NULL
+        AND s.product_id IN (SELECT id FROM products WHERE template_line = ?) ${filter}`
   ).bind(...binds).run();
 }
 
@@ -172,18 +181,19 @@ export async function listItems(env, rolloutId, limit = 100) {
 }
 
 /** Live sites grouped by the version they run: the fleet at a glance. */
-export async function fleetVersions(env) {
+export async function fleetVersions(env, line = "casino") {
   const r = await env.LUMMET_DB.prepare(
     `SELECT app_version AS version, COUNT(*) AS n FROM sites
-      WHERE status = 'active' AND tenant_id IS NOT NULL GROUP BY app_version ORDER BY n DESC`
-  ).all();
+      WHERE status = 'active' AND tenant_id IS NOT NULL
+        AND product_id IN (SELECT id FROM products WHERE template_line = ?) GROUP BY app_version ORDER BY n DESC`
+  ).bind(line).all();
   return r.results || [];
 }
 
-export async function activeRelease(env) {
+export async function activeRelease(env, line = "casino") {
   return env.LUMMET_DB.prepare(
-    `SELECT version, created_at, notes FROM tenant_template_releases WHERE status = 'active' ORDER BY created_at DESC, rowid DESC LIMIT 1`
-  ).first();
+    `SELECT version, created_at, notes FROM tenant_template_releases WHERE status = 'active' AND template_line = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`
+  ).bind(line).first();
 }
 
 /** The newest rollout of a version that was started as a canary (notes begin "canary:"), or null. */
@@ -194,11 +204,12 @@ export async function latestCanaryRollout(env, version) {
 }
 
 /** Live sites that are not on `version`: who could be the canary. Names only. */
-export async function canaryCandidates(env, version, limit = 50) {
+export async function canaryCandidates(env, version, line = "casino", limit = 50) {
   const r = await env.LUMMET_DB.prepare(
     `SELECT id, name, slug, app_version FROM sites
       WHERE status = 'active' AND tenant_id IS NOT NULL AND (app_version IS NULL OR app_version <> ?)
+        AND product_id IN (SELECT id FROM products WHERE template_line = ?)
       ORDER BY created_at, id LIMIT ?`
-  ).bind(version, limit).all();
+  ).bind(version, line, limit).all();
   return r.results || [];
 }

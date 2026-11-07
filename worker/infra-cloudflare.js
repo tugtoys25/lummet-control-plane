@@ -243,7 +243,16 @@ export const TENANT_STATIC_HEADERS = [
   ""
 ].join("\n");
 
-export function tenantAssetsConfig(env) {
+export function tenantAssetsConfig(env, { profile = null, releaseConfig = null } = {}) {
+  // A line whose application defines its own static-file rules (brokerage) carries them in the release: which paths still
+  // go to the Worker first, and the text of its _headers file. Nothing else about the upload is taken from a release.
+  if (profile && profile.assets === "release_defined") {
+    const config = {};
+    const first = releaseConfig && Array.isArray(releaseConfig.runWorkerFirst) ? releaseConfig.runWorkerFirst : null;
+    config.run_worker_first = first && first.length ? first : true;
+    if (releaseConfig && typeof releaseConfig.headers === "string" && releaseConfig.headers.trim()) config._headers = releaseConfig.headers;
+    return config;
+  }
   if (String(env?.TENANT_STATIC_BYPASS || "on").toLowerCase() === "off") return { run_worker_first: true };
   return { run_worker_first: ["/*", "!/static/*"], _headers: TENANT_STATIC_HEADERS };
 }
@@ -258,20 +267,20 @@ export function tenantAssetsConfig(env) {
  *           via the completion token. The tenant Worker stays in front of
  *           everything except /static/* (see tenantAssetsConfig), as in its wrangler.jsonc.
  */
-export async function uploadWorkerScript(env, { workerName, scriptContent, bindings = [], assets = null }) {
+export async function uploadWorkerScript(env, { workerName, scriptContent, bindings = [], assets = null, profile = null, assetsConfig = null }) {
   if (!env.CF_API_TOKEN) throw new Error("CF_API_TOKEN is not configured on this Worker");
   if (!env.CF_ACCOUNT_ID) throw new Error("CF_ACCOUNT_ID is not configured on this Worker");
 
   const metadata = {
     main_module: "index.js",
     // Match the tenant repo (lummet-tenant/wrangler.jsonc). Override with TENANT_COMPAT_DATE if a release needs another date.
-    compatibility_date: env.TENANT_COMPAT_DATE || "2026-01-01",
-    compatibility_flags: ["nodejs_compat"],
+    compatibility_date: (profile && profile.compatibilityDate) || env.TENANT_COMPAT_DATE || "2026-01-01",
+    compatibility_flags: profile && profile.compatibilityFlags ? [...profile.compatibilityFlags] : ["nodejs_compat"],
     bindings
   };
   if (assets) {
     const jwt = await uploadAssets(env, { workerName, manifest: assets.manifest, readAsset: assets.readAsset });
-    metadata.assets = { jwt, config: tenantAssetsConfig(env) };
+    metadata.assets = { jwt, config: tenantAssetsConfig(env, { profile, releaseConfig: assetsConfig }) };
   }
   // Smart Placement runs the tenant Worker near its D1 database, so the ~15 sequential queries of a page render are
   // not each a long round trip. Cloudflare keeps it only where it measures an improvement. TENANT_SMART_PLACEMENT=off removes it.

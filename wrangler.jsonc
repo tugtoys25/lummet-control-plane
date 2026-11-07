@@ -69,6 +69,7 @@
 	],
 	// Secrets (set via `wrangler secret put`, never here):
 	//
+	//   TENANT_SECRET_ROOT      — 32+ characters; derives each brokerage site's own IP_HASH_SECRET and OTP_ENCRYPTION_KEY. Never rotate.
 	//   CREDENTIAL_KEK          — base64-encoded 32-byte AES-GCM key.
 	//                             Encrypts at rest: tenant Super API
 	//                             HMAC secrets, webhook signing secrets,

@@ -316,7 +316,7 @@ const cli = (args, env = {}) => spawnSync(process.execPath, [SCRIPT, ...args], {
 
 test('CLI: --offline validates the catalog with no key and no network', () => {
   const r = cli(['--offline']);
-  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Catalog v1 is valid: 10 products, 50 plans, 48 prices \(48 active\)/);
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Catalog v1 is valid: 11 products, 50 plans, 48 prices \(48 active\)/);
 });
 
 test('CLI: refuses a mode that does not match the key, a missing key, a missing --db and a bad catalog, before any call', () => {

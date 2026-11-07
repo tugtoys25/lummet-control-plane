@@ -35,8 +35,10 @@ export const JOB_TYPE = "site_teardown";
 const NOT_FOUND = /not\s*found|does\s*not\s*exist|no\s*such|could\s*not\s*(?:be\s*)?(?:find|found)|invalid zone/i;
 // Kept as the audit record of what existed and when it ended; everything else about the site is removed at the end.
 const KEEP_TABLES = new Set(["site_status_events", "site_resources"]);
-// Statuses a deletion may start from (ALLOWED_TRANSITIONS in sites.js decides the rest). In-flight jobs must finish or fail first.
-export const BUSY_STATUSES = ["provisioning", "configuring", "deploying"];
+// Every status except `deleted` can start a deletion (ALLOWED_TRANSITIONS in sites.js). A site stuck in provisioning, configuring or
+// deploying (or failed, or provisioned) is deletable too: its other jobs are cancelled first, and whatever a job created in the
+// meantime is caught by the `finalize` check (it refuses to finish while a resource is still recorded as active) and removed on retry.
+export const BUSY_STATUSES = [];
 
 export function createSiteTeardownService(infra, { zoneService = null } = {}) {
   const zones = () => zoneService || createZoneDomainService({ infra, dns: dohResolver });
@@ -52,12 +54,12 @@ export function createSiteTeardownService(infra, { zoneService = null } = {}) {
     const site = await sites.getSite(env, siteId);
     if (!site || (organizationId && site.organization_id !== organizationId)) return { ok: false, status: 404, error: "site_not_found" };
     if (site.status === "deleted") return { ok: false, status: 409, error: "site_already_deleted" };
-    if (BUSY_STATUSES.includes(site.status)) return { ok: false, status: 409, error: "site_busy", currentStatus: site.status };
 
     if (site.status !== "deleting") {
       const t = await sites.transitionSiteStatus(env, siteId, "deleting", { reason: reason || "deletion requested", actorType, actorId });
       if (!t.ok) return t;
     }
+    await repo.cancelOtherJobs(env, siteId, JOB_TYPE);     // nothing else may run, or be retried by the sweep, for a site that is going away
     const existing = await openJob(env, siteId);
     if (existing) return { ok: true, jobId: existing.id, alreadyRunning: true };
     const job = await jobsModule.createJob(env, { type: JOB_TYPE, organizationId: site.organization_id, siteId, createdBy: actorId, actorType, stepKeys: TEARDOWN_STEPS, payload: { reason: reason || null } });
@@ -140,7 +142,7 @@ export function createSiteTeardownService(infra, { zoneService = null } = {}) {
     }
   };
 
-  /** Runs (or resumes) one teardown job. Finished steps are skipped; a failure stops the job and leaves the site in `deleting`. */
+  /** Runs (or resumes) one teardown job. Steps are idempotent and all re-run; a failure stops the job and leaves the site in `deleting`. */
   async function runJob(env, jobId) {
     const job = await jobsModule.getJob(env, jobId);
     if (!job) return { ok: false, status: 404, error: "job_not_found" };
@@ -154,7 +156,8 @@ export function createSiteTeardownService(infra, { zoneService = null } = {}) {
     await jobsModule.markJobRunning(env, jobId);
     const result = {};
     for (const step of job.steps) {
-      if (step.status === "success" || step.status === "skipped") continue;
+      // Every step runs on every attempt, even one that succeeded before: each only acts on what is still recorded as active, so
+      // a repeat is a no-op, and a resource a straggling setup job created after its step passed is still caught and removed.
       await jobsModule.startStep(env, jobId, step.step_key);
       try {
         if (site.status === "deleted" && step.step_key !== "finalize") { await jobsModule.skipStep(env, jobId, step.step_key, "site already deleted"); continue; }

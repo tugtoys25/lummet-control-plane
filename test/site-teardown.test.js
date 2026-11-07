@@ -121,7 +121,7 @@ test('a provider failure leaves the site deleting with its address held; a retry
   infra._calls.length = 0;
   const second = await svc.retryTeardown(env, req.jobId);
   assert.equal(second.ok, true, JSON.stringify(second));
-  assert.deepEqual(infra._calls.map((c) => c.method).filter((m) => m.startsWith('delete')), ['deleteDatabase', 'deleteKVNamespace', 'deleteR2Bucket'], 'finished steps are not repeated');
+  assert.deepEqual(infra._calls.map((c) => c.method).filter((m) => m.startsWith('delete')), ['deleteDatabase', 'deleteKVNamespace', 'deleteR2Bucket'], 'what is already gone is not deleted again');
   assert.equal((await sites.getSite(env, s.siteId)).status, 'deleted');
 });
 
@@ -144,19 +144,13 @@ test('stored backups that cannot be removed block the deletion instead of being 
   assert.equal((await sites.getSite(env, s.siteId)).status, 'deleting');
 });
 
-test('starting a deletion twice reuses the open job; busy and deleted sites are refused', async () => {
+test('starting a deletion twice reuses the open job; deleted and unknown sites are refused', async () => {
   const env = makeEnv(); const org = await newOrg(env); const infra = createFakeInfraProvider(); const svc = service(infra);
   const s = await liveSite(env, infra, org);
   const a = await svc.beginSiteDeletion(env, { siteId: s.siteId, actorType: 'lummet_admin', actorId: '1', reason: 'staff' });
   const b = await svc.beginSiteDeletion(env, { siteId: s.siteId, actorType: 'lummet_admin', actorId: '1' });
   assert.equal(a.ok, true); assert.equal(b.jobId, a.jobId); assert.equal(b.alreadyRunning, true);
   assert.equal((await all(env, `SELECT id FROM jobs WHERE type = 'site_teardown'`)).length, 1);
-
-  const org2 = await newOrg(env);
-  const busy = await sites.createSite(env, { organizationId: org2.organizationId, name: 'Busy', productId: 'prod_casino_news', actorUserId: org2.userId });
-  await run(env, `UPDATE sites SET status = 'deploying' WHERE id = ?`, busy.siteId);
-  const refused = await svc.beginSiteDeletion(env, { siteId: busy.siteId });
-  assert.equal(refused.error, 'site_busy'); assert.equal(refused.status, 409);
 
   await svc.runJob(env, a.jobId);
   assert.equal((await svc.beginSiteDeletion(env, { siteId: s.siteId })).error, 'site_already_deleted');
@@ -304,4 +298,52 @@ test('route: a failed teardown job shows Retry on the staff job page, and a staf
   const retry = await call(env, 'POST', `/api/platform/saas/jobs/${job.jobId}/retry`, { cookie: staff, body: {} });
   assert.equal(retry.status, 200, retry.text);
   assert.ok(await waitFor(async () => (await sites.getSite(env, made.json.siteId)).status === 'deleted'), 'the retried teardown finished');
+});
+
+test('a site stuck in provisioning, configuring or deploying can be deleted: its other jobs are cancelled and partial resources are removed', async () => {
+  const env = makeEnv(); const org = await newOrg(env); const infra = createFakeInfraProvider(); const svc = service(infra);
+  const names = ['provisioning', 'configuring', 'deploying'];
+  for (const [i, status] of names.entries()) {
+    const made = await sites.createSite(env, { organizationId: org.organizationId, name: `Stuck ${status}`, productId: 'prod_casino_news', actorUserId: org.userId });
+    await run(env, `UPDATE sites SET status = ? WHERE id = ?`, status, made.siteId);
+    // Half set up: a database exists, plus a provisioning job that never finished and a failed deployment the sweep would retry.
+    await run(env, `INSERT INTO site_resources (site_id, provider, resource_type, resource_id, resource_name) VALUES (?, 'fake-cloudflare', 'd1', ?, ?)`, made.siteId, `db-${i}`, `db-name-${i}`);
+    const prov = await jobs.createJob(env, { type: 'tenant_provisioning', organizationId: org.organizationId, siteId: made.siteId, actorType: 'system', stepKeys: ['create_database'] });
+    await jobs.markJobRunning(env, prov.jobId);
+    const dep = await jobs.createJob(env, { type: 'site_deployment', organizationId: org.organizationId, siteId: made.siteId, actorType: 'system', stepKeys: ['deploy'] });
+    await jobs.markJobFailed(env, dep.jobId, 'worker upload failed');
+
+    const r = await changeRequests.requestSiteDeletion(env, { organizationId: org.organizationId, siteId: made.siteId, actorUserId: org.userId, confirmName: `Stuck ${status}` });
+    assert.equal(r.ok, true, `${status}: ${JSON.stringify(r)}`);
+    assert.equal((await jobs.getJob(env, prov.jobId)).status, 'cancelled', 'the unfinished setup can no longer run');
+    assert.equal((await jobs.getJob(env, dep.jobId)).status, 'cancelled', 'and the sweep will not retry the failed deployment');
+
+    infra._calls.length = 0;
+    assert.equal((await svc.runJob(env, r.jobId)).ok, true);
+    assert.deepEqual(infra._calls.map((c) => c.method).filter((m) => m.startsWith('delete')), ['deleteDatabase']);
+    assert.equal((await sites.getSite(env, made.siteId)).status, 'deleted');
+  }
+});
+
+test('a resource a stuck job created after its teardown step passed is caught by finalize and removed on retry', async () => {
+  const env = makeEnv(); const org = await newOrg(env); const infra = createFakeInfraProvider(); const svc = service(infra);
+  const made = await sites.createSite(env, { organizationId: org.organizationId, name: 'Racy', productId: 'prod_casino_news', actorUserId: org.userId });
+  await run(env, `UPDATE sites SET status = 'provisioning' WHERE id = ?`, made.siteId);
+  await run(env, `INSERT INTO site_resources (site_id, provider, resource_type, resource_id, resource_name) VALUES (?, 'fake-cloudflare', 'r2', 'r2-1', 'bucket-1')`, made.siteId);
+  const b = await svc.beginSiteDeletion(env, { siteId: made.siteId });
+  // The straggler records a KV namespace after the KV step already ran, but before finalize.
+  const realR2 = infra.deleteR2Bucket;
+  infra.deleteR2Bucket = async (...args) => {
+    await run(env, `INSERT INTO site_resources (site_id, provider, resource_type, resource_id, resource_name) VALUES (?, 'fake-cloudflare', 'kv', 'late-kv', 'late')`, made.siteId);
+    return realR2.apply(infra, args);
+  };
+  const first = await svc.runJob(env, b.jobId);
+  assert.equal(first.ok, false); assert.equal(first.failedStep, 'finalize');
+  assert.equal((await sites.getSite(env, made.siteId)).status, 'deleting', 'not reported deleted while something is left');
+
+  infra.deleteR2Bucket = realR2; infra._calls.length = 0;
+  const second = await svc.retryTeardown(env, b.jobId);
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.ok(infra._calls.some((c) => c.method === 'deleteKVNamespace'), 'the late namespace was removed at the provider');
+  assert.equal((await sites.getSite(env, made.siteId)).status, 'deleted');
 });

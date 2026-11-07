@@ -42,6 +42,13 @@ export const deleteTenant = (env, tenantId) => env.LUMMET_DB.prepare(`DELETE FRO
 export const detachTenantFromSite = (env, siteId) =>
   env.LUMMET_DB.prepare(`UPDATE sites SET tenant_id = NULL, primary_domain = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(siteId).run();
 
+/** Cancels every other job of the site that could still run or be retried (setup, deploy, backups...), so none can recreate what is being removed. */
+export async function cancelOtherJobs(env, siteId, keepType) {
+  return (await env.LUMMET_DB.prepare(
+    `UPDATE jobs SET status = 'cancelled', canceled_at = CURRENT_TIMESTAMP WHERE site_id = ? AND type != ? AND status IN ('queued','running','waiting','retrying','failed')`
+  ).bind(siteId, keepType).run()).meta.changes || 0;
+}
+
 export async function sitesDeletingWithoutJob(env, type, limit) {
   return (await env.LUMMET_DB.prepare(
     `SELECT s.id FROM sites s WHERE s.status = 'deleting' AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.site_id = s.id AND j.type = ?) LIMIT ?`

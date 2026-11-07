@@ -1,8 +1,8 @@
 import { escapeHtml } from "../customer-layout.js";
 import { nonceToken, onClick } from "../../csp.js";
 
-// A site can be deleted from these states. Provisioning, configuring and deploying are jobs in flight: they must finish or fail first.
-const DELETABLE = new Set(["pending", "provisioned", "active", "suspended", "maintenance", "failed"]);
+// A site can be deleted from any state except deleting/deleted, including one stuck in provisioning (its other jobs are cancelled first).
+const DELETABLE = new Set(["pending", "provisioning", "provisioned", "configuring", "deploying", "active", "suspended", "maintenance", "failed"]);
 
 function actionsFor(site) {
   const actions = [];

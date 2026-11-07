@@ -32,6 +32,8 @@ import { deployments as realDeployments } from "./deployments.js";
 import * as tenantTemplate from "./tenant-template.js";
 import { evaluateWriteGate, refusalFor } from "./access.js";
 import * as siteSetupService from "./site-setup.js";
+import { getDomainForSite, envFallbackDomain, hostFor } from "./platform-domains.js";
+import * as platformDomainsRepo from "./repositories/platform-domains.js";
 
 export const PROVISIONING_STEPS = [
   "validate_entitlement",
@@ -42,9 +44,12 @@ export const PROVISIONING_STEPS = [
   "register_tenant"
 ];
 
-export function computeResourceNames(site, env) {
+/**
+ * Synchronous on purpose. `domain` is the site's resolved platform domain (see resolveResourceNames); without it the
+ * env bootstrap domain is used, which is what a platform with no extra domains has always done.
+ */
+export function computeResourceNames(site, env, domain = null) {
   const base = `lummet-site-${site.slug}`;
-  const domainSuffix = env.PLATFORM_DOMAIN_SUFFIX || "sites.lummet.app";
   return {
     workerName: base,
     d1Name: `${base}-db`,
@@ -54,8 +59,15 @@ export function computeResourceNames(site, env) {
     // attachment is Phase 4's Domain Management (section 20). This
     // is what the tenant registry row (and the site's
     // primary_domain) point at until then.
-    host: `${site.slug}.${domainSuffix}`
+    host: hostFor(site, domain || envFallbackDomain(env))
   };
+}
+
+/** computeResourceNames with the site's platform domain looked up (a site with none recorded gets the default). */
+export async function resolveResourceNames(env, site) {
+  let s = site;
+  if (s.platform_domain_id === undefined && env?.LUMMET_DB && s.id) s = { ...s, ...((await platformDomainsRepo.getSite(env, s.id)) || {}) };
+  return computeResourceNames(site, env, await getDomainForSite(env, s));
 }
 
 export function createProvisioningService(infra, { deploymentService = realDeployments, templateService = tenantTemplate, setupService = siteSetupService } = {}) {
@@ -190,7 +202,7 @@ export function createProvisioningService(infra, { deploymentService = realDeplo
           }
 
           case "generate_identifiers": {
-            names = computeResourceNames(site, env);
+            names = await resolveResourceNames(env, site);
             await jobsModule.completeStep(env, jobId, step.step_key, names);
             break;
           }

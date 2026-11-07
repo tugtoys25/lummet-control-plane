@@ -180,3 +180,10 @@ Use a spare domain you control and a staging control plane with a provisioned, d
 
 If step 2 fails with `provider_error`, the token is missing Zone Edit. If step 5 stays at *Connecting* the Worker may not
 be deployed (the hostname fails to attach until it is; it retries and gives up after `DOMAIN_ATTACH_GIVE_UP_HOURS`).
+
+## Reserved list and platform domains
+
+The reserved list now includes **every platform domain** (any status, disabled ones too), not only the one in
+`PLATFORM_DOMAIN_SUFFIX`: a customer can never connect a platform domain or any subdomain of one. Adding a platform domain
+in the staff console takes effect immediately. A domain a customer has already connected cannot be added as a platform
+domain. `cnameTargetFor` keeps using the single default domain's target. See `docs/PLATFORM_DOMAINS.md`.

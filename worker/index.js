@@ -97,6 +97,10 @@ import { billing } from "./billing.js";
 import { cryptoBilling } from "./billing-nowpayments-service.js";
 import * as billingGateways from "./billing-gateways.js";
 import * as platformSettings from "./platform-settings.js";
+import { handlePlatformDomainsRoute } from "./platform-domains-routes.js";
+import * as platformDomainsModule from "./platform-domains.js";
+import { createSiteDomainMoveService, redirectResponseFor } from "./site-domain-moves.js";
+import * as cloudflareInfra from "./infra-cloudflare.js";
 import { applySiteChrome, hasChromeMarkers, CHROME_HEADER } from "./site-chrome.js";
 import { staffTurnstileSiteKey, verifyStaffTurnstile } from "./staff-turnstile.js";
 import * as billingLifecycle from "./billing-lifecycle.js";
@@ -420,6 +424,25 @@ function makeDomainRedeploy(env, ctx) {
   };
 }
 
+function portalHostnameOf(env) { try { return new URL(env.PORTAL_BASE_URL).hostname; } catch (_) { return ""; } }
+
+/**
+ * Same release redeploy as makeDomainRedeploy, but reports whether it started (the move service needs to know): used after a
+ * site moves to another platform domain so the Worker learns its new URL.
+ */
+function makeMoveRedeploy(env, ctx) {
+  return async (_env, siteId) => {
+    const release = await tenantTemplate.getCurrentRelease(env);
+    if (!release.ok) return { ok: false, error: release.error || "no_release" };
+    const result = await deployments.startDeployment(env, {
+      siteId, version: release.version, migrations: release.migrations, scriptContent: release.scriptContent, actorType: "system"
+    });
+    if (!result.ok) return { ok: false, error: result.error };
+    await jobRunner.dispatchJob(env, ctx, result.jobId);
+    return { ok: true };
+  };
+}
+
 
 async function renderPhase5StaffPage(env, admin, kind) {
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -496,6 +519,16 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method.toUpperCase();
+
+    // A site that moved to another platform domain: for a limited time its OLD host reaches this Worker (the old route is
+    // repointed here) and is redirected to the new host. Exact-hostname lookup; never for the portal host or workers.dev.
+    // Only evaluated when the portal host is known (PORTAL_BASE_URL) and this request is for some other host, so ordinary
+    // portal, visitor and workers.dev traffic never pays for the lookup.
+    const portalHostname = portalHostnameOf(env);
+    if (portalHostname && url.hostname !== portalHostname && !url.hostname.endsWith(".workers.dev")) {
+      const moved = await redirectResponseFor(env, request).catch(() => null);
+      if (moved) return moved;
+    }
     const isApiRoute = path.startsWith("/api/");
 
     // Liveness for uptime monitors: no auth, no data, nothing about the deployment. 200 only if the database answers.
@@ -1792,7 +1825,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const body = await request.json().catch(() => ({}));
             const result = await sites.createSite(env, {
               organizationId, name: body.name, productId: body.productId, actorUserId: customer.id,
-              preset: body.preset, cloneFromSiteId: body.cloneFromSiteId, cloneFromTenantId: body.cloneFromTenantId, sections: body.sections
+              preset: body.preset, cloneFromSiteId: body.cloneFromSiteId, cloneFromTenantId: body.cloneFromTenantId, sections: body.sections,
+              platformDomainId: body.platformDomainId
             });
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -1801,7 +1835,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
             });
             if (!result.ok) return json({ success: false, error: result.error }, result.status);
-            return json({ success: true, siteId: result.siteId, slug: result.slug, setup: result.setup ? { kind: result.setup.kind, presetId: result.setup.presetId, status: result.setup.status } : null });
+            return json({ success: true, siteId: result.siteId, slug: result.slug, host: result.platformDomain?.host || null, setup: result.setup ? { kind: result.setup.kind, presetId: result.setup.presetId, status: result.setup.status } : null });
           }
 
           // Phase 10 A1: what the create-site screen offers (presets, the default that applies, this organization's own sites to copy from).
@@ -1809,7 +1843,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (method === "GET" && subPath === "/site-setup/options") {
             const rawProductId = url.searchParams.get("productId");
             if (rawProductId !== null && rawProductId !== "" && !/^[A-Za-z0-9._:-]{1,120}$/.test(rawProductId)) return json({ success: false, error: "invalid_product" }, 422);
-            return json({ success: true, data: await siteSetup.getSetupOptions(env, { organizationId, productId: rawProductId || null }) });
+            return json({ success: true, data: { ...(await siteSetup.getSetupOptions(env, { organizationId, productId: rawProductId || null })), platformDomains: await platformDomainsModule.customerDomainOptions(env, { organizationId }) } });
           }
 
           // Phase 9: how this site was (or will be) first configured. Any member may read it; an admin may retry a failed apply.
@@ -3237,11 +3271,14 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             siteSetup.getSetupOptions(env, { organizationId: activeOrgId, productId: products[0]?.id || null }).catch(() => null),
             siteSetup.getSetupViewsForOrganization(env, activeOrgId).catch(() => ({}))
           ]);
+          // Platform domains: the picker (only when there is a choice) and each site's address. Fail-open like the reads above.
+          const platformDomains = await platformDomainsModule.customerDomainOptions(env, { organizationId: activeOrgId }).catch(() => []);
+          const siteHosts = await platformDomainsModule.hostsForSites(env, sitesList).catch(() => ({}));
           return html(
             shell({
               title: "Sites", activeKey: "sites", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderSitesPage({ sites: sitesList, products, canManage, setupOptions, setupViews })
+              bodyHtml: renderSitesPage({ sites: sitesList, products, canManage, setupOptions, setupViews, platformDomains, siteHosts })
             })
           );
         }
@@ -4452,6 +4489,12 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         // organization it touched. Not reachable with a customer session.
         // ---------------------------------------------
 
+        {
+          // Platform domains (migration 0085): own permission (platform / platform_domains), read-only for support roles.
+          const platformDomainsResponse = await handlePlatformDomainsRoute({ env, request, url, method, path, admin, requestId, ipHash, json, html, logAudit, redeploy: makeMoveRedeploy(env, ctx) });
+          if (platformDomainsResponse) return platformDomainsResponse;
+        }
+
         // Phase 9: the preset new sites start from, per plan or per product (no entry = "full"). Super admin only, validated, audited.
         if (path === "/api/platform/site-presets/defaults" && (method === "GET" || method === "PUT")) {
           const guard = requireSuperAdmin();
@@ -5339,6 +5382,12 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
       if (method === "GET" && path === "/api/platform/saas/tax-checklist") { const guard=requireSuperAdmin(); if(guard)return guard; return json({success:true,data:await commercial.listTaxChecklist(env)}); }
       if (method === "POST" && path === "/api/platform/saas/credit-packs/reconcile") { const guard=requireSuperAdmin(); if(guard)return guard; const result=await commercial.reconcileCreditPacks(env); await logAudit(env,{adminId:admin.id,endpoint:path,method,resource:'credit_pack_grants',action:'reconcile',success:result.ok,statusCode:result.ok? 200:502,requestId,ipHash}); return json({success:true,data:result}); }
+      {
+        // Platform domains (migration 0085): own permission (platform / platform_domains), read-only for support roles.
+        const platformDomainsResponse = await handlePlatformDomainsRoute({ env, request, url, method, path, admin, requestId, ipHash, json, html, logAudit, redeploy: makeMoveRedeploy(env, ctx) });
+        if (platformDomainsResponse) return platformDomainsResponse;
+      }
+
       if (method === "GET" && path.startsWith("/platform/saas")) {
         const guard = requireSuperAdmin();
         if (guard) return guard;
@@ -5492,6 +5541,9 @@ async function runScheduled(event, env, ctx) {
         console.error(JSON.stringify({ msg: "revenue_daily_job_failed", error: error?.message || String(error) }));
       }
     })());
+    ctx.waitUntil(createSiteDomainMoveService({ infra: cloudflareInfra, redeploy: async () => ({ ok: false }) }).sweepExpiredRedirects(env).then((r) => {
+      if (r.removed || r.failed.length) console.log(JSON.stringify({ msg: "site_move_redirect_sweep", removed: r.removed, failed: r.failed.length }));
+    }).catch((error) => console.error(JSON.stringify({ msg: "site_move_redirect_sweep_failed", error: error?.message || String(error) }))));
     ctx.waitUntil(captureDailyUsageSnapshots(env).then((result) => {
       console.log(JSON.stringify({ msg: "usage_snapshots_completed", organizations: result.organizations, metrics: result.metrics }));
     }).catch((error) => {

@@ -8,6 +8,7 @@
 // Worker/D1/KV/R2 for it (master prompt section 9).
 // =====================================================
 
+import { resolveCustomerChoice, hostFor } from "./platform-domains.js";
 import * as webhooks from "./webhooks.js";
 import { evaluateWriteGate, refusalFor } from "./access.js";
 import { syncSiteBrand } from "./site-brands.js";
@@ -84,7 +85,7 @@ async function recordStatusEvent(env, { siteId, fromStatus, toStatus, reason, ac
  * customer; it is not a fake success for a deployment that hasn't
  * happened.
  */
-export async function createSite(env, { organizationId, name, productId, actorUserId, preset, cloneFromSiteId, cloneFromTenantId, sections }) {
+export async function createSite(env, { organizationId, name, productId, actorUserId, preset, cloneFromSiteId, cloneFromTenantId, sections, platformDomainId }) {
   const gate = await evaluateWriteGate(env, { organizationId, method: "POST", subPath: "/sites" });
   if (gate.blocked) return { ok: false, status: 402, ...refusalFor(gate.access) };
   const trimmedName = (name || "").trim();
@@ -101,13 +102,17 @@ export async function createSite(env, { organizationId, name, productId, actorUs
   const planned = await planSetup(env, { preset, cloneFromSiteId, cloneFromTenantId, sections, organizationId, productId, staff: false });
   if (!planned.ok) return { ok: false, status: planned.status, error: planned.error };
 
+  // Platform domain (migration 0085): validated server-side against what this organisation may choose, before anything is written.
+  const chosen = await resolveCustomerChoice(env, { organizationId, platformDomainId });
+  if (!chosen.ok) return { ok: false, status: 422, error: chosen.error };
+
   const id = crypto.randomUUID();
-  const slug = await uniqueSlug(env, slugify(trimmedName));
+  const slug = await uniqueSlug(env, slugify(trimmedName));   // still globally unique: Worker, D1, KV and R2 names derive from it
 
   await env.LUMMET_DB.prepare(
-    `INSERT INTO sites (id, organization_id, name, slug, product_id, status) VALUES (?, ?, ?, ?, ?, 'pending')`
+    `INSERT INTO sites (id, organization_id, name, slug, product_id, status, platform_domain_id) VALUES (?, ?, ?, ?, ?, 'pending', ?)`
   )
-    .bind(id, organizationId, trimmedName, slug, productId)
+    .bind(id, organizationId, trimmedName, slug, productId, chosen.domain.id || null)
     .run();
 
   await recordStatusEvent(env, {
@@ -127,7 +132,7 @@ export async function createSite(env, { organizationId, name, productId, actorUs
   await webhooks.dispatchEvent(env, organizationId, "site.created", { siteId: id, name: trimmedName, slug });
 
   return {
-    ok: true, siteId: id, slug,
+    ok: true, siteId: id, slug, platformDomain: { id: chosen.domain.id || null, hostname: chosen.domain.hostname, host: hostFor({ slug }, chosen.domain) },
     setup: { requestId: setupRequestId, kind: planned.plan.kind, presetId: planned.plan.presetId, presetSource: planned.plan.presetSource, status: "pending" }
   };
 }

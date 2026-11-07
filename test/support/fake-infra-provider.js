@@ -14,6 +14,7 @@ export function createFakeInfraProvider() {
   const provider = {
     PROVIDER_NAME: "fake-cloudflare",
     _calls: calls,
+    _routeFailByPattern: new Map(),   // pattern -> message: ensureWorkerRoute throws for that pattern (move-site tests)
 
     /** Makes the NEXT call to the named method throw, once. */
     _failNextCall(type, message) {
@@ -32,15 +33,41 @@ export function createFakeInfraProvider() {
 
     // Test-controlled: make a delete call fail until cleared (_deleteFailures.delete(name)).
     _deleteFailures: new Map(),
-    async ensureWorkerRoute(env, { pattern, workerName }) {
-      calls.push({ method: "ensureWorkerRoute", pattern, workerName });
+    async ensureWorkerRoute(env, { pattern, workerName, zoneId }) {
+      calls.push({ method: "ensureWorkerRoute", pattern, workerName, zoneId });
       if (provider._routeFailure) throw new Error(provider._routeFailure);
+      if (provider._routeFailByPattern.has(pattern)) throw new Error(provider._routeFailByPattern.get(pattern));
       return { routeId: `fake-route-${nextId++}` };
     },
-    async deleteWorkerRoute(env, routeId) {
-      calls.push({ method: "deleteWorkerRoute", routeId });
+    async deleteWorkerRoute(env, routeId, { zoneId } = {}) {
+      calls.push({ method: "deleteWorkerRoute", routeId, zoneId });
       if (provider._deleteFailures.has("deleteWorkerRoute")) throw new Error(provider._deleteFailures.get("deleteWorkerRoute"));
       return { ok: true };
+    },
+    // Platform domains: zones come from _zones above (seed with _seedZone). _accessMissing: zoneId -> [permissions].
+    _seedZone(name, { zoneId = `fake-zone-${nextId++}`, status = "active", records = [] } = {}) { provider._zones.set(zoneId, { name, status, nameServers: [], records: records.slice(), scanned: [] }); return zoneId; },
+    _accessMissing: new Map(),
+    _ssl: new Map(),
+    _routes: new Map(),
+    async findZoneByName(env, name) {
+      calls.push({ method: "findZoneByName", name });
+      const id = provider._zoneIdByName(name);
+      if (!id) return null;
+      const z = provider._zones.get(id);
+      return { zoneId: id, name, cfStatus: z.status, status: z.status === "active" ? "active" : "pending" };
+    },
+    async probeZoneAccess(env, zoneId) {
+      calls.push({ method: "probeZoneAccess", zoneId });
+      const missing = provider._accessMissing.get(zoneId) || [];
+      return { ok: missing.length === 0, missing };
+    },
+    async getUniversalSsl(env, zoneId) {
+      calls.push({ method: "getUniversalSsl", zoneId });
+      return { enabled: provider._ssl.get(zoneId) !== false };
+    },
+    async listWorkerRoutes(env, zoneId) {
+      calls.push({ method: "listWorkerRoutes", zoneId });
+      return [...(provider._routes.get(zoneId) || [])];
     },
     async setWorkerSchedule(env, { workerName, crons }) {
       calls.push({ method: "setWorkerSchedule", workerName, crons });

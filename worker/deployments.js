@@ -33,7 +33,8 @@ import { evaluateWriteGate, refusalFor } from "./access.js";
 import { buildSiteBindings } from "./site-bindings.js";
 import * as siteResources from "./repositories/site-resources.js";
 import * as sites from "./sites.js";
-import { computeResourceNames } from "./provisioning.js";
+import { resolveResourceNames } from "./provisioning.js";
+import { getDomainForSite, zoneIdFor } from "./platform-domains.js";
 import { newTenantSeedMigrations } from "./tenant-defaults.js";
 import * as webhooks from "./webhooks.js";
 
@@ -198,7 +199,8 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
     await jobsModule.markJobRunning(env, jobId);
     await updateDeploymentStatus(env, deploymentId, "building", { startedAt: true });
 
-    const names = computeResourceNames(site, env);
+    const names = await resolveResourceNames(env, site);
+    const platformDomain = await getDomainForSite(env, site);
 
     async function failDeployment(step, message) {
       await jobsModule.failStep(env, jobId, step, message);
@@ -312,9 +314,11 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
             if (existingRoute) {
               routeId = existingRoute.resource_id;
             } else {
-              const route = await infra.ensureWorkerRoute(env, { pattern: `${host}/*`, workerName: names.workerName });
+              // The route lives in the zone of the site's platform domain (the default zone for sites that predate platform domains).
+              const zoneId = zoneIdFor(env, platformDomain);
+              const route = await infra.ensureWorkerRoute(env, { pattern: `${host}/*`, workerName: names.workerName, zoneId });
               routeId = route.routeId;
-              await siteResources.saveRoute(env, { siteId: site.id, provider: infra.PROVIDER_NAME, routeId, pattern: `${host}/*` });
+              await siteResources.saveRoute(env, { siteId: site.id, provider: infra.PROVIDER_NAME, routeId, pattern: `${host}/*`, zoneId });
             }
 
             // The tenant's cron triggers. Not fatal (the site works without

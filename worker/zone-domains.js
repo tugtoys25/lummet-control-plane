@@ -39,7 +39,8 @@ import * as repo from "./repositories/domain-zones.js";
 import * as webhooks from "./webhooks.js";
 import * as entitlements from "./entitlements.js";
 import { queueEmail, portalLink } from "./email.js";
-import { computeResourceNames } from "./provisioning.js";
+import { computeResourceNames, resolveResourceNames } from "./provisioning.js";
+import { reservedHostnames, listDomains } from "./platform-domains.js";
 
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?!-)[a-zA-Z0-9-]{1,63}(?<!-)(\.(?!-)[a-zA-Z0-9-]{1,63}(?<!-))+$/;
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
@@ -62,10 +63,12 @@ export const settings = (env) => ({
 // -----------------------------------------------------
 
 /** Names a customer may never claim: the platform's own domains and anything above or below them. */
-export function reservedDomains(env) {
+export function reservedDomains(env, platformHostnames = []) {
   const out = new Set(["workers.dev", "pages.dev", "localhost", "cloudflare.com"]);
   const add = (v) => { if (v) out.add(String(v).toLowerCase().replace(/^\*?\.?/, "")); };
   add(env?.PLATFORM_DOMAIN_SUFFIX || "sites.lummet.app");
+  // Every platform domain (any status, disabled included), from worker/platform-domains.js. Callers that can await pass it in.
+  for (const h of platformHostnames) add(h);
   try { if (env?.PORTAL_BASE_URL) add(new URL(env.PORTAL_BASE_URL).hostname); } catch (_) { /* not a URL */ }
   return [...out];
 }
@@ -75,7 +78,7 @@ export function reservedDomains(env) {
  * zone is the root domain; anything else with several labels is passed through and Cloudflare decides whether it
  * is a registrable root (it refuses real subdomains on non-Enterprise accounts).
  */
-export function normalizeDomainInput(input, env = {}) {
+export function normalizeDomainInput(input, env = {}, platformHostnames = []) {
   let host = String(input || "").trim().toLowerCase();
   if (!host || /\s/.test(host)) return { ok: false, error: "invalid_domain" };
   host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split(/[/?#]/)[0].replace(/:\d+$/, "").replace(/\.$/, "");
@@ -84,7 +87,7 @@ export function normalizeDomainInput(input, env = {}) {
   if (!HOSTNAME_PATTERN.test(host) || IPV4.test(host)) return { ok: false, error: "invalid_domain" };
   const tld = host.split(".").pop();
   if (!/^([a-z]{2,63}|xn--[a-z0-9-]+)$/.test(tld)) return { ok: false, error: "invalid_domain" };
-  for (const r of reservedDomains(env)) {
+  for (const r of reservedDomains(env, platformHostnames)) {
     if (host === r || host.endsWith(`.${r}`) || r.endsWith(`.${host}`)) return { ok: false, error: "domain_reserved" };
   }
   return { ok: true, zoneName: host };
@@ -108,7 +111,7 @@ export function isLikelyApex(host) {
 }
 
 /** "https://Shop.Example.com/x" -> { ok, hostname: "shop.example.com" }. Keeps www (it IS a subdomain here). */
-export function normalizeSubdomainInput(input, env = {}) {
+export function normalizeSubdomainInput(input, env = {}, platformHostnames = []) {
   let host = String(input || "").trim().toLowerCase();
   if (!host || /\s/.test(host)) return { ok: false, error: "invalid_domain" };
   host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split(/[/?#]/)[0].replace(/:\d+$/, "").replace(/\.$/, "");
@@ -116,7 +119,7 @@ export function normalizeSubdomainInput(input, env = {}) {
   if (!HOSTNAME_PATTERN.test(host) || IPV4.test(host)) return { ok: false, error: "invalid_domain" };
   const tld = host.split(".").pop();
   if (!/^([a-z]{2,63}|xn--[a-z0-9-]+)$/.test(tld)) return { ok: false, error: "invalid_domain" };
-  for (const r of reservedDomains(env)) {
+  for (const r of reservedDomains(env, platformHostnames)) {
     if (host === r || host.endsWith(`.${r}`) || r.endsWith(`.${host}`)) return { ok: false, error: "domain_reserved" };
   }
   if (isLikelyApex(host)) return { ok: false, error: "apex_needs_nameservers" };
@@ -124,8 +127,22 @@ export function normalizeSubdomainInput(input, env = {}) {
 }
 
 /** What a customer's CNAME must point at: a proxied record on the platform zone that is also its SaaS fallback origin. */
-export function cnameTargetFor(env) {
-  return String(env?.PLATFORM_CNAME_TARGET || `customers.${env?.PLATFORM_DOMAIN_SUFFIX || "sites.lummet.app"}`).toLowerCase().replace(/\.$/, "");
+export function cnameTargetFor(env, domainHostname) {
+  return String(env?.PLATFORM_CNAME_TARGET || `customers.${domainHostname || env?.PLATFORM_DOMAIN_SUFFIX || "sites.lummet.app"}`).toLowerCase().replace(/\.$/, "");
+}
+
+/**
+ * The CNAME target with platform domains considered: PLATFORM_CNAME_TARGET still wins, then a domain row that has
+ * cname_target set (the one domain serving custom hostnames), then customers.<default domain>. A platform with no
+ * extra domains gets exactly what cnameTargetFor(env) gave before. [OPEN] custom hostnames and the fallback origin
+ * stay on the single CF_ZONE_ID zone (infra-cloudflare.js); a different zone for them is not supported yet.
+ */
+export async function resolveCnameTarget(env) {
+  if (env?.PLATFORM_CNAME_TARGET) return cnameTargetFor(env);
+  const rows = await listDomains(env);
+  const serving = rows.find((d) => d.cname_target);
+  if (serving) return String(serving.cname_target).toLowerCase().replace(/\.$/, "");
+  return cnameTargetFor(env, (rows.find((d) => d.is_default) || {}).hostname);
 }
 
 /** Same phase names as describeProgress so the page and polling treat both kinds alike. */
@@ -310,7 +327,7 @@ export function createZoneDomainService({ dns, infra }) {
   // ---------------------------------------------------- add
 
   async function addZone(env, { siteId, domain, actorUserId = null, organizationId = null, now = Date.now() }) {
-    const norm = normalizeDomainInput(domain, env);
+    const norm = normalizeDomainInput(domain, env, await reservedHostnames(env));
     if (!norm.ok) return { ok: false, status: 422, error: norm.error };
     const { zoneName } = norm;
 
@@ -641,7 +658,7 @@ export function createZoneDomainService({ dns, infra }) {
    *     provider, including the customer's own Cloudflare account).
    */
   async function addSubdomain(env, { siteId, hostname, actorUserId = null, organizationId = null, redeploy, now = Date.now() }) {
-    const norm = normalizeSubdomainInput(hostname, env);
+    const norm = normalizeSubdomainInput(hostname, env, await reservedHostnames(env));
     if (!norm.ok) return { ok: false, status: 422, error: norm.error };
     const host = norm.hostname;
 
@@ -680,7 +697,7 @@ export function createZoneDomainService({ dns, infra }) {
 
     const id = crypto.randomUUID();
     const token = crypto.randomUUID().replace(/-/g, "");
-    const target = cnameTargetFor(env);
+    const target = await resolveCnameTarget(env);
     const instructions = [
       { type: "CNAME", name: host, value: target, note: "Points the subdomain at Lummet. If your DNS is on Cloudflare, set it to DNS only (grey cloud)." },
       { type: "TXT", name: `_lummet-verify.${host}`, value: `lummet-site-verification=${token}`, note: "Proves you control this domain." }
@@ -804,7 +821,7 @@ export function createZoneDomainService({ dns, infra }) {
     await repo.updateHostname(env, d.id, { status: "removed", removed_at: new Date().toISOString(), is_primary: 0, route_id: null, ssl_resource_id: null, next_check_at: null });
     await repo.addHostnameEvent(env, { domainId: d.id, fromStatus: d.status, toStatus: "removed", actorType: "customer_user", actorId: actorUserId });
     const site = await repo.getSite(env, d.site_id);
-    if (site && site.primary_domain === d.hostname) await repo.setSitePrimaryDomain(env, site.id, computeResourceNames(site, env).host);
+    if (site && site.primary_domain === d.hostname) await repo.setSitePrimaryDomain(env, site.id, (await resolveResourceNames(env, site)).host);
     return { ok: true };
   }
 
@@ -905,7 +922,7 @@ export function createZoneDomainService({ dns, infra }) {
     const site = await repo.getSite(env, domainRow.site_id);
     if (site && site.primary_domain === domainRow.hostname) {
       // Fall back to the platform address; the next deployment refreshes the Worker's own URL.
-      await repo.setSitePrimaryDomain(env, site.id, computeResourceNames(site, env).host);
+      await repo.setSitePrimaryDomain(env, site.id, (await resolveResourceNames(env, site)).host);
     }
     return { ok: true };
   }

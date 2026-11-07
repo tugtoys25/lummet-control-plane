@@ -18,6 +18,7 @@ import * as dohResolver from "./dns-doh.js";
 import * as policy from "./retention-policy.js";
 import { verifyPassword, hashPassword } from "./auth.js";
 import * as cloudflareProvider from "./infra-cloudflare.js";
+import { routeZoneId } from "./repositories/site-resources.js";
 
 const NOT_FOUND = /not\s*found|does\s*not\s*exist|no\s*such|could\s*not\s*(?:be\s*)?(?:find|found)/i;
 
@@ -121,10 +122,10 @@ async function deleteExternalResources(env, org, infra) {
     }
     // Delegated custom domains (v1): detach hostnames from the Worker and delete the Cloudflare zones.
     failures.push(...(await createZoneDomainService({ infra, dns: dohResolver }).cleanupForSite(env, site.id)));
-    const resources = (await env.LUMMET_DB.prepare(`SELECT id, resource_type, resource_id, resource_name FROM site_resources WHERE site_id = ? AND status = 'active'`).bind(site.id).all()).results;
+    const resources = (await env.LUMMET_DB.prepare(`SELECT id, resource_type, resource_id, resource_name, metadata FROM site_resources WHERE site_id = ? AND status = 'active'`).bind(site.id).all()).results;
     const order = { route: 0, worker: 1, d1: 2, kv: 3, r2: 4 };      // stop routing, then the Worker, so nothing is serving while its data goes
     for (const r of resources.sort((a, b) => (order[a.resource_type] ?? 9) - (order[b.resource_type] ?? 9))) {
-      const fn = { route: () => infra.deleteWorkerRoute(env, r.resource_id), worker: () => infra.deleteWorkerScript(env, r.resource_name), d1: () => infra.deleteDatabase(env, r.resource_id),
+      const fn = { route: () => infra.deleteWorkerRoute(env, r.resource_id, { zoneId: routeZoneId(r) }), worker: () => infra.deleteWorkerScript(env, r.resource_name), d1: () => infra.deleteDatabase(env, r.resource_id),
         kv: () => infra.deleteKVNamespace(env, r.resource_id), r2: () => infra.deleteR2Bucket(env, r.resource_id) }[r.resource_type];
       if (!fn) continue;
       if (await attempt(`${r.resource_type}:${r.resource_id}`, fn)) {

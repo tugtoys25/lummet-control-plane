@@ -55,7 +55,7 @@ function setupSection(options, products) {
           <p id="site-setup-help" class="subtitle">A starting point decides which parts of the site are switched on (for example news only, or a casino list). You can change everything later in the site's Configuration. If you copy one of your own sites, its settings are copied, not its content or accounts.</p>`;
 }
 
-export function renderSitesPage({ sites, products, canManage, setupOptions = null, setupViews = null }) {
+export function renderSitesPage({ sites, products, canManage, setupOptions = null, setupViews = null, platformDomains = [], siteHosts = {} }) {
   const views = setupViews && typeof setupViews === "object" ? setupViews : {};
   const rows = sites.length
     ? sites
@@ -67,7 +67,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
             <td>${escapeHtml(site.name)}</td>
             <td>${escapeHtml(site.product_name || "")}</td>
             <td><span class="badge badge-${escapeHtml(site.status)}">${escapeHtml(site.status)}</span></td>
-            <td class="mono">${escapeHtml(site.primary_domain || "—")}</td>
+            <td class="mono">${escapeHtml(site.primary_domain || siteHosts[site.id] || "—")}</td>
             <td>${escapeHtml(site.app_version || "—")}</td>
             <td>${escapeHtml(setup.text)}${retry}</td>
             <td class="actions">${canManage ? actionsFor(site) : "—"}</td>
@@ -80,6 +80,17 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
     .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`)
     .join("");
 
+
+  const domainList = Array.isArray(platformDomains) ? platformDomains : [];
+  const domainBlock = domainList.length
+    ? `
+          ${domainList.length > 1
+            ? `<label for="site-domain">Site address</label>
+          <select id="site-domain">${domainList.map((d) => `<option value="${escapeHtml(d.id)}" data-host="${escapeHtml(d.hostname)}"${d.isDefault ? " selected" : ""}>${escapeHtml(d.label)} (.${escapeHtml(d.hostname)})</option>`).join("")}</select>`
+            : `<input type="hidden" id="site-domain" value="${escapeHtml(domainList[0].id)}" data-host="${escapeHtml(domainList[0].hostname)}" />`}
+          <p id="site-host-preview" class="subtitle" aria-live="polite"></p>`
+    : "";
+
   const createForm = canManage
     ? `
       <div class="card">
@@ -88,7 +99,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
           <label for="site-name">Site name</label>
           <input type="text" id="site-name" required />
           <label for="site-product">Product</label>
-          <select id="site-product" required>${productOptions}</select>${setupSection(setupOptions, products)}
+          <select id="site-product" required>${productOptions}</select>${domainBlock}${setupSection(setupOptions, products)}
           <button class="btn" type="submit">Create site</button>
         </form>
       </div>`
@@ -142,12 +153,34 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
 
       function lummetCreateBody() {
         var body = { name: document.getElementById('site-name').value, productId: document.getElementById('site-product').value };
+        var dom = document.getElementById('site-domain');
+        if (dom && dom.value) { body.platformDomainId = dom.value; }
         var p = document.getElementById('site-preset');
         var c = document.getElementById('site-clone');
         if (c && c.value) { body.cloneFromSiteId = c.value; }
         else if (p && p.value) { body.preset = p.value; }
         return body;
       }
+
+
+      // Live preview of the site address: the same slug rule as the server (a taken name gets a number there).
+      function lummetSlug(n) { return String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 60) || 'site'; }
+      function lummetHostPreview() {
+        var out = document.getElementById('site-host-preview');
+        var dom = document.getElementById('site-domain');
+        var nameEl = document.getElementById('site-name');
+        if (!out || !dom || !nameEl) { return; }
+        var opt = dom.tagName === 'SELECT' ? dom.options[dom.selectedIndex] : dom;
+        var host = opt ? opt.getAttribute('data-host') : '';
+        out.textContent = host ? 'Your site will be at ' + lummetSlug(nameEl.value) + '.' + host + ' (a number is added if that name is taken).' : '';
+      }
+      (function () {
+        var dom = document.getElementById('site-domain');
+        var nameEl = document.getElementById('site-name');
+        if (dom) { dom.addEventListener('change', lummetHostPreview); }
+        if (nameEl) { nameEl.addEventListener('input', lummetHostPreview); }
+        lummetHostPreview();
+      })();
 
       var createForm = document.getElementById('create-site-form');
       var presetSel = document.getElementById('site-preset');
@@ -182,7 +215,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
             .then(function (r) { return r.json(); })
             .then(function (data) {
               if (data.success) { location.reload(); }
-              else { alert('Could not create site: ' + (data.error || 'unknown error')); }
+              else { alert('Could not create site: ' + (data.error === 'invalid_platform_domain' ? 'that site address is not available. Choose another.' : (data.error || 'unknown error'))); }
             });
         });
       }

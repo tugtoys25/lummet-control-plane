@@ -484,6 +484,13 @@ A maintenance sweep (every tick of `POST /api/ops/alert-check`; point a pinger a
 background jobs, retries failed provisioning with backoff, dead-letters what keeps failing, and retries failed webhook
 deliveries. Optional Cloudflare Queue support. See `docs/DURABLE_JOBS.md` and `docs/CHANGES_V7D.md`.
 
+## Platform domains
+
+Sites can run on more than one platform domain (`<slug>.lummet.app`, `<slug>.genteelisms.com`, ...). Staff add and verify
+domains in the console (Platform domains), pick a default, and can move a site between domains with a redirect from the old
+address; customers pick a domain when they create a site. One platform domain behaves exactly as before. Migrations `0085`
+and `0086`. Details, Cloudflare setup, moving and rollback: `docs/PLATFORM_DOMAINS.md`.
+
 ## Custom domains (v1)
 
 Customers connect their own domain by changing its nameservers; the dashboard tracks progress until the site is live with

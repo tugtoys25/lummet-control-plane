@@ -28,8 +28,14 @@
  *   Stable machine key stored in site_resources.provider — e.g. "cloudflare".
  *
  * @property {(env: Object, params: {name: string}) => Promise<{resourceId: string, metadata: ?Object}>} createDatabase
- * @property {(env: Object, params: {pattern: string, workerName: string}) => Promise<{routeId: string}>} ensureWorkerRoute
- * @property {(env: Object, routeId: string) => Promise<{ok: boolean}>} deleteWorkerRoute
+ * @property {(env: Object, params: {pattern: string, workerName: string, zoneId?: string}) => Promise<{routeId: string}>} ensureWorkerRoute
+ * @property {(env: Object, routeId: string, options?: {zoneId?: string}) => Promise<{ok: boolean}>} deleteWorkerRoute
+ * @property {(env: Object, name: string) => Promise<?{zoneId: string, name: string, cfStatus: string, status: 'active'|'pending'}>} findZoneByName
+ *   Looks a zone up by exact name in the platform account. null = no such zone. Never creates one.
+ * @property {(env: Object, zoneId: string) => Promise<{ok: boolean, missing: string[]}>} probeZoneAccess
+ *   Harmless reads proving the token may edit Workers routes and DNS on the zone; `missing` names the permissions it lacks.
+ * @property {(env: Object, zoneId: string) => Promise<{enabled: boolean}>} getUniversalSsl
+ * @property {(env: Object, zoneId: string) => Promise<Array<{id: string, pattern: string, script: ?string}>>} listWorkerRoutes
  * @property {(env: Object, params: {workerName: string, crons: string[]}) => Promise<{ok: boolean}>} setWorkerSchedule
  * @property {(env: Object, workerName: string) => Promise<{ok: boolean}>} deleteWorkerScript
  * @property {(env: Object, resourceId: string) => Promise<{ok: boolean}>} deleteDatabase

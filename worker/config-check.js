@@ -129,6 +129,23 @@ const RULES = [
   { key: "PORTAL_BASE_URL/PLATFORM_DOMAIN_SUFFIX", ok: (e) => isHttp(e.PORTAL_BASE_URL) && has(e, "PLATFORM_DOMAIN_SUFFIX") && !/localhost|workers\.dev/i.test(`${e.PORTAL_BASE_URL} ${e.PLATFORM_DOMAIN_SUFFIX}`), impact: "production portal and tenant hostnames are not explicitly configured" }
 ];
 
+/**
+ * Platform domain table checks (needs the database, so separate from the env-only rules above): there is an active
+ * default, every active domain has a zone id, and no domain equals the portal host. [] when all hold.
+ */
+export async function platformDomainIssues(env) {
+  if (!env?.LUMMET_DB || env.ENVIRONMENT !== "production") return [];   // same rule as configIssues: staging and dev never raise it
+  const { listDomains } = await import("./platform-domains.js");
+  const rows = await listDomains(env);
+  const out = [];
+  if (!rows.some((d) => d.is_default && d.status === "active")) out.push({ key: "platform_domains.default", impact: "no active default platform domain, so new sites have nowhere to be placed" });
+  for (const d of rows) if (d.status === "active" && !d.cf_zone_id) out.push({ key: `platform_domains.${d.hostname}`, impact: "is active but has no Cloudflare zone id, so its routes cannot be created" });
+  let portal = null;
+  try { portal = env.PORTAL_BASE_URL ? new URL(env.PORTAL_BASE_URL).hostname.toLowerCase() : null; } catch (_) { portal = null; }
+  for (const d of rows) if (portal && d.hostname === portal) out.push({ key: `platform_domains.${d.hostname}`, impact: "equals the portal host; customer sites must never share it" });
+  return out;
+}
+
 /** [{ key, impact }] for every missing or invalid production setting; [] outside production. */
 export function configIssues(env) {
   if (!env || env.ENVIRONMENT !== "production") return [];

@@ -110,6 +110,18 @@ export function createPlatformDomainAdmin({ infra, fetcher } = {}) {
     try {
       ({ routeId } = await infra.ensureWorkerRoute(env, { pattern: `${testHost}/*`, workerName: worker, zoneId }));
       const res = await doFetch(`https://${testHost}/api/health`, { method: "GET", headers: { "Cache-Control": "no-cache" }, redirect: "manual" });
+      // HTTP 522 is what Cloudflare returns when this Worker fetches a route that points back at this same Worker: the
+      // subrequest is not routed to itself, so it falls through to the 100:: origin. The route is fine (a browser gets
+      // {"ok":true}), the Worker just cannot test itself. So on a 522 we read the route back from the Cloudflare API and
+      // accept it only if it is really bound to this Worker. Any other failure stays a failure.
+      if (res.status === 522) {
+        const routes = await infra.listWorkerRoutes(env, zoneId);
+        const bound = (Array.isArray(routes) ? routes : []).find((r) => r.pattern === `${testHost}/*` && r.script === worker);
+        if (bound) {
+          steps.push(step("routing", "ok", `Route ${testHost}/* is bound to ${worker} in this zone. This Worker cannot fetch its own route (HTTP 522), so the request itself was not run; open https://${testHost}/api/health in a browser while a route exists to see it live.`));
+          return { zoneId, steps, passed: true };
+        }
+      }
       const body = await res.json().catch(() => null);
       if (!res.ok || body?.ok !== true) throw new Error(`https://${testHost}/ answered HTTP ${res.status}`);
       steps.push(step("routing", "ok", `https://${testHost}/ reached the platform Worker.`));

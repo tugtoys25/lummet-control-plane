@@ -104,7 +104,7 @@ export async function listRedirectsForSite(env, siteId) {
 
 /** Sites for the move preview. */
 export async function getSiteWithTenant(env, siteId) {
-  return env.LUMMET_DB.prepare(`SELECT id, name, slug, status, tenant_id, primary_domain, platform_domain_id FROM sites WHERE id = ?`).bind(siteId).first();
+  return env.LUMMET_DB.prepare(`SELECT id, name, slug, host_label, status, tenant_id, primary_domain, platform_domain_id FROM sites WHERE id = ?`).bind(siteId).first();
 }
 
 export async function revertSwitch(env, { siteId, tenantId, host, domainId, setPrimary, route }) {

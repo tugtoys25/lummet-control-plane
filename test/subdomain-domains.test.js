@@ -19,12 +19,12 @@ function makeEnv(extra = {}) {
 async function org(env, email, planKey = 'plan_agency_30') {
   const signup = await customerAuth.signUp({ async json() { return { email, password: 'correct-horse-battery', organizationName: 'Org' }; }, headers: { get: () => '203.0.113.20' } }, env);
   await plans.startTrialSubscription(env, signup.organizationId, planKey);
-  const site = await sites.createSite(env, { organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId });
+  const site = await sites.createSite(env, { organizationId: signup.organizationId, name: 'Site ' + signup.organizationId.slice(0, 8), productId: 'prod_casino_news', actorUserId: signup.userId });
   await env.LUMMET_DB.prepare(`UPDATE sites SET status = 'active' WHERE id = ?`).bind(site.siteId).run();
   return { organizationId: signup.organizationId, userId: signup.userId, siteId: site.siteId };
 }
 async function extraSite(env, o, name) {
-  const site = await sites.createSite(env, { organizationId: o.organizationId, name, productId: 'prod_casino_news', actorUserId: o.userId });
+  const site = await sites.createSite(env, { organizationId: o.organizationId, name: name + ' ' + o.organizationId.slice(0, 8), productId: 'prod_casino_news', actorUserId: o.userId });
   await env.LUMMET_DB.prepare(`UPDATE sites SET status = 'active' WHERE id = ?`).bind(site.siteId).run();
   return site.siteId;
 }

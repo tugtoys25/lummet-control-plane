@@ -38,7 +38,7 @@ test('without the entitlement, requesting deletion deletes the site immediately 
     organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId
   });
 
-  const result = await changeRequests.requestSiteDeletion(env, {
+  const result = await changeRequests.requestSiteDeletion(env, { confirmName: 'Site',
     organizationId: signup.organizationId, siteId: site.siteId, actorUserId: signup.userId
   });
   assert.equal(result.ok, true);
@@ -56,7 +56,7 @@ test('with the entitlement, requesting deletion creates a pending change request
     organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId
   });
 
-  const result = await changeRequests.requestSiteDeletion(env, {
+  const result = await changeRequests.requestSiteDeletion(env, { confirmName: 'Site',
     organizationId: signup.organizationId, siteId: site.siteId, actorUserId: signup.userId, reason: 'no longer needed'
   });
   assert.equal(result.ok, true);
@@ -79,8 +79,8 @@ test('a second deletion request for the same pending site is refused, not duplic
     organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId
   });
 
-  await changeRequests.requestSiteDeletion(env, { organizationId: signup.organizationId, siteId: site.siteId, actorUserId: signup.userId });
-  const second = await changeRequests.requestSiteDeletion(env, { organizationId: signup.organizationId, siteId: site.siteId, actorUserId: signup.userId });
+  await changeRequests.requestSiteDeletion(env, { confirmName: 'Site', organizationId: signup.organizationId, siteId: site.siteId, actorUserId: signup.userId });
+  const second = await changeRequests.requestSiteDeletion(env, { confirmName: 'Site', organizationId: signup.organizationId, siteId: site.siteId, actorUserId: signup.userId });
   assert.equal(second.ok, false);
   assert.equal(second.error, 'deletion_already_requested');
 });
@@ -92,7 +92,7 @@ test('the requester cannot approve their own request (segregation of duties)', a
   const site = await sites.createSite(env, {
     organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId
   });
-  const request = await changeRequests.requestSiteDeletion(env, {
+  const request = await changeRequests.requestSiteDeletion(env, { confirmName: 'Site',
     organizationId: signup.organizationId, siteId: site.siteId, actorUserId: signup.userId
   });
 
@@ -120,7 +120,7 @@ test('a different admin approving the request actually deletes the site, and rej
   const site = await sites.createSite(env, {
     organizationId: requester.organizationId, name: 'Site To Delete', productId: 'prod_casino_news', actorUserId: requester.userId
   });
-  const request = await changeRequests.requestSiteDeletion(env, {
+  const request = await changeRequests.requestSiteDeletion(env, { confirmName: 'Site To Delete',
     organizationId: requester.organizationId, siteId: site.siteId, actorUserId: requester.userId
   });
 
@@ -138,7 +138,7 @@ test('a different admin approving the request actually deletes the site, and rej
   const site2 = await sites.createSite(env, {
     organizationId: requester.organizationId, name: 'Site To Keep', productId: 'prod_casino_news', actorUserId: requester.userId
   });
-  const request2 = await changeRequests.requestSiteDeletion(env, {
+  const request2 = await changeRequests.requestSiteDeletion(env, { confirmName: 'Site To Keep',
     organizationId: requester.organizationId, siteId: site2.siteId, actorUserId: requester.userId
   });
   const rejection = await changeRequests.rejectChangeRequest(env, {

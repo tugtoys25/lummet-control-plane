@@ -10,10 +10,13 @@ const HOST_RE = /^(?=.{3,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63
 export const normalizeHostname = (v) => String(v ?? "").trim().toLowerCase().replace(/^\*?\.?/, "").replace(/\.$/, "");
 export const isValidHostname = (v) => HOST_RE.test(normalizeHostname(v));
 
-/** <slug>.<domain>. `domain` is a row ({ hostname }) or a bare hostname string. */
+/**
+ * <label>.<domain>. `domain` is a row ({ hostname }) or a bare hostname string. The label is what the customer chose
+ * (sites.host_label, migration 0088); a row without one (made before it) uses its slug, which is what it always did.
+ */
 export function hostFor(site, domain) {
   const hostname = typeof domain === "string" ? domain : domain?.hostname;
-  return `${site.slug}.${normalizeHostname(hostname)}`;
+  return `${site.host_label || site.slug}.${normalizeHostname(hostname)}`;
 }
 
 /** The env-derived row used before any table row exists (and by sync callers/tests with no database). */

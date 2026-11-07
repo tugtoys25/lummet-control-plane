@@ -92,7 +92,7 @@ export async function setSiteDomain(env, siteId, domainId) {
 }
 
 export async function getSite(env, siteId) {
-  return env.LUMMET_DB.prepare(`SELECT id, slug, status, primary_domain, platform_domain_id, organization_id FROM sites WHERE id = ?`).bind(siteId).first();
+  return env.LUMMET_DB.prepare(`SELECT id, slug, host_label, status, primary_domain, platform_domain_id, organization_id FROM sites WHERE id = ?`).bind(siteId).first();
 }
 
 /** Sites on a domain (a NULL platform_domain_id counts for the default domain). Newest first, capped. */

@@ -489,7 +489,7 @@ deliveries. Optional Cloudflare Queue support. See `docs/DURABLE_JOBS.md` and `d
 Sites can run on more than one platform domain (`<slug>.lummet.app`, `<slug>.genteelisms.com`, ...). Staff add and verify
 domains in the console (Platform domains), pick a default, and can move a site between domains with a redirect from the old
 address; customers pick a domain when they create a site. One platform domain behaves exactly as before. Migrations `0085`
-and `0086`. Details, Cloudflare setup, moving and rollback: `docs/PLATFORM_DOMAINS.md`.
+, `0086`, and `0088` (site address labels). Details, Cloudflare setup, moving and rollback: `docs/PLATFORM_DOMAINS.md`.
 
 ## Custom domains (v1)
 

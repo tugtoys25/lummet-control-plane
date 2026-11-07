@@ -19,6 +19,7 @@
 
 import { checkEntitlement } from "./entitlements.js";
 import * as sites from "./sites.js";
+import * as teardown from "./site-teardown.js";
 import * as requestsRepo from "./repositories/change-requests.js";
 
 async function requiresApproval(env, organizationId) {
@@ -32,16 +33,21 @@ async function requiresApproval(env, organizationId) {
  * requester to also be the approver — segregation of duties is the
  * entire point of an approval workflow.
  */
-export async function requestSiteDeletion(env, { organizationId, siteId, actorUserId, reason }) {
+export async function requestSiteDeletion(env, { organizationId, siteId, actorUserId, reason, confirmName }) {
   const site = await sites.getSite(env, siteId);
   if (!site || site.organization_id !== organizationId) return { ok: false, status: 404, error: "site_not_found" };
 
+  // Typed confirmation, checked HERE (not just in the page): the exact site name, so a script or a stray click cannot delete a site.
+  if (String(confirmName ?? "").trim() !== String(site.name).trim()) return { ok: false, status: 422, error: "confirmation_required", detail: "Type the site's name exactly to confirm." };
+  if (site.status === "deleting" || site.status === "deleted") return { ok: false, status: 409, error: "site_already_deleting" };
+  if (teardown.BUSY_STATUSES.includes(site.status)) return { ok: false, status: 409, error: "site_busy", currentStatus: site.status };
+
   if (!(await requiresApproval(env, organizationId))) {
-    const result = await sites.transitionSiteStatus(env, siteId, "deleting", {
-      reason: reason || "customer-requested deletion", actorType: "customer_user", actorId: actorUserId
+    const result = await teardown.beginSiteDeletion(env, {
+      siteId, organizationId, reason: reason || "customer-requested deletion", actorType: "customer_user", actorId: actorUserId
     });
     if (!result.ok) return result;
-    return { ok: true, requiresApproval: false };
+    return { ok: true, requiresApproval: false, jobId: result.jobId };
   }
 
   if (await requestsRepo.findPendingSiteDeletion(env, organizationId, siteId)) return { ok: false, status: 409, error: "deletion_already_requested" };
@@ -68,16 +74,18 @@ export async function approveChangeRequest(env, { organizationId, changeRequestI
     return { ok: false, status: 403, error: "cannot_approve_own_request" };
   }
 
+  let jobId = null;
   if (request.type === "site_deletion") {
-    const deletion = await sites.transitionSiteStatus(env, request.resource_id, "deleting", {
-      reason: `approved change request ${request.id}`, actorType: "customer_user", actorId: approverUserId
+    const deletion = await teardown.beginSiteDeletion(env, {
+      siteId: request.resource_id, organizationId, reason: `approved change request ${request.id}`, actorType: "customer_user", actorId: approverUserId
     });
     if (!deletion.ok) return deletion;
+    jobId = deletion.jobId;
   }
 
   await requestsRepo.markApproved(env, changeRequestId, approverUserId);
 
-  return { ok: true };
+  return { ok: true, jobId };
 }
 
 export async function rejectChangeRequest(env, { organizationId, changeRequestId, approverUserId, reason }) {

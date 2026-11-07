@@ -77,14 +77,15 @@ test('omitted domain = the default; if the default is not customer-choosable, th
   assert.equal((await create(env, org)).platformDomain.hostname, 'b.com');
 });
 
-test('the slug stays globally unique across domains: the same name on two domains gets a numbered slug', async () => {
+test('the same name on two domains is allowed: the visible address is the name on each, only the internal slug is numbered', async () => {
   const env = makeEnv(); const org = await newOrg(env);
   await pd.getDefaultDomain(env);
   await addDomain(env, 'b', 'b.com');
   const one = await create(env, org);
   const two = await create(env, org, { platformDomainId: 'b' });
-  assert.deepEqual([one.slug, two.slug], ['my-brand', 'my-brand-2']);
-  assert.equal(two.platformDomain.host, 'my-brand-2.b.com');
+  assert.deepEqual([one.slug, two.slug], ['my-brand', 'my-brand-2']);   // internal: Worker/D1/KV/R2 names stay unique
+  assert.equal(two.platformDomain.host, 'my-brand.b.com');              // visible: exactly what the customer asked for
+  assert.equal(two.label, 'my-brand');
 });
 
 test('changing the default pins sites with no stored domain to the old default, so their host does not move', async () => {
@@ -109,7 +110,7 @@ test('page: picker only with a real choice, hidden input with one, live preview 
   assert.ok(!one.includes('id="site-domain">') && one.includes('type="hidden" id="site-domain"') && one.includes('s.lummet.app'));
   const two = renderSitesPage({ ...base, platformDomains: [{ id: 'd1', label: 'Lummet', hostname: 'lummet.app', isDefault: true }, { id: 'd2', label: '<b>X</b>', hostname: 'x.com', isDefault: false }] });
   assert.ok(two.includes('<select id="site-domain">') && two.includes('value="d1" data-host="lummet.app" selected'));
-  assert.ok(two.includes('lummetHostPreview') && two.includes('platformDomainId = dom.value'));
+  assert.ok(two.includes('lummetCheckAddress') && two.includes('platformDomainId = dom.value'));
   assert.ok(!two.includes('<b>X</b>') && two.includes('&lt;b&gt;X&lt;/b&gt;'));
   const none = renderSitesPage({ ...base, platformDomains: [] });
   assert.ok(!none.includes('site-domain"'));

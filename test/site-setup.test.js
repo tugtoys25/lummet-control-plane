@@ -141,9 +141,9 @@ test('createSite uses the plan default, and an explicit preset beats it', async 
   const env = makeEnv();
   const { organizationId, userId } = await newOrg(env);
   await setup.setDefault(env, { scopeKind: 'plan', scopeId: 'plan_casino_news_starter', presetId: 'news' });
-  const a = await sites.createSite(env, { organizationId, name: 'A', productId: 'prod_casino_news', actorUserId: userId });
+  const a = await sites.createSite(env, { organizationId, name: 'Alpha', productId: 'prod_casino_news', actorUserId: userId });
   assert.equal(a.setup.presetId, 'news'); assert.equal(a.setup.presetSource, 'plan');
-  const b = await sites.createSite(env, { organizationId, name: 'B', productId: 'prod_casino_news', actorUserId: userId, preset: 'research' });
+  const b = await sites.createSite(env, { organizationId, name: 'Bravo', productId: 'prod_casino_news', actorUserId: userId, preset: 'research' });
   assert.equal(b.setup.presetId, 'research'); assert.equal(b.setup.presetSource, 'explicit');
 });
 

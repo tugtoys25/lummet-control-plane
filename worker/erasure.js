@@ -178,7 +178,7 @@ export async function eraseOrganization(env, organizationId, { infra = cloudflar
     }
   }
   await env.LUMMET_DB.prepare(
-    `UPDATE sites SET name = 'Erased site', slug = 'erased-' || id, primary_domain = NULL, suspension_reason = NULL, tenant_id = NULL, status = 'deleted', deleted_at = CURRENT_TIMESTAMP WHERE organization_id = ?`
+    `UPDATE sites SET name = 'Erased site', slug = 'erased-' || id, host_label = NULL, primary_domain = NULL, suspension_reason = NULL, tenant_id = NULL, status = 'deleted', deleted_at = CURRENT_TIMESTAMP WHERE organization_id = ?`
   ).bind(organizationId).run();
   await scrubAudit(env, "organization_id = ?", organizationId);
   if (org.billing_email) await deleteWhere(env, "lummet_inquiries", "lower(email) = lower(?)", org.billing_email);

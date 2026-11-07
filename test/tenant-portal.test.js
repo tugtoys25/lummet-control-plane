@@ -44,7 +44,7 @@ async function setUpSite(env, email, { withTenant = false, planEntitlementOverri
   }
 
   const site = await sites.createSite(env, {
-    organizationId: signup.organizationId, name: 'Site', productId: 'prod_casino_news', actorUserId: signup.userId
+    organizationId: signup.organizationId, name: 'Site ' + signup.organizationId.slice(0, 8), productId: 'prod_casino_news', actorUserId: signup.userId
   });
 
   if (withTenant) {

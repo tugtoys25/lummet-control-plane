@@ -599,7 +599,7 @@ One-time setup you must do for this to work:
 **More than one platform domain.** Everything above describes the first (default) domain, which comes from
 `PLATFORM_DOMAIN_SUFFIX` and `CF_ZONE_ID`. Further domains are added in the staff console (Platform domains), each in its
 own Cloudflare zone in the same account, with the same three one-time steps checked for you. A site's route is created in
-the zone of its domain. See `docs/PLATFORM_DOMAINS.md`. Run migrations `0085` and `0086` before using it.
+the zone of its domain. See `docs/PLATFORM_DOMAINS.md`. Run migrations `0085` and `0086` before using it; `0088` adds per-domain site addresses and must run before the matching code.
 
 Limits: Cloudflare allows on the order of 1,000 routes per zone, and the plan
 you are on decides how many Workers an account may hold, so this model suits

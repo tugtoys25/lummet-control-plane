@@ -54,34 +54,66 @@ export async function createDatabase(env, { name }) {
 }
 
 /**
- * Routes one hostname to one site's Worker: pattern "<host>/*" on the
- * platform zone (CF_ZONE_ID; the same zone used for custom hostnames).
- * Idempotent: if the route already exists, its id is returned instead
- * of an error. Needs a proxied DNS record covering the hostname
- * (a wildcard record, set up once; see DEPLOYMENT.md).
+ * Routes one hostname to one site's Worker: pattern "<host>/*" on a platform zone. `zoneId` is the zone the hostname
+ * lives in (a platform domain's cf_zone_id); without it the default platform zone, CF_ZONE_ID, is used (the same zone
+ * as the custom hostnames). Idempotent: if the route already exists, its id is returned instead of an error. Needs a
+ * proxied DNS record covering the hostname (a wildcard record, set up once; see DEPLOYMENT.md and docs/PLATFORM_DOMAINS.md).
  */
-export async function ensureWorkerRoute(env, { pattern, workerName }) {
-  if (!env.CF_ZONE_ID) throw new Error(`CF_ZONE_ID is not configured on this Worker, so ${pattern} cannot be routed to the site`);
+export async function ensureWorkerRoute(env, { pattern, workerName, zoneId }) {
+  const zone = zoneId || env.CF_ZONE_ID;
+  if (!zone) throw new Error(`CF_ZONE_ID is not configured on this Worker, so ${pattern} cannot be routed to the site`);
   try {
-    const result = await cloudflareRequest(env, "POST", `/zones/${env.CF_ZONE_ID}/workers/routes`, { pattern, script: workerName });
+    const result = await cloudflareRequest(env, "POST", `/zones/${zone}/workers/routes`, { pattern, script: workerName });
     return { routeId: result.id };
   } catch (err) {
     if (!/already exists|duplicate/i.test(String(err.message))) throw err;
-    const list = await cloudflareRequest(env, "GET", `/zones/${env.CF_ZONE_ID}/workers/routes`);
+    const list = await cloudflareRequest(env, "GET", `/zones/${zone}/workers/routes`);
     const existing = (Array.isArray(list) ? list : []).find((r) => r.pattern === pattern);
     if (!existing) throw err;
     if (existing.script !== workerName) {
       // Same hostname bound to a different Worker: take it over for this site.
-      await cloudflareRequest(env, "PUT", `/zones/${env.CF_ZONE_ID}/workers/routes/${existing.id}`, { pattern, script: workerName });
+      await cloudflareRequest(env, "PUT", `/zones/${zone}/workers/routes/${existing.id}`, { pattern, script: workerName });
     }
     return { routeId: existing.id };
   }
 }
 
-export async function deleteWorkerRoute(env, routeId) {
-  if (!env.CF_ZONE_ID) throw new Error("CF_ZONE_ID is not configured on this Worker");
-  await cloudflareRequest(env, "DELETE", `/zones/${env.CF_ZONE_ID}/workers/routes/${routeId}`);
+/** Route ids are zone-scoped: pass the zone the route was created in (none recorded = the default platform zone). */
+export async function deleteWorkerRoute(env, routeId, { zoneId } = {}) {
+  const zone = zoneId || env.CF_ZONE_ID;
+  if (!zone) throw new Error("CF_ZONE_ID is not configured on this Worker");
+  await cloudflareRequest(env, "DELETE", `/zones/${zone}/workers/routes/${routeId}`);
   return { ok: true };
+}
+
+// ---- Platform domains (staff "Add domain" checks). Read-mostly calls on a zone that must already exist in the platform account.
+
+/** Finds an existing zone in the platform account by its exact name. Never creates one. Returns null when there is none. */
+export async function findZoneByName(env, name) {
+  const result = await cloudflareRequest(env, "GET", `/zones?name=${encodeURIComponent(name)}&account.id=${encodeURIComponent(env.CF_ACCOUNT_ID)}`);
+  const z = (Array.isArray(result) ? result : []).find((r) => String(r.name).toLowerCase() === String(name).toLowerCase());
+  return z ? { zoneId: z.id, name: z.name, cfStatus: z.status, status: z.status === "active" ? "active" : "pending" } : null;
+}
+
+/** Harmless reads that need the same permissions routing needs (Workers Routes, DNS). Reports which one is missing. */
+export async function probeZoneAccess(env, zoneId) {
+  const missing = [];
+  for (const [label, path] of [["Workers Routes: Edit", `/zones/${zoneId}/workers/routes`], ["DNS: Edit", `/zones/${zoneId}/dns_records?per_page=1`]]) {
+    try { await cloudflareRequest(env, "GET", path); }
+    catch (err) { if (err.httpStatus === 403 || err.httpStatus === 401 || /permission|authentication|not authorized/i.test(String(err.message))) missing.push(label); else throw err; }
+  }
+  return { ok: missing.length === 0, missing };
+}
+
+/** Whether Universal SSL is on for the zone (it covers *.domain one level down, which is what <slug>.<domain> needs). */
+export async function getUniversalSsl(env, zoneId) {
+  const r = await cloudflareRequest(env, "GET", `/zones/${zoneId}/ssl/universal/settings`);
+  return { enabled: r?.enabled !== false };
+}
+
+export async function listWorkerRoutes(env, zoneId) {
+  const list = await cloudflareRequest(env, "GET", `/zones/${zoneId}/workers/routes`);
+  return (Array.isArray(list) ? list : []).map((r) => ({ id: r.id, pattern: r.pattern, script: r.script || null }));
 }
 
 /** Registers the Worker's cron triggers (replaces any existing schedule). */

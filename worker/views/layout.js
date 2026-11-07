@@ -224,6 +224,16 @@ const NAV = [
       { label: "Capabilities", href: "/platform/capabilities", key: "platform-capabilities" },
       { label: "Platform settings", href: "/platform/saas/settings", key: "saas-settings" }
     ]
+  },
+  {
+    // Platform domains has its own permission (area platform, resource platform_domains): support roles can be given read-only
+    // access without the rest of the Platform section, so it is a group of its own (super admins pass the permission check).
+    id: "platform-domains",
+    section: "Platform domains",
+    icon: "platform",
+    items: [
+      { label: "Platform domains", href: "/platform/domains", key: "platform-domains", area: "platform", resource: "platform_domains" }
+    ]
   }
 ];
 

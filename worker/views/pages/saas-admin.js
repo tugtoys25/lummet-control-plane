@@ -1,7 +1,7 @@
 // Staff console screens for the SaaS layer (master prompt section 45).
 // Super-admin only — the route layer enforces that; hiding nav is not security.
 import * as errorsRepo from "../../repositories/request-errors.js";
-import { configIssues } from "../../config-check.js";
+import { configIssues, platformDomainIssues } from "../../config-check.js";
 import * as alertsModule from "../../alerts.js";
 import { monitorStatuses } from "../../synthetic-monitors.js";
 import * as cpBackupModule from "../../cp-backup.js";
@@ -69,6 +69,46 @@ function lummetCheckSwitch(siteId, outId) {
       else { out.textContent = 'Could not read it: ' + (d.error || 'unknown'); }
     })
     .catch(function () { if (out) { out.textContent = 'Could not read it.'; } });
+}
+// Move a site to another platform domain (staff, platform_domains.manage). Prompt-driven like the other staff actions:
+// pick the target, see the effect, type the new address to confirm. Answers are shown with alert()/textContent only.
+function lummetMoveJson(r) { return r.json(); }
+function lummetMoveSite(siteId) {
+  var base = '/api/platform/sites/' + encodeURIComponent(siteId) + '/move';
+  fetch(base).then(lummetMoveJson).then(function (d) {
+    if (!d.success) { alert('Could not load the move options: ' + (d.error || 'unknown')); return; }
+    var targets = d.data.targets;
+    var pick = prompt('Move ' + d.data.site.name + ' to which domain? Enter a number:\\n' + targets.map(function (t, i) { return (i + 1) + ') ' + t.hostname + (t.isDefault ? ' (default)' : ''); }).join('\\n'));
+    var target = pick ? targets[Number(pick) - 1] : null;
+    if (!target) { return; }
+    var days = prompt('Keep the old address redirecting for how many days? (0 = none)', '30');
+    if (days === null) { return; }
+    fetch(base + '/preview?targetDomainId=' + encodeURIComponent(target.id) + '&redirectDays=' + encodeURIComponent(days)).then(lummetMoveJson).then(function (p) {
+      if (!p.success) { alert('Could not preview: ' + (p.error || 'unknown')); return; }
+      var v = p.data;
+      if (v.blockers.length) { alert('This site cannot be moved yet:\\n' + v.blockers.join('\\n')); return; }
+      var typed = prompt(v.effects.join('\\n') + '\\n\\nType ' + v.newHost + ' to confirm:');
+      if (typed === null) { return; }
+      fetch(base, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetDomainId: target.id, confirmHostname: typed, redirectDays: Number(days) }) })
+        .then(lummetMoveJson).then(function (r) {
+          if (r.success) { alert('Moved. Status: ' + r.state + (r.state === 'redirecting' ? '. The old address redirects until it expires.' : '.')); location.reload(); return; }
+          alert('The move did not finish' + (r.step ? ' at step ' + r.step : '') + ': ' + (r.detail || (r.blockers || []).join(' ') || r.error) + (r.moveId ? '\\nThe site is still reachable. Use "Moves" on this site to resume or roll back.' : ''));
+          if (r.moveId) { location.reload(); }
+        });
+    });
+  });
+}
+// Moves of one site: resume a failed one or roll one back (while its redirect still runs).
+function lummetSiteMoves(siteId) {
+  fetch('/api/platform/sites/' + encodeURIComponent(siteId) + '/move').then(lummetMoveJson).then(function (d) {
+    if (!d.success) { alert('Could not load: ' + (d.error || 'unknown')); return; }
+    var open = d.data.moves.filter(function (m) { return m.state === 'failed' || m.state === 'redirecting'; });
+    if (!open.length) { alert(d.data.moves.length ? 'No unfinished or redirecting moves. Last: ' + d.data.moves[0].old_host + ' -> ' + d.data.moves[0].new_host + ' (' + d.data.moves[0].state + ')' : 'This site has never been moved.'); return; }
+    var m = open[0];
+    var answer = prompt(m.old_host + ' -> ' + m.new_host + ' is ' + m.state + (m.last_error ? ' (' + m.last_error + ')' : '') + (m.redirect_until ? ', redirect until ' + m.redirect_until : '') + '.\\nType "resume" (failed moves only) or "rollback":');
+    if (answer !== 'resume' && answer !== 'rollback') { return; }
+    act('/api/platform/site-moves/' + encodeURIComponent(m.id) + '/' + answer, {}, answer === 'rollback' ? 'Roll back to ' + m.old_host + '?' : 'Resume the move?');
+  });
 }
 // Handlers that used to be inline code. Each is a named function the delegated runtime calls.
 function actReason(url, status, label) { var r = prompt(label); if (r) act(url, { status: status, reason: r }); }
@@ -164,7 +204,7 @@ async function shell(env, admin, title, activeKey, body) {
 export async function renderSaasOverview(env, admin) {
   const s = await staff.opsSummary(env);
   const card = (label, v, warn) => `<div class="card" style="min-width:150px"><div style="color:var(--text-dim);font-size:12px">${h(label)}</div><div style="font-size:26px;${warn && v ? "color:#e5484d" : ""}">${h(v)}</div></div>`;
-  const issues = configIssues(env);
+  const issues = [...configIssues(env), ...(await platformDomainIssues(env).catch(() => []))];
   const configBanner = issues.length ? `<div class="card" style="border:1px solid #c0392b;margin-bottom:12px"><strong>Production configuration is incomplete</strong>
       <ul style="margin:6px 0 0 18px">${issues.map((i) => `<li><code>${h(i.key)}</code> is missing or invalid: ${h(i.impact)}</li>`).join("")}</ul></div>` : "";
   return shell(env, admin, "SaaS overview", "saas-overview", `
@@ -220,8 +260,8 @@ export async function renderOrganizationDetailPage(env, admin, id) {
     <h2>Sites</h2>
     ${table(["Name", "Status", "Reason", "Configurable platform", ""], d.sites.map((s) => [h(s.name), badge(s.status), h(s.suspension_reason || ""),
       s.tenant_id && s.status !== "deleted" ? `<button class="btn"${onClick("lummetCheckSwitch", [s.id, `switch-${s.id}`])}>Check switch</button> <span id="switch-${h(s.id)}" aria-live="polite"></span>` : "—",
-      s.status === "active" ? `<button class="btn" ${onClick("actReason", [`/api/platform/saas/sites/${s.id}/status`, "suspended", "Reason (required)"])}>Suspend</button>`
-      : s.status === "suspended" ? `<button class="btn"${onClick("act", [`/api/platform/saas/sites/${s.id}/status`, {status: "active"}, "Reactivate site?"])}>Reactivate</button>` : ""]), "No sites.")}
+      (s.tenant_id && s.status !== "deleted" ? `<button class="btn"${onClick("lummetMoveSite", [s.id])}>Move domain</button> <button class="btn"${onClick("lummetSiteMoves", [s.id])}>Moves</button> ` : "") + (s.status === "active" ? `<button class="btn" ${onClick("actReason", [`/api/platform/saas/sites/${s.id}/status`, "suspended", "Reason (required)"])}>Suspend</button>`
+      : s.status === "suspended" ? `<button class="btn"${onClick("act", [`/api/platform/saas/sites/${s.id}/status`, {status: "active"}, "Reactivate site?"])}>Reactivate</button>` : "")]), "No sites.")}
     <h2>Team</h2>${table(["Email", "Role", "Joined"], d.members.map((m) => [h(m.email), h(m.role), h(m.created_at)]))}
     <h2>Recent jobs</h2>${table(["Type", "Status", "Progress", "Error", ""], d.jobs.map((j) => [h(j.type), badge(j.status), `${h(j.progress)}%`, h(j.error_message || ""), `<a href="/platform/saas/jobs/${h(j.id)}">view</a>`]), "No jobs.")}
     <h2>Audit (latest 25)</h2>${table(["When", "Actor", "Action", "Resource", "OK"], audit.map((a) => [h(a.created_at), h(a.actor_type || ""), h(a.action || ""), h(`${a.resource || ""} ${a.resource_id || ""}`), a.success ? "✓" : `✗ ${h(a.error_message || "")}`]), "No audit rows.")}`);

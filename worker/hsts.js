@@ -6,7 +6,7 @@
 //
 // HSTS_PRELOAD=on adds `preload` and raises max-age to two years. Preload submission is the owner's act and is hard to
 // undo (removal from browser lists takes months), and includeSubDomains then covers EVERY subdomain of the registrable
-// domain, including customer-site hostnames under PLATFORM_DOMAIN_SUFFIX. See docs/HSTS_PRELOAD.md. config-check also
+// domain, including customer-site hostnames under EVERY platform domain (Platform domains screen; PLATFORM_DOMAIN_SUFFIX is only the first-run default). See docs/HSTS_PRELOAD.md. config-check also
 // requires HSTS_PRELOAD_APPROVED=yes before production may run with the flag on.
 //
 // checkPreloadEligibility() is a pure function over a header value (and, optionally, whether http:// redirects to the

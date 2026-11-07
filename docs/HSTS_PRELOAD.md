@@ -16,3 +16,8 @@ Rollback of the header: set `HSTS_PRELOAD=off`. This stops sending `preload` but
 
 ## Evidence labels
 Header behaviour: TESTED LOCALLY (tests in `test/hsts-preload.test.js`). Live host eligibility, certificate coverage, subdomain HTTPS, preload-list submission: NOT VERIFIED until an owner attaches the script output.
+
+**More than one platform domain.** `includeSubDomains` + `preload` applies to the registrable domain of *each* platform
+domain. Before adding a platform domain to the preload list, every subdomain of it (all customer sites on it,
+`platform-check.<domain>`, redirects for moved sites) must serve valid HTTPS, and each domain is a separate submission.
+Adding a new platform domain does not change the header; only your decision to preload does.

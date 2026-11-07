@@ -100,7 +100,7 @@ export const SETTINGS = [
   def("COOKIE_CONSENT_DAYS", "Public site", "int", { min: 1, max: 400, default: "180", help: "Days a visitor's cookie choice is remembered (browsers cap cookies at 400 days)." }),
   def("SECURITY_TXT_EXPIRES", "Public site", "text", { max: 40, pattern: /^\d{4}-\d{2}-\d{2}(T[0-9:.]+Z?)?$/, default: "", help: "security.txt Expires date, e.g. 2027-12-31." }),
   // ---- Platform ----
-  def("PLATFORM_DOMAIN_SUFFIX", "Platform", "hostname", { default: "sites.lummet.app", help: "Placeholder domain a newly provisioned site gets before a custom domain is attached." }),
+  def("PLATFORM_DOMAIN_SUFFIX", "Platform", "hostname", { default: "sites.lummet.app", help: "First-run default only: used once, to create the default row in Platform domains. After that, manage platform domains in the Platform domains screen; changing this does not move any domain or site." }),
   def("CF_WORKERS_DEV_SUBDOMAIN", "Platform", "text", { max: 63, pattern: /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/i, default: "workers", help: "workers.dev subdomain used as the health-check target for a site without a verified domain." })
 ];
 

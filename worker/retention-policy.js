@@ -68,6 +68,8 @@ export const SITE_DELETE = [
   ["site_access_push_jobs", "site_id = ?"],
   ["site_storage_limit_sync", "site_id = ?"],
   ["site_storage_usage", "site_id = ?"],
+  ["site_domain_moves", "site_id = ?"],           // moving a site to another platform domain: hostnames, route/zone ids, step log, short error text; no personal data
+  ["site_host_redirects", "site_id = ?"],         // temporary old-host redirect of a moved site (hostnames only)
   ["site_setup_requests", "site_id = ?"]            // Phase 9: first-configuration requests (preset or clone source ids, short error codes; no content). Rows for a manually registered tenant have no site and stay with the tenant registry
 ];
 
@@ -110,5 +112,6 @@ export const OUT_OF_SCOPE = {
   lummet_sessions: "staff data", tenant_api_credentials: "removed with the tenant registry row", tenant_capabilities: "removed with the tenant registry row",
   tenant_health: "removed with the tenant registry row", tenant_template_releases: "platform releases", staff_api_tokens: "staff data: CI credentials, stored hashed", tenant_rollouts: "platform releases: which release went to which sites, no personal data", tenant_rollout_items: "erased per site (see SITE_DELETE) and cascades with tenant_rollouts", domain_events: "cascades with domains", domain_zone_events: "cascades with domain_zones",
   site_preset_defaults: "platform settings: which preset new sites start from, per plan or product; staff ids only",
+  platform_domains: "platform settings: the domains new sites can run on; staff ids only, no customer data",
   webhook_deliveries: "cascades with webhooks", job_steps: "cascades with jobs", tenants: "removed per site, see eraseOrganization"
 };

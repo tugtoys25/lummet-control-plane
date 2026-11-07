@@ -40,7 +40,6 @@ export async function requestSiteDeletion(env, { organizationId, siteId, actorUs
   // Typed confirmation, checked HERE (not just in the page): the exact site name, so a script or a stray click cannot delete a site.
   if (String(confirmName ?? "").trim() !== String(site.name).trim()) return { ok: false, status: 422, error: "confirmation_required", detail: "Type the site's name exactly to confirm." };
   if (site.status === "deleting" || site.status === "deleted") return { ok: false, status: 409, error: "site_already_deleting" };
-  if (teardown.BUSY_STATUSES.includes(site.status)) return { ok: false, status: 409, error: "site_busy", currentStatus: site.status };
 
   if (!(await requiresApproval(env, organizationId))) {
     const result = await teardown.beginSiteDeletion(env, {

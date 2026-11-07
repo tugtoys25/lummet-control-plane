@@ -17,7 +17,7 @@
 - Both create a durable `site_teardown` job (`worker/site-teardown.js`): `stop_routing`, `remove_custom_domains`, `delete_worker`, `delete_database`, `delete_kv`, `delete_r2`, `delete_backups`, `finalize`. Steps are idempotent; a resource the provider no longer has counts as gone. A failure leaves the site in `deleting` and the job sweep retries with backoff; after the retries it is dead-lettered and the `dead_jobs` alert reports it.
 - `finalize` removes the site's operational rows (the `SITE_DELETE` list in `retention-policy.js`, except `site_status_events` and `site_resources`, which stay as the record), its stored backups and its tenant row with credentials, then marks the site `deleted`. The plan slot frees as soon as the site is `deleting`.
 - The sweep adopts sites left in `deleting` by the old code that never had a job.
-- Sites in `provisioning`, `configuring` or `deploying` cannot be deleted until they finish or fail (`409 site_busy`). A site stuck at `provisioned` can now be deleted.
+- Every site that is not already `deleted` can be deleted, including one stuck in `provisioning`, `configuring`, `deploying`, `provisioned` or `failed`. Starting a deletion cancels the site's other jobs (setup, deploys, retries), so nothing can recreate what is being removed or be retried by the sweep. Every teardown step re-runs on each attempt and only acts on what is still recorded as active, so a resource a straggling job created late is caught by `finalize` (it refuses to finish while anything is recorded active) and removed on the retry.
 - New webhook event: `site.deleted`.
 
 ## Verification (merged onto the current stable tree)

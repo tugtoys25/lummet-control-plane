@@ -36,10 +36,10 @@ export const SITE_STATUSES = [
 // master prompt section 9/17 describes.
 const ALLOWED_TRANSITIONS = {
   pending: ["provisioning", "failed", "deleting"],
-  provisioning: ["provisioned", "failed"],
+  provisioning: ["provisioned", "failed", "deleting"],   // a site stuck mid-setup holds real resources; it must be deletable (its open jobs are cancelled first)
   provisioned: ["configuring", "failed", "deleting"],   // a site that stopped here (no release published) holds real resources; it must be deletable
-  configuring: ["deploying", "failed"],
-  deploying: ["active", "failed"],
+  configuring: ["deploying", "failed", "deleting"],
+  deploying: ["active", "failed", "deleting"],
   active: ["suspended", "maintenance", "deleting"],
   suspended: ["active", "deleting"],
   maintenance: ["active", "deleting"],

@@ -31,6 +31,7 @@ export const PLAN_CATALOG_CLIENT = String.raw`
     entitlement_type_mismatch: 'That key has a fixed type.', invalid_number: 'Entitlement numbers must be whole numbers.', invalid_boolean: 'Pick on or off.', duplicate_key: 'Duplicate entitlement key.',
     not_archived: 'Only retired plans can be restored.', nothing_selected: 'Select at least one plan.', too_many_selected: 'Select up to 100 plans at a time.', invalid_category: 'Pick a category.',
     slug_taken: 'That slug is used (or was used) by another product.', invalid_slug: 'Slugs use lowercase letters, digits and hyphens.', reserved_slug: 'That word is reserved. Pick another slug.', invalid_public_name: 'The public name needs at least 2 characters.', invalid_sort_order: 'Sort order must be a whole number from -1000 to 1000.', source_has_no_plans: 'That product has no monthly plans to copy.',
+    stripe_not_configured: 'This Worker has no Stripe key, so a price cannot be created here.', live_confirmation_required: 'This is a LIVE Stripe key. Confirm to create a live price.', lookup_key_in_use: 'Stripe already has a different price under this plan\'s lookup key. Attach that one by id on the manual form below, or ask a developer.', stripe_rejected: 'Stripe refused the request.', product_not_found: 'The plan\'s product no longer exists.',
     cross_site_request_blocked: 'Blocked: reload the page and try again.'
   };
   function errText(code) { return ERR[code] || ('Failed: ' + (code || 'unknown error')); }
@@ -497,7 +498,35 @@ export const PLAN_CATALOG_CLIENT = String.raw`
           var sid = el('input', { placeholder: 'price_1AbC...', autocomplete: 'off', spellcheck: 'false' });
           var tax = el('select', null, ['unspecified', 'exclusive', 'inclusive'].map(function (x) { return el('option', { value: x, text: x }); }));
           var why = el('input', { maxlength: '300', placeholder: 'Why is the price changing? (audit log)' });
-          pane.appendChild(el('h3', { text: versions.length ? 'Add a new price version' : 'Attach the first Stripe price' }));
+          // Create the Stripe price for the staff member (plan-stripe.js), then attach it through the same checks as the manual form below.
+          var cAmt = el('input', { type: 'number', step: '0.01', min: '0', value: fromCents(plan.price_cents) || '', placeholder: '29.00' });
+          var cTax = el('select', null, ['unspecified', 'exclusive', 'inclusive'].map(function (x) { return el('option', { value: x, text: x }); }));
+          var cWhy = el('input', { maxlength: '300', placeholder: 'Why? (audit log)' });
+          function createInStripe(confirmLive) {
+            var cents = toCents(cAmt.value);
+            if (cents === null || cents <= 0) { toast(errText('invalid_price_cents'), 'err'); return; }
+            return api('POST', '/plan-catalog/' + encodeURIComponent(plan.id) + '/stripe-price', { amountCents: cents, taxBehavior: cTax.value, reason: cWhy.value, confirmLive: confirmLive === true }).then(function (r) {
+              if (!r.success && r.error === 'live_confirmation_required') {
+                return confirmBox('Create a LIVE Stripe price?', 'Your Worker uses a live Stripe key. Stripe prices cannot be edited afterwards. This creates a real recurring price of ' + money(cents, plan.currency) + '.', 'Create live price', true).then(function (ok) { if (ok) return createInStripe(true); });
+              }
+              if (!r.success) {
+                var extra = (r.stripePriceId ? ' The Stripe price ' + r.stripePriceId + ' exists; attach it on the manual form below.' : '') + (r.detail ? ' ' + r.detail : '');
+                return toast(errText(r.error) + extra, 'err');
+              }
+              toast('Created ' + r.stripePriceId + (r.adopted ? ' (adopted the matching price already in Stripe)' : '') + ', price v' + r.version + ' is live' + (r.verified ? ' (verified with Stripe).' : '.'), 'ok');
+              reopen('pricing');
+            });
+          }
+          pane.appendChild(el('h3', { text: 'Create the price in Stripe for me' }));
+          pane.appendChild(el('p', { class: 'pc-dim', text: 'Creates the recurring price in Stripe (the product is created only if missing), then attaches it with the same checks as the manual form. Prices cannot be edited in Stripe afterwards; to change one, add a new version.' }));
+          pane.appendChild(el('div', { class: 'pc-grid2' }, field('Amount (' + String(plan.currency).toUpperCase() + ' / ' + (plan.billing_period === 'annual' ? 'year' : 'month') + ')', cAmt), field('Tax behavior', cTax, 'Cannot be changed later once exclusive or inclusive.'), field('Reason', cWhy)));
+          pane.appendChild(saveBar('Create in Stripe and make it the selling price', function () {
+            var cents = toCents(cAmt.value);
+            if (cents === null || cents <= 0) { toast(errText('invalid_price_cents'), 'err'); return; }
+            return confirmBox('Create this price in Stripe?', 'New checkouts will charge ' + money(cents, plan.currency) + '. ' + (plan.live_subscriptions ? plan.live_subscriptions + ' current subscriber(s) stay on their existing price.' : 'Nobody is subscribed yet.'), 'Create price', false).then(function (ok) { if (ok) return createInStripe(false); });
+          }));
+          pane.appendChild(el('h3', { text: 'Or attach one you already created' }));
+          pane.appendChild(el('h3', { text: 'Attach a Stripe price id' }));
           pane.appendChild(el('p', { class: 'pc-dim', text: 'Create the recurring price in Stripe first, then paste its id. When Stripe is connected, Lummet checks the amount, currency and interval against Stripe and refuses a mismatch.' }));
           pane.appendChild(el('div', { class: 'pc-grid2' }, field('Amount (' + String(plan.currency).toUpperCase() + ' / ' + (plan.billing_period === 'annual' ? 'year' : 'month') + ')', amt), field('Stripe price id', sid), field('Tax behavior', tax, 'Cannot be changed later once exclusive or inclusive.'), field('Reason', why)));
           pane.appendChild(saveBar('Make this the selling price', function () {

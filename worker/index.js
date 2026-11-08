@@ -1725,7 +1725,11 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const portalOrigin = (env.PORTAL_BASE_URL || url.origin).replace(/\/$/, "");
             // Gateway switch (migration 0074): the customer may pick a gateway; with none named, the first enabled one by priority
             // is used (Stripe unless staff changed it). A switched-off gateway is refused here, never at the webhook.
-            const gatewayChoice = await billingGateways.resolveGateway(env, body.gateway);
+            // A plan with no Stripe price yet cannot be paid by card; when the caller did not pick a gateway and crypto is on, it is sent to crypto
+            // instead of failing. An explicit choice is never overridden, and with crypto off nothing changes.
+            const wantsGateway = body.gateway !== undefined && body.gateway !== null && body.gateway !== "";
+            const requestedGateway = !wantsGateway && body.planId && await billingGateways.cryptoReady(env) && await billingGateways.isCryptoOnlyPlan(env, String(body.planId)) ? "nowpayments" : body.gateway;
+            const gatewayChoice = await billingGateways.resolveGateway(env, requestedGateway);
             if (!gatewayChoice.ok) return json({ success: false, error: gatewayChoice.error, available: gatewayChoice.available }, gatewayChoice.status);
             const checkoutArgs = {
               organizationId, planId: body.planId,
@@ -3415,7 +3419,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             shell({
               title: "Billing", activeKey: "billing", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling, checkoutStatus, selectedPlanId: url.searchParams.get("plan") || null, billingProfile, access, usage, aiCredits, cardRequiredTrial: cardRequiredTrial(env) })
+              bodyHtml: renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling, checkoutStatus, selectedPlanId: url.searchParams.get("plan") || null, billingProfile, access, usage, aiCredits, cardRequiredTrial: cardRequiredTrial(env), cryptoReady: await billingGateways.cryptoReady(env) })
             })
           );
         }

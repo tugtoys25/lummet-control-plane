@@ -7,6 +7,7 @@
 
 import * as pricingRepo from "../repositories/pricing.js";
 import { cardRequiredTrial, withEffectiveTrial } from "../billing-config.js";
+import { cryptoReady } from "../billing-gateways.js";
 import * as data from "./data.js";
 import { brandModel, updateModel, publicationModel, partnerModel, authorModel, typeLabel } from "./models.js";
 import { PAGE_ALIASES } from "./links.js";
@@ -459,7 +460,11 @@ async function resolveFocusFamily(ctx, groups) {
 
 export async function pricingPage(ctx) {
   const { site, settings, ui } = ctx.siteCtx;
-  const plans = withEffectiveTrial(ctx.env, await pricingRepo.listPricing(ctx.env, { requirePrice: cardRequiredTrial(ctx.env) }));
+  // When card checkout is required for a trial, plans without a Stripe price are hidden, unless crypto checkout is on: it sells them at the
+  // list price. Such a plan advertises no trial there (a card-required trial starts in Stripe Checkout). Crypto off: exactly as before.
+  const cryptoOn = cardRequiredTrial(ctx.env) ? await cryptoReady(ctx.env) : false;
+  const plans = withEffectiveTrial(ctx.env, await pricingRepo.listPricing(ctx.env, { requirePrice: cardRequiredTrial(ctx.env) && !cryptoOn }))
+    .map((p) => (cryptoOn && p.has_stripe_price === 0 ? { ...p, trial_days: 0 } : p));
   const hasAnnual = plans.some((p) => p.billing_period === "annual");
   const period = hasAnnual && ctx.url.searchParams.get("billing") === "annual" ? "annual" : "monthly";
   const groups = pricingGroups(plans, period, ui);

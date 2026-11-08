@@ -416,7 +416,8 @@ export function pricingGroups(plans, period, ui = {}) {
       labels: p.labels || [],
       has_labels: !!(p.labels && p.labels.length),
       promo: p.promo ? { text: p.promo.text, code_note: p.promo.code ? (ui.pricing_promo_code || "Use code {code} at checkout").replace("{code}", p.promo.code) : "" } : null,
-      cta: p.cta_label || "",
+      // A plan that really has a trial says "Start free trial"; one without keeps the generic label. A label set on the plan always wins.
+      cta: p.cta_label || (p.trial_days > 0 ? (ui.pricing_cta_trial || "") : ""),
       sort_order: p.sort_order || 0,
       staffFeatured: !!p.is_featured,
       seo_description: p.seo_description || "",
@@ -468,6 +469,13 @@ export async function pricingPage(ctx) {
   const hasAnnual = plans.some((p) => p.billing_period === "annual");
   const period = hasAnnual && ctx.url.searchParams.get("billing") === "annual" ? "annual" : "monthly";
   const groups = pricingGroups(plans, period, ui);
+  // Both billing periods are rendered into the one (edge-cached) page and the toggle switches between them in the browser, so a click
+  // never reloads or re-renders anything. ?billing=annual still opens the page on Yearly, and without scripts the links still work.
+  const panels = (hasAnnual ? ["monthly", "annual"] : ["monthly"]).map((key) => {
+    // The Monthly panel keeps the element ids the page always had; the Yearly one gets its own so ids stay unique.
+    const g = (key === period ? groups : pricingGroups(plans, key, ui)).map((grp) => ({ ...grp, domKey: key === "monthly" ? grp.id : `${key}-${grp.id}` }));
+    return { key, titleId: key === "monthly" ? "pricing-comparison-title" : `pricing-comparison-title-${key}`, active: key === period, groups: g, comparisonPlans: g.flatMap((x) => x.plans.map((plan) => ({ ...plan, family: x.name }))) };
+  });
   const focusFamily = await resolveFocusFamily(ctx, groups);
   const heading = intro(settings, "pricing", ui.title_pricing || "Pricing");
   const description = heading.intro || `Plans and prices for ${site.name}.`;
@@ -486,7 +494,7 @@ export async function pricingPage(ctx) {
   return renderPage(ctx, {
     template: "pricing",
     data: {
-      ...heading, intro: description, groups, has_groups: groups.length > 0, has_annual: hasAnnual, monthly: period === "monthly", annual: period === "annual",
+      ...heading, intro: description, groups, panels, has_groups: groups.length > 0, has_annual: hasAnnual, monthly: period === "monthly", annual: period === "annual",
       families: groups.map((g) => ({ id: g.id, slug: g.slug, name: g.name, selected: g.id === focusFamily })),
       multi_family: groups.length > 1,
       focus_family: focusFamily,

@@ -18,15 +18,17 @@
       <div class="pricing-toolbar">
         {{#if has_annual}}
         <div class="filter-bar" role="group" aria-label="{{ui.pricing_billing_label}}">
-          <a{{#if monthly}} aria-current="true"{{/if}} class="chip{{#if monthly}} is-active{{/if}}" href="/pricing">{{ui.pricing_monthly}}</a>
-          <a{{#if annual}} aria-current="true"{{/if}} class="chip{{#if annual}} is-active{{/if}}" href="/pricing?billing=annual">{{ui.pricing_annual}}</a>
+          <a data-period="monthly"{{#if monthly}} aria-current="true"{{/if}} class="chip{{#if monthly}} is-active{{/if}}" href="/pricing">{{ui.pricing_monthly}}</a>
+          <a data-period="annual"{{#if annual}} aria-current="true"{{/if}} class="chip{{#if annual}} is-active{{/if}}" href="/pricing?billing=annual">{{ui.pricing_annual}}</a>
         </div>
         {{/if}}
         {{#if multi_family}}<div class="field pricing-family-filter"><label for="pricing-family">{{ui.pricing_family_label}}</label><select id="pricing-family"><option value="all">{{ui.pricing_family_all}}</option>{{#each families}}<option value="{{id}}"{{#if selected}} selected{{/if}}>{{name}}</option>{{/each}}</select></div>{{/if}}
       </div>
+      {{#each panels}}
+      <div class="pricing-panel" data-period-panel="{{key}}"{{#unless active}} hidden{{/unless}}>
       {{#each groups}}
-      <section class="pricing-family" data-pricing-family="{{id}}" aria-labelledby="pricing-family-title-{{id}}">
-        <h2 class="pricing-product" id="pricing-family-title-{{id}}">{{name}}</h2>
+      <section class="pricing-family" data-pricing-family="{{id}}" aria-labelledby="pricing-family-title-{{domKey}}">
+        <h2 class="pricing-product" id="pricing-family-title-{{domKey}}">{{name}}</h2>
         <div class="plan-grid">
           {{#each plans}}
           {{> components/plan-card}}
@@ -34,14 +36,16 @@
         </div>
       </section>
       {{/each}}
-      <section class="pricing-comparison" aria-labelledby="pricing-comparison-title">
-        <h2 id="pricing-comparison-title">{{ui.pricing_comparison_title}}</h2>
+      <section class="pricing-comparison" aria-labelledby="{{titleId}}">
+        <h2 id="{{titleId}}">{{ui.pricing_comparison_title}}</h2>
         <div class="table-scroll" role="region" aria-label="{{ui.pricing_comparison_aria}}" tabindex="0">
           <table><caption>{{ui.pricing_comparison_caption}}</caption><thead><tr><th scope="col">{{ui.pricing_family_label}}</th><th scope="col">{{ui.pricing_comparison_plan}}</th><th scope="col">{{ui.pricing_comparison_price}}</th><th scope="col">{{ui.pricing_comparison_features}}</th><th scope="col">{{ui.pricing_comparison_action}}</th></tr></thead><tbody>
           {{#each comparisonPlans}}<tr data-comparison-family="{{productId}}"><td>{{family}}</td><th scope="row">{{name}}</th><td><strong>{{price}}</strong> {{period}}</td><td>{{featuresText}}</td><td><a href="/app/signup?plan={{planId}}&amp;period={{signupPeriod}}">{{ui.pricing_cta}}</a></td></tr>{{/each}}
           </tbody></table>
         </div>
       </section>
+      </div>
+      {{/each}}
       <p class="pricing-note">{{ui.pricing_note}}</p>
       <aside class="pricing-trust" aria-label="{{ui.pricing_trust_aria}}"><p><strong>{{ui.pricing_trust_title}}</strong> {{ui.pricing_trust_body}}</p></aside>
       <section class="pricing-faq" aria-labelledby="pricing-faq-title"><h2 id="pricing-faq-title">{{ui.pricing_faq_title}}</h2>

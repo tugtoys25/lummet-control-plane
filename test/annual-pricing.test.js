@@ -78,12 +78,22 @@ test('staff activate an annual plan; customers can then check out on it and the 
   assert.equal(call.priceId, 'price_annual1');
 });
 
+// The page carries both billing periods (one hidden) so the toggle is instant; these read one panel of the page.
+function panel(text, key) {
+  const start = text.indexOf(`data-period-panel="${key}"`);
+  if (start < 0) return '';
+  const next = text.indexOf('data-period-panel="', start + 10);
+  const end = text.indexOf('<p class="pricing-note">', start);
+  return text.slice(start, next > 0 && next < end ? next : end);
+}
+const isHidden = (text, key) => new RegExp(`data-period-panel="${key}" hidden>`).test(text);
+
 test('/pricing: monthly plans of active products, grouped, with CTA, trial and feature lines; no annual toggle while none is published', async () => {
   const e = env(); const p = await page(e, '/pricing');
   assert.equal(p.status, 200);
   assert.match(p.text, /<h1>Pricing<\/h1>/);
   assert.match(p.text, /Casino News/); assert.match(p.text, /\$5<\/strong> per month/); assert.match(p.text, /7-day free trial/);
-  assert.match(p.text, /href="\/app\/signup\?plan=[^&]+&amp;period=monthly">Get started</);
+  assert.match(p.text, /href="\/app\/signup\?plan=[^&]+&amp;period=monthly">Start free trial</); // a plan that has a trial says so; plans without one keep the generic label
   assert.doesNotMatch(p.text, /billing=annual/, 'no toggle without a published annual plan');
   assert.doesNotMatch(p.text, /\(annual\)/);
   assert.match(p.text, /Prices exclude any taxes/);
@@ -104,13 +114,14 @@ test('/pricing with a published annual plan: toggle appears, annual view shows t
   await staff.updatePlan(e, 'plan_casino_news_pro_annual', { status: 'active' });
   const monthly = await page(e, '/pricing');
   assert.match(monthly.text, /href="\/pricing\?billing=annual">Annual</); assert.match(monthly.text, /chip is-active" href="\/pricing">Monthly/);
-  assert.doesNotMatch(monthly.text, /per year/);
+  assert.doesNotMatch(panel(monthly.text, 'monthly'), /per year/); assert.equal(isHidden(monthly.text, 'annual'), true); assert.equal(isHidden(monthly.text, 'monthly'), false);
   const annual = await page(e, '/pricing?billing=annual');
   assert.match(annual.text, /chip is-active" href="\/pricing\?billing=annual">Annual/);
   assert.match(annual.text, /\$50<\/strong> per year/); assert.match(annual.text, /\$200<\/strong> per year/);
   assert.match(annual.text, /Save 17% compared with paying monthly/);
-  assert.doesNotMatch(annual.text, /per month/); assert.doesNotMatch(annual.text, /\(annual\)/);
-  assert.doesNotMatch(annual.text, /Sports News/, 'only products that have an annual plan published appear in the annual view');
+  assert.equal(isHidden(annual.text, 'monthly'), true); assert.equal(isHidden(annual.text, 'annual'), false);
+  assert.doesNotMatch(panel(annual.text, 'annual'), /per month/); assert.doesNotMatch(annual.text, /\(annual\)/);
+  assert.doesNotMatch(panel(annual.text, 'annual'), /Sports News/, 'only products that have an annual plan published appear in the annual view');
   assert.match((await page(e, '/pricing?billing=bogus')).text, /per month/, 'unknown values fall back to monthly');
 });
 

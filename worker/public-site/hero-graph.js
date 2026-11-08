@@ -53,7 +53,6 @@ export function heroGraphSvg(centerName, brands, ui = {}) {
     <ellipse class="hg-ring" cx="${CX}" cy="${CY}" rx="${RX}" ry="${RY}"/>
     <ellipse class="hg-ring hg-ring-outer" cx="${CX}" cy="${CY}" rx="${RX + 34}" ry="${RY + 30}"/>
     ${links}
-    <circle class="hg-hub-halo" cx="${CX}" cy="${CY}" r="46"/>
     <circle class="hg-hub" cx="${CX}" cy="${CY}" r="34"/>
     <text class="hg-hub-label" x="${CX}" y="${CY + 4}" text-anchor="middle">${escapeHtml(truncate(centerName, 10))}</text>
     ${dots}

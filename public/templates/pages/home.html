@@ -1,10 +1,9 @@
 {{#if hero}}
 <section class="hero">
-  <div class="hero-bg" aria-hidden="true"></div>
   <div class="container hero-grid">
     <div class="hero-copy">
       {{#if hero.eyebrow}}<span class="eyebrow eyebrow-pill">{{hero.eyebrow}}</span>{{/if}}
-      <h1>{{#if hero.has_accent}}{{hero.title_lead}} <span class="grad">{{hero.title_accent}}</span>{{else}}{{hero.title}}{{/if}}</h1>
+      <h1>{{#if hero.has_accent}}{{hero.title_lead}} <span class="hero-accent">{{hero.title_accent}}</span>{{else}}{{hero.title}}{{/if}}</h1>
       {{#if hero.subtitle}}<p class="lede">{{hero.subtitle}}</p>{{/if}}
       <div class="hero-actions">
         {{#if hero.has_primary}}<a class="btn btn-primary btn-lg" href="{{hero.primary_href}}">{{hero.primary_label}}</a>{{/if}}

@@ -211,7 +211,6 @@ export const STYLES = `
     --accent-strong: #3b82f6;
     --accent-ink: #ffffff;
     --accent-soft: rgba(91, 155, 255, 0.14);
-    --grad: #3b82f6;
     --ok: #3ccf96;
     --warn: #f5b23a;
     --danger: #e5484d;
@@ -238,7 +237,6 @@ export const STYLES = `
     --accent: #1a56db;
     --accent-strong: #1447b8;
     --accent-soft: rgba(26, 86, 219, 0.08);
-    --grad: #1a56db;
     --ok: #0f7a55;
     --warn: #96560a;
     --danger: #c4264a;
@@ -485,7 +483,7 @@ export const STYLES = `
   .brand { font-size: 20px; }
   .card, .stat { box-shadow: none; }
   .card { border-radius: var(--radius); }
-  .btn, .btn-primary { background: var(--grad); color: #fff; border-radius: 8px; padding: 9px 16px; box-shadow: none; font-weight: 600; transition: background-color .15s ease; }
+  .btn, .btn-primary { background: var(--accent); color: #fff; border-radius: 8px; padding: 9px 16px; box-shadow: none; font-weight: 600; transition: background-color .15s ease; }
   .btn:hover, .btn-primary:hover { background: var(--accent-strong); filter: none; }
   .btn-secondary { background: transparent; color: var(--text); border-color: var(--panel-border); box-shadow: none; }
   .btn-secondary:hover { background: var(--accent-soft); filter: none; }

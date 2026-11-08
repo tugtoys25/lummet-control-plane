@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.3 - Cleanup of the 2.7.2 restyle (no visual change intended)
+
+- The "enterprise layer" appended to `components.css` and `pages.css` in 2.7.2 is folded into the original rules, so each selector is defined once. Dead decorative rules are deleted: hero radial halos and grid wash, panel glow, hero-card gradient border, page-hero wash, footer glow, CTA grid overlay, brand-strip gradient bar, hub halo and the unused `hg-flow` / `hg-pulse` keyframes.
+- Markup: removed the empty `hero-bg` and `panel-glow` elements and the hero graph's hub-halo circle; the headline accent span is now `hero-accent` (was `grad`).
+- Tokens: removed `--grad`, `--grad-text`, `--accent-glow` and `--accent-3` (public site, dashboards, sign-in pages, cookie banner). `--accent-2` stays: it is the optional secondary accent an admin can set.
+- Deleted the unused Bricolage Grotesque font file and licence; updated the accent-colour example in the staff content settings.
+- Flat brand chips and plan flag (no glow or lift). `ASSET_VERSION` is `ui10`.
+
 ## 2.7.2 - Enterprise look: neutral canvas, one accent, flat surfaces
 
 Visual-only; no routes, data, migrations or behaviour change. Reference traits taken from Stripe, Cloudflare, Google/Material, Tesla, Canva, eBay, Amazon and Stake: neutral canvas, a single blue accent, hairline borders, small radii, flat shadows, one grotesque type family.

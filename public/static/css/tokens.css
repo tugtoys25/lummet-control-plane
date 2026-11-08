@@ -13,15 +13,12 @@
 
 :root,
 :root[data-theme="light"] {
-  /* Enterprise palette: neutral canvas, ONE blue accent (Tesla/Stripe/Google pattern), no gradients, no glow. */
+  /* Enterprise palette: neutral canvas, one blue accent, no gradients, no glow.
+     --accent-2 is the optional secondary accent an admin can set (accent_color_secondary). */
   --accent: #1a56db;
   --accent-2: #1a56db;
-  --accent-3: #1a56db;
   --accent-ink: #1447b8;
   --accent-soft: rgba(26, 86, 219, 0.08);
-  --accent-glow: transparent;
-  --grad: #1a56db;
-  --grad-text: #1a56db;
 
   --bg: #ffffff;
   --bg-soft: #f6f7f9;
@@ -53,12 +50,8 @@
 :root[data-theme="dark"] {
   --accent: #5b9bff;
   --accent-2: #5b9bff;
-  --accent-3: #5b9bff;
   --accent-ink: #8db8ff;
   --accent-soft: rgba(91, 155, 255, 0.14);
-  --accent-glow: transparent;
-  --grad: #3b82f6;
-  --grad-text: #8db8ff;
 
   --bg: #0b0f17;
   --bg-soft: #111723;

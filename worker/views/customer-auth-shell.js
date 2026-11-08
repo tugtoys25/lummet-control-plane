@@ -43,8 +43,8 @@ const AUTH_CSS = `
   .auth-card input::placeholder { color: var(--ink-faint); }
   .auth-card input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent); }
   .auth-btn { width: 100%; min-height: 48px; margin-top: 22px; padding: 12px 18px; font: inherit; font-weight: 700; color: #fff; cursor: pointer; border: 0;
-    border-radius: var(--radius-pill); background: var(--grad); box-shadow: 0 10px 24px -10px var(--accent-glow); transition: transform .15s var(--ease), box-shadow .15s var(--ease), filter .15s var(--ease); }
-  .auth-btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
+    border-radius: var(--radius-pill); background: var(--accent); transition: background-color .15s var(--ease); }
+  .auth-btn:hover { background: var(--accent-ink); }
   .auth-btn:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; box-shadow: 0 0 0 2px var(--accent); }
   .auth-btn[disabled] { opacity: .65; cursor: progress; transform: none; }
   .auth-alt { margin: 18px 0 0; text-align: center; font-size: var(--fs-sm); color: var(--ink-dim); }
@@ -56,8 +56,8 @@ const AUTH_CSS = `
   .auth-flash .flash-error { color: var(--danger); background: var(--danger-soft); border-color: var(--danger); }
   .auth-flash .flash-success { color: var(--ok); background: var(--ok-soft); border-color: var(--ok); }
   .auth-card .btn { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 48px; margin-top: 22px; padding: 12px 18px; font: inherit; font-weight: 700; color: #fff; cursor: pointer; text-decoration: none;
-    border: 0; border-radius: var(--radius-pill); background: var(--grad); box-shadow: 0 10px 24px -10px var(--accent-glow); }
-  .auth-card .btn:hover { filter: brightness(1.06); text-decoration: none; }
+    border: 0; border-radius: var(--radius-pill); background: var(--accent); }
+  .auth-card .btn:hover { background: var(--accent-ink); text-decoration: none; }
   .auth-card .btn:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
   .auth-card .btn[disabled], .auth-card .btn:disabled { opacity: .65; cursor: progress; }
   .auth-card .flash { margin-bottom: 16px; padding: 11px 14px; border-radius: var(--radius-sm); font-size: var(--fs-sm); border: 1px solid transparent; }

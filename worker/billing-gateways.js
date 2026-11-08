@@ -18,6 +18,9 @@ import * as stripeProvider from "./billing-stripe.js";
 import { billing } from "./billing.js";
 import { cryptoBilling } from "./billing-nowpayments-service.js";
 import * as repo from "./repositories/payment-gateways.js";
+import * as cryptoRepo from "./repositories/crypto-checkouts.js";
+import * as planPricesRepo from "./repositories/plan-prices.js";
+import { PERIOD_INTERVAL } from "./catalog.js";
 
 export const GATEWAY_KEYS = ["stripe", "nowpayments"];
 
@@ -139,6 +142,24 @@ export async function billingServiceFor(env, organizationId) {
     }
   } catch (_) { /* fall through to Stripe */ }
   return billing;
+}
+
+/** True when crypto checkout is on AND configured right now. False on any error, so a failure here can only keep today's behaviour. */
+export async function cryptoReady(env) {
+  try { return (await availableGateways(env)).some((g) => g.gateway === "nowpayments"); } catch (_) { return false; }
+}
+
+/**
+ * A plan that can be sold (active, recurring, with a list price) but has no active Stripe price: a card checkout would be refused
+ * with plan_not_billing_configured, crypto checkout bills the list price and works. False on any error or any doubt.
+ */
+export async function isCryptoOnlyPlan(env, planId) {
+  try {
+    const plan = await cryptoRepo.findActivePlan(env, planId);
+    const interval = plan && PERIOD_INTERVAL[plan.billing_period];
+    if (!interval || !(Number(plan.price_cents) > 0)) return false;
+    return !(await planPricesRepo.activeForPlan(env, plan.id, plan.currency, interval));
+  } catch (_) { return false; }
 }
 
 export { stripeProvider };

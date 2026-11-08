@@ -11,7 +11,8 @@ export async function listPricing(env, { requirePrice = false } = {}) {
     // Plan families staff chose to show, under their public name and slug, in staff order (migration 0089).
     plans = (await env.LUMMET_DB.prepare(
       `SELECT p.id, p.name, p.billing_period, p.price_cents, p.currency, p.trial_days, pr.id AS product_id, COALESCE(pr.public_name, pr.name) AS product_name,
-              pr.slug AS product_slug, pr.description AS product_description, pr.sort_order AS product_order, pr.category
+              pr.slug AS product_slug, pr.description AS product_description, pr.sort_order AS product_order, pr.category,
+              EXISTS (SELECT 1 FROM plan_prices pp WHERE pp.plan_id = p.id AND pp.active = 1 AND pp.stripe_price_id IS NOT NULL) AS has_stripe_price
          FROM plans p JOIN products pr ON pr.id = p.product_id
         WHERE p.status = 'active' AND pr.status = 'active' AND pr.show_on_pricing = 1 AND p.price_cents IS NOT NULL AND p.price_cents > 0 ${priced}
         ORDER BY pr.sort_order, pr.category, COALESCE(pr.public_name, pr.name), p.price_cents, p.id`

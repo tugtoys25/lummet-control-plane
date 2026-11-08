@@ -37,7 +37,7 @@ function planPrice(p) {
   return p.price_cents != null ? formatMoney(p.price_cents, p.currency) + " / " + escapeHtml(p.billing_period) : "Custom";
 }
 
-export function renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling = canManage, checkoutStatus, selectedPlanId = null, billingProfile = null, access = null, usage = null, aiCredits = null, cardRequiredTrial = false }) {
+export function renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling = canManage, checkoutStatus, selectedPlanId = null, billingProfile = null, access = null, usage = null, aiCredits = null, cardRequiredTrial = false, cryptoReady = false }) {
   const isPaid = !!(subscription && subscription.provider);
   const isTrialNoCard = !!(subscription && !subscription.provider);
 
@@ -113,7 +113,8 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
     </div>` : "";
 
   // CARD_REQUIRED_TRIAL: a new customer is only offered plans that can be bought online (a trial starts in Stripe Checkout).
-  if (cardRequiredTrial && !subscription) availablePlans = availablePlans.filter((p) => p.active_price_id);
+  // With crypto checkout on, a plan that has no Stripe price yet is still offered (crypto bills its list price).
+  if (cardRequiredTrial && !subscription) availablePlans = availablePlans.filter((p) => p.active_price_id || (cryptoReady && Number(p.price_cents) > 0));
   const showPlans = canManage && availablePlans.length > 0;
   // A customer who arrives with a chosen, buyable plan goes straight to Checkout (not again after they cancel out of it).
   const autoCheckoutPlan = cardRequiredTrial && canManage && !subscription && !checkoutStatus && selectedPlanId
@@ -137,7 +138,9 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
     if (isPaid) return `<button class="btn"${onClick("lummetChangePlan", [p.id])}>Switch to this plan</button> ` + crypto;
     const buy = p.active_price_id
       ? `<button class="btn"${onClick("lummetCheckout", [p.id])}>${p.id === selectedPlanId ? "Continue with selected plan" : (cardRequiredTrial && !subscription && p.trial_days ? "Start " + escapeHtml(String(p.trial_days)) + "-day trial" : "Subscribe")}</button>`
-      : `<span style="color:var(--text-dim);font-size:13px;">Not available online</span>`;
+      : (cryptoReady && Number(p.price_cents) > 0
+        ? `<button class="btn"${onClick("lummetCheckout", [p.id, "nowpayments"])}>Subscribe with crypto</button>`
+        : `<span style="color:var(--text-dim);font-size:13px;">Not available online</span>`);
     const trial = !cardRequiredTrial && !subscription && p.trial_days ? `<button class="btn btn-secondary"${onClick("lummetStartTrial", [p.id])}>Start ${escapeHtml(String(p.trial_days))}-day trial</button> ` : "";
     return trial + buy + (p.active_price_id ? " " + crypto : "");
   };

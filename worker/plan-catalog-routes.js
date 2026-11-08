@@ -14,12 +14,14 @@
 //   POST /plan-catalog/:id                   edit fields
 //   POST /plan-catalog/:id/{publish|unpublish|archive|restore|delete|duplicate}
 //   POST /plan-catalog/:id/{features|entitlements|labels|price|promotions}
+//   POST /plan-catalog/:id/stripe-price      create the recurring price in Stripe, then attach it like /price does (plan-stripe.js)
 //   POST /plan-catalog/promotions/:pid[/delete]
 //   POST /plan-labels, /plan-labels/:id, /plan-labels/:id/delete
 //   POST /products, /products/:id
 // =====================================================
 
 import * as catalog from "./plan-catalog.js";
+import { createStripePriceForPlan } from "./plan-stripe.js";
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -138,6 +140,12 @@ export async function handlePlanCatalogRoute({ env, request, url, method, path, 
         const b = await body(); const r = await catalog.setPlanPrice(env, id, b);
         await audit("plan", id, "set_price", r, r.ok ? `v${r.version} ${r.from} -> ${r.to} cents (${r.verified ? "verified with Stripe" : "NOT verified"}); ${r.reason}` : null);
         return reply(r, r.ok ? { version: r.version, verified: r.verified } : {});
+      }
+      case "stripe-price": {
+        const r = await createStripePriceForPlan(env, id, await body());
+        await audit("plan", id, "create_stripe_price", r, r.ok ? `v${r.version} ${r.stripePriceId}${r.adopted ? " (adopted existing)" : ""} ${r.verified ? "verified with Stripe" : "NOT verified"}; ${r.reason}` : null);
+        if (!r.ok) return json({ success: false, error: r.error, ...(r.stripePriceId ? { stripePriceId: r.stripePriceId } : {}), ...(r.lookupKey ? { lookupKey: r.lookupKey } : {}), ...(r.detail ? { detail: r.detail } : {}), ...(r.mode ? { mode: r.mode } : {}) }, r.status || 400);
+        return reply(r, { version: r.version, verified: r.verified, stripePriceId: r.stripePriceId, lookupKey: r.lookupKey, mode: r.mode, adopted: r.adopted });
       }
       case "promotions": {
         const r = await catalog.createPromotion(env, id, await body());

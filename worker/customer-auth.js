@@ -17,6 +17,7 @@ import { createOrganization } from "./organizations.js";
 import { getTotpStatus, verifyFactorForLogin } from "./totp.js";
 import { evaluateSessionUse } from "./org-security-policy.js";
 import * as commercialRepo from "./repositories/commercial.js";
+import { cryptoReady } from "./billing-gateways.js";
 
 const SESSION_COOKIE = "lummet_customer_session";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
@@ -188,7 +189,8 @@ export async function signUp(request, env) {
     const plan = await commercialRepo.signupPlan(env,requestedPlan,requestedPeriod);
     if (!plan || plan.status !== 'active' || plan.billing_period !== requestedPeriod || plan.price_cents == null || String(plan.billing_period)==='custom') return {ok:false,status:422,error:'invalid_signup_intent'};
     const price = await commercialRepo.activePlanPrice(env,plan.id,requestedPeriod==='annual'?'year':'month');
-    if (!price?.stripe_price_id) return {ok:false,status:409,error:'plan_not_billing_configured'};
+    // No Stripe price yet: still registrable when crypto checkout is on (it bills the plan's list price). With crypto off, as before.
+    if (!price?.stripe_price_id && !(Number(plan.price_cents) > 0 && await cryptoReady(env))) return {ok:false,status:409,error:'plan_not_billing_configured'};
   }
 
   const allowed = await checkRateLimit(env, ipHash, "customer_signup");

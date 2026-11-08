@@ -16,6 +16,7 @@ import * as repo from "./repositories/plan-catalog.js";
 import * as versions from "./repositories/plan-price-versions.js";
 import { priceLookupKey, PERIOD_INTERVAL, TAX_BEHAVIORS } from "./catalog.js";
 import { stripeModeFromEnv } from "./plan-prices.js";
+import { validateProductFields, slugify } from "./plan-families.js";
 import { stripeRequest } from "./billing-stripe.js";
 
 export const PLAN_STATUSES = ["draft", "active", "retired"];
@@ -369,24 +370,70 @@ export async function deleteLabel(env, id) {
   return { ok: true };
 }
 
-export async function createProduct(env, { name, key, category } = {}) {
-  const n = clean(name, 80);
-  if (n.length < 2) return fail(422, "invalid_name");
+export async function createProduct(env, input = {}) {
+  const category = input.category;
   if (!PRODUCT_CATEGORIES.includes(category)) return fail(422, "invalid_category");
-  const k = clean(key, 64) || slug(n);
+  const v = validateProductFields({ ...input, slug: input.slug || slugify(input.name) });
+  if (!v.ok) return v;
+  const k = clean(input.key, 64) || slug(v.value.name);
   if (!KEY_RE.test(k)) return fail(422, "invalid_key");
   if (await repo.getProductByKey(env, k)) return fail(409, "key_already_exists");
+  if (await repo.slugOwner(env, v.value.slug)) return fail(409, "slug_taken");
   const id = `product_${k}`;
-  await repo.insertProduct(env, { id, key: k, name: n, category });
+  await repo.insertProduct(env, { id, key: k, category, ...v.value });
   return { ok: true, productId: id };
 }
-export async function updateProduct(env, id, { name, status } = {}) {
-  if (!(await repo.getProduct(env, id))) return fail(404, "not_found");
-  const f = {};
-  if (name !== undefined) { f.name = clean(name, 80); if (f.name.length < 2) return fail(422, "invalid_name"); }
-  if (status !== undefined) { if (!["active", "retired"].includes(status)) return fail(422, "invalid_status"); f.status = status; }
+
+/** Edits the staff label, public name, slug, description, order, visibility switches and status. The key and id never change. */
+export async function updateProduct(env, id, input = {}) {
+  const cur = await repo.getProduct(env, id);
+  if (!cur) return fail(404, "not_found");
+  const v = validateProductFields(input, { partial: true });
+  if (!v.ok) return v;
+  const f = v.value;
+  if (input.status !== undefined) { if (!["active", "retired"].includes(input.status)) return fail(422, "invalid_status"); f.status = input.status; }
+  if (f.slug !== undefined && f.slug !== cur.slug) {
+    const owner = await repo.slugOwner(env, f.slug);
+    if (owner && owner.product_id !== id) return fail(409, "slug_taken");
+  } else delete f.slug;
   await repo.updateProduct(env, id, f);
   return { ok: true };
+}
+
+/**
+ * Creates a new plan family from an existing one, for a generic catalogue ("Starter, Growth, Pro" that are not tied to a
+ * vertical). Every sellable plan is copied as a DRAFT with its limits, feature lines and labels; prices, Stripe objects and
+ * subscriptions are never copied. Staff then set prices and publish. The new family is a plan family only (it is not offered
+ * as a site type), so customers pick the type of site at site creation.
+ */
+export async function cloneFamily(env, sourceId, input = {}) {
+  const src = await repo.getProduct(env, sourceId);
+  if (!src) return fail(404, "not_found");
+  const base = { name: input.name, publicName: input.publicName ?? input.name, slug: input.slug || slugify(input.name), description: input.description, showOnPricing: input.showOnPricing ?? 1, showInSiteCreation: 0 };
+  const v = validateProductFields(base);
+  if (!v.ok) return v;
+  const k = clean(input.key, 64) || slug(v.value.name);
+  if (!KEY_RE.test(k)) return fail(422, "invalid_key");
+  if (await repo.getProductByKey(env, k)) return fail(409, "key_already_exists");
+  if (await repo.slugOwner(env, v.value.slug)) return fail(409, "slug_taken");
+  const sources = (await repo.plansOfProduct(env, sourceId)).filter((p) => p.status !== "retired" && p.billing_period === "monthly");
+  if (!sources.length) return fail(422, "source_has_no_plans");
+  const id = `product_${k}`;
+  await repo.insertProduct(env, { id, key: k, category: src.category, template_line: src.template_line || "casino", ...v.value });
+  const planIds = [];
+  for (const p of sources) {
+    const full = await repo.getPlan(env, p.id);
+    const pk = `${k}_${slug(full.name) || "plan"}`.slice(0, 64);
+    if (await repo.getPlanByKey(env, pk)) continue;
+    const pid = `plan_${pk}`;
+    await repo.insertPlan(env, {
+      id: pid, productId: id, key: pk, name: full.name, billingPeriod: "monthly", priceCents: full.price_cents, currency: String(full.currency).toUpperCase(), trialDays: full.trial_days,
+      status: "draft", description: full.description, tagline: full.tagline, sortOrder: full.sort_order, isFeatured: !!full.is_featured, ctaLabel: full.cta_label, seoTitle: full.seo_title, seoDescription: full.seo_description
+    });
+    await repo.copyPlanDetails(env, p.id, pid);
+    planIds.push(pid);
+  }
+  return { ok: true, productId: id, planIds };
 }
 
 // ---------------------------------------------------------------------------------------------- promotions

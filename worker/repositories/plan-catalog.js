@@ -73,24 +73,51 @@ export async function statusCounts(env) {
 // ---- products ----
 export async function listProducts(env) {
   return (await env.LUMMET_DB.prepare(
-    `SELECT pr.id, pr.key, pr.name, pr.category, pr.status, (SELECT COUNT(*) FROM plans p WHERE p.product_id = pr.id) AS plan_count
-       FROM products pr ORDER BY pr.category, pr.name`).all()).results || [];
+    `SELECT pr.id, pr.key, pr.name, pr.public_name, pr.slug, pr.description, pr.sort_order, pr.show_on_pricing, pr.show_in_site_creation,
+            pr.category, pr.status, pr.template_line, (SELECT COUNT(*) FROM plans p WHERE p.product_id = pr.id) AS plan_count,
+            (SELECT COUNT(*) FROM sites s WHERE s.product_id = pr.id) AS site_count
+       FROM products pr ORDER BY pr.sort_order, pr.category, pr.name`).all()).results || [];
 }
 export async function getProduct(env, id) {
-  return env.LUMMET_DB.prepare(`SELECT id, key, name, category, status FROM products WHERE id = ?`).bind(id).first();
+  return env.LUMMET_DB.prepare(`SELECT id, key, name, public_name, slug, description, sort_order, show_on_pricing, show_in_site_creation, category, status, template_line FROM products WHERE id = ?`).bind(id).first();
 }
 export async function getProductByKey(env, key) {
   return env.LUMMET_DB.prepare(`SELECT id FROM products WHERE key = ?`).bind(key).first();
 }
-export async function insertProduct(env, { id, key, name, category }) {
-  await env.LUMMET_DB.prepare(`INSERT INTO products (id, key, name, category, status) VALUES (?, ?, ?, ?, 'active')`).bind(id, key, name, category).run();
+/** Who owns a slug right now or ever did: { product_id, current } or null. A slug is never reused for another product. */
+export async function slugOwner(env, slug) {
+  const cur = await env.LUMMET_DB.prepare(`SELECT id FROM products WHERE slug = ?`).bind(slug).first();
+  if (cur) return { product_id: cur.id, current: true };
+  const old = await env.LUMMET_DB.prepare(`SELECT product_id FROM product_slug_history WHERE slug = ?`).bind(slug).first();
+  return old ? { product_id: old.product_id, current: false } : null;
 }
-export async function updateProduct(env, id, { name, status }) {
-  const sets = [], vals = [];
-  if (name !== undefined) { sets.push("name = ?"); vals.push(name); }
-  if (status !== undefined) { sets.push("status = ?"); vals.push(status); }
-  if (!sets.length) return;
-  await env.LUMMET_DB.prepare(`UPDATE products SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, id).run();
+/** Current product id for a slug, following history (old links keep working). */
+export async function resolveFamilySlug(env, slug) {
+  const o = await slugOwner(env, String(slug || "").toLowerCase());
+  return o ? o.product_id : null;
+}
+export async function insertProduct(env, { id, key, name, category, slug, public_name = null, description = null, sort_order = 0, show_on_pricing = 1, show_in_site_creation = 1, template_line = "casino" }) {
+  await env.LUMMET_DB.prepare(
+    `INSERT INTO products (id, key, name, category, status, slug, public_name, description, sort_order, show_on_pricing, show_in_site_creation, template_line, updated_at)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+  ).bind(id, key, name, category, slug, public_name, description, sort_order, show_on_pricing, show_in_site_creation, template_line).run();
+}
+const PRODUCT_COLUMNS = new Set(["name", "status", "public_name", "slug", "description", "sort_order", "show_on_pricing", "show_in_site_creation"]);
+/** Updates the given columns; when the slug changes the old one goes to the history table in the same batch. */
+export async function updateProduct(env, id, fields) {
+  const keys = Object.keys(fields).filter((k) => PRODUCT_COLUMNS.has(k));
+  if (!keys.length) return;
+  const stmts = [];
+  if (fields.slug !== undefined) {
+    const cur = await env.LUMMET_DB.prepare(`SELECT slug FROM products WHERE id = ?`).bind(id).first();
+    if (cur?.slug && cur.slug !== fields.slug) stmts.push(env.LUMMET_DB.prepare(`INSERT OR IGNORE INTO product_slug_history (slug, product_id) VALUES (?, ?)`).bind(cur.slug, id));
+  }
+  stmts.push(env.LUMMET_DB.prepare(`UPDATE products SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(...keys.map((k) => fields[k]), id));
+  await env.LUMMET_DB.batch(stmts);
+}
+/** Draft/retired and live plans of a family (for the clone action and the delete guard). */
+export async function plansOfProduct(env, productId) {
+  return (await env.LUMMET_DB.prepare(`SELECT id, key, name, billing_period, trial_days, currency, status, sort_order, is_featured, tagline, description, cta_label FROM plans WHERE product_id = ? ORDER BY sort_order, price_cents, id`).bind(productId).all()).results || [];
 }
 
 // ---- plan rows ----

@@ -10,15 +10,18 @@
 // =====================================================
 
 import { notify } from "./billing-notifications.js";
+import { listActiveProducts } from "./repositories/products.js";
 import { effectiveTrialDays, withEffectiveTrial } from "./billing-config.js";
 import * as repo from "./repositories/billing-lifecycle.js";
 import { checkTrialByDomain, recordTrialByDomain } from "./trial-abuse.js";
 
-export async function listProducts(env) {
-  const result = await env.LUMMET_DB.prepare(
-    `SELECT * FROM products WHERE status = 'active' ORDER BY category, name`
-  ).all();
-  return result.results || [];
+/**
+ * Active products. scope: "all" (default, the original behaviour), "site_types" (what a customer can pick when creating a
+ * site) or "plan_families" (what is sold as a plan). The visible name is the public name when staff set one. If the
+ * migration that adds these switches is not applied yet, every scope falls back to the original query.
+ */
+export async function listProducts(env, { scope = "all" } = {}) {
+  return listActiveProducts(env, scope);
 }
 
 export async function listPlans(env, productId) {

@@ -400,7 +400,7 @@ export function pricingGroups(plans, period, ui = {}) {
     if (monthly && monthly.price_cents * 12 > p.price_cents) {
       saving = (ui.pricing_saving || "Save {pct}% compared with paying monthly").replace("{pct}", String(Math.round((1 - p.price_cents / (monthly.price_cents * 12)) * 100)));
     }
-    if (!groups.has(p.product_id)) groups.set(p.product_id, { id: String(p.product_id), name: p.product_name, category: p.category || "", plans: [] });
+    if (!groups.has(p.product_id)) groups.set(p.product_id, { id: String(p.product_id), slug: p.product_slug || String(p.product_id), name: p.product_name, description: p.product_description || "", category: p.category || "", plans: [] });
     groups.get(p.product_id).plans.push({
       name: base,
       price_cents: p.price_cents,
@@ -448,12 +448,22 @@ function pricingOffersLd(groups, period) {
   return offers.length ? [{ "@type": "ItemList", name: "Plans", itemListElement: offers.map((o, i) => ({ "@type": "ListItem", position: i + 1, item: o })) }] : [];
 }
 
+/** ?family=<slug> -> the family's id, also for an old slug after a rename (product_slug_history). "" when absent or unknown. */
+async function resolveFocusFamily(ctx, groups) {
+  const wanted = String(ctx.url.searchParams.get("family") || "").toLowerCase().slice(0, 64);
+  if (!wanted || groups.length < 2) return "";
+  const direct = groups.find((g) => g.slug === wanted);
+  if (direct) return direct.id;
+  try { const id = await pricingRepo.resolveFamilySlug(ctx.env, wanted); return groups.some((g) => g.id === id) ? id : ""; } catch { return ""; }
+}
+
 export async function pricingPage(ctx) {
   const { site, settings, ui } = ctx.siteCtx;
   const plans = withEffectiveTrial(ctx.env, await pricingRepo.listPricing(ctx.env, { requirePrice: cardRequiredTrial(ctx.env) }));
   const hasAnnual = plans.some((p) => p.billing_period === "annual");
   const period = hasAnnual && ctx.url.searchParams.get("billing") === "annual" ? "annual" : "monthly";
   const groups = pricingGroups(plans, period, ui);
+  const focusFamily = await resolveFocusFamily(ctx, groups);
   const heading = intro(settings, "pricing", ui.title_pricing || "Pricing");
   const description = heading.intro || `Plans and prices for ${site.name}.`;
   const head = buildHead({
@@ -472,7 +482,9 @@ export async function pricingPage(ctx) {
     template: "pricing",
     data: {
       ...heading, intro: description, groups, has_groups: groups.length > 0, has_annual: hasAnnual, monthly: period === "monthly", annual: period === "annual",
-      families: groups.map((g) => ({ id: g.id, name: g.name })),
+      families: groups.map((g) => ({ id: g.id, slug: g.slug, name: g.name, selected: g.id === focusFamily })),
+      multi_family: groups.length > 1,
+      focus_family: focusFamily,
       comparisonPlans: groups.flatMap((g) => g.plans.map((plan) => ({ ...plan, family: g.name }))),
       crumbs: crumbs([crumb(ui.crumb_home, "/"), crumb(heading.title, "/pricing")])
     },

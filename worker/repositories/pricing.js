@@ -5,14 +5,25 @@ const PRICING_KEYS = ["sites.max", "domains.custom.max", "users.max", "ai.credit
 
 /** Active, priced, recurring plans of active products, with the entitlements the pricing page lists. */
 export async function listPricing(env, { requirePrice = false } = {}) {
-  const plans = (await env.LUMMET_DB.prepare(
-    `SELECT p.id, p.name, p.billing_period, p.price_cents, p.currency, p.trial_days, pr.id AS product_id, pr.name AS product_name, pr.category
-       FROM plans p JOIN products pr ON pr.id = p.product_id
-      WHERE p.status = 'active' AND pr.status = 'active' AND p.price_cents IS NOT NULL AND p.price_cents > 0
-        AND p.billing_period IN ('monthly', 'annual')
-        ${requirePrice ? "AND EXISTS (SELECT 1 FROM plan_prices pp WHERE pp.plan_id = p.id AND pp.active = 1 AND pp.stripe_price_id IS NOT NULL)" : ""}
-      ORDER BY pr.category, pr.name, p.price_cents, p.id`
-  ).all()).results;
+  const priced = requirePrice ? "AND EXISTS (SELECT 1 FROM plan_prices pp WHERE pp.plan_id = p.id AND pp.active = 1 AND pp.stripe_price_id IS NOT NULL)" : "";
+  let plans;
+  try {
+    // Plan families staff chose to show, under their public name and slug, in staff order (migration 0089).
+    plans = (await env.LUMMET_DB.prepare(
+      `SELECT p.id, p.name, p.billing_period, p.price_cents, p.currency, p.trial_days, pr.id AS product_id, COALESCE(pr.public_name, pr.name) AS product_name,
+              pr.slug AS product_slug, pr.description AS product_description, pr.sort_order AS product_order, pr.category
+         FROM plans p JOIN products pr ON pr.id = p.product_id
+        WHERE p.status = 'active' AND pr.status = 'active' AND pr.show_on_pricing = 1 AND p.price_cents IS NOT NULL AND p.price_cents > 0 ${priced}
+        ORDER BY pr.sort_order, pr.category, COALESCE(pr.public_name, pr.name), p.price_cents, p.id`
+    ).all()).results;
+  } catch {
+    plans = (await env.LUMMET_DB.prepare(
+      `SELECT p.id, p.name, p.billing_period, p.price_cents, p.currency, p.trial_days, pr.id AS product_id, pr.name AS product_name, pr.category
+         FROM plans p JOIN products pr ON pr.id = p.product_id
+        WHERE p.status = 'active' AND pr.status = 'active' AND p.price_cents IS NOT NULL AND p.price_cents > 0 ${priced}
+        ORDER BY pr.category, pr.name, p.price_cents, p.id`
+    ).all()).results;
+  }
   if (!plans.length) return [];
   const marks = PRICING_KEYS.map(() => "?").join(",");
   const ents = (await env.LUMMET_DB.prepare(
@@ -57,4 +68,12 @@ async function pricingExtras(env, ids) {
     return new Map();
   }
   return out;
+}
+
+/** Product id for a family slug, following renamed slugs (migration 0089). null when unknown. */
+export async function resolveFamilySlug(env, slug) {
+  const cur = await env.LUMMET_DB.prepare(`SELECT id FROM products WHERE slug = ?`).bind(slug).first();
+  if (cur) return cur.id;
+  const old = await env.LUMMET_DB.prepare(`SELECT product_id FROM product_slug_history WHERE slug = ?`).bind(slug).first();
+  return old ? old.product_id : null;
 }

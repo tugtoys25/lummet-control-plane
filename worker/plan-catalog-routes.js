@@ -170,6 +170,8 @@ export async function handlePlanCatalogRoute({ env, request, url, method, path, 
     await audit("product", r.productId || "none", "create", r);
     return reply(r, r.ok ? { productId: r.productId } : {});
   }
+  const clone = matchPath(`${base}/products/:id/clone`, path);
+  if (clone) { const r = await catalog.cloneFamily(env, clone.id, await body()); await audit("product", r.productId || clone.id, "clone", r); return reply(r, r.ok ? { productId: r.productId, planIds: r.planIds } : {}); }
   const prod = matchPath(`${base}/products/:id`, path);
   if (prod) { const r = await catalog.updateProduct(env, prod.id, await body()); await audit("product", prod.id, "update", r); return reply(r); }
 

@@ -1,6 +1,6 @@
 {
   "note": "Direct .prepare( calls per file outside worker/repositories. May only go down. See worker/repositories/README.md.",
-  "total": 490,
+  "total": 489,
   "files": {
     "worker/ai-credits.js": 8,
     "worker/ai-gateway.js": 1,
@@ -29,7 +29,7 @@
     "worker/organizations.js": 26,
     "worker/phase3-source-of-truth.js": 16,
     "worker/plan-change-guard.js": 4,
-    "worker/plans.js": 6,
+    "worker/plans.js": 5,
     "worker/provisioning.js": 3,
     "worker/rbac.js": 8,
     "worker/registry.js": 14,

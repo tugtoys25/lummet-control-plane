@@ -303,3 +303,98 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
   .brand-marquee-dup, .brand-strip-pause { display: none; }
   .brand-chip { transition: none; }
 }
+
+/* =====================================================
+   ENTERPRISE LAYER (2.7.2) — loaded last, wins over the rules above.
+   Reference traits (Stripe, Cloudflare, Google/Material, Tesla, Canva, eBay, Amazon, Stake):
+   neutral canvas, a single blue accent, hairline borders, 6-12px radii, flat shadows, solid
+   fills, one grotesque type family, no gradient text, no glow, no glass blur, no grid wash.
+   ===================================================== */
+body { font-size: 1rem; line-height: 1.6; }
+h1, h2, h3, h4 { letter-spacing: -0.02em; line-height: 1.15; font-weight: 700; }
+h1 { letter-spacing: -0.03em; line-height: 1.08; }
+a:hover { text-decoration-thickness: 1px; }
+
+/* Header: solid white bar, hairline rule, square brand mark */
+.site-header { background: var(--header-bg); backdrop-filter: none; -webkit-backdrop-filter: none; border-bottom: 1px solid var(--border); }
+.site-header.is-scrolled { box-shadow: none; }
+.brand { font-size: 1.15rem; letter-spacing: -0.02em; }
+.brand-mark { width: 24px; height: 24px; border-radius: 6px; background: var(--accent); box-shadow: none; }
+.brand-mark::after { inset: 7px; border-radius: 2px; background: #fff; }
+.bar-links a:not(.btn) { font-weight: 500; padding: 8px 12px; border-radius: 6px; }
+.bar-links a:not(.btn):hover, .bar-links a[aria-current="page"] { background: var(--bg-soft); color: var(--ink); }
+.bar-links a[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--accent); border-radius: 6px 6px 0 0; }
+.icon-btn { width: 40px; height: 40px; border-radius: 8px; }
+.mobile-menu nav > a:not(.btn) { font-family: var(--font-sans); font-weight: 500; font-size: 1.05rem; letter-spacing: 0; }
+@media (min-width: 900px) { .mobile-menu { border-radius: 12px; box-shadow: var(--shadow-lg); } }
+
+/* Buttons: rectangular, solid, no lift, no glow */
+.btn { font-weight: 600; border-radius: 8px; padding: 11px 18px; transition: background-color .15s, border-color .15s, color .15s; }
+.btn:hover svg { transform: none; }
+.btn-lg { padding: 14px 24px; font-size: var(--fs-base); }
+.btn-sm { padding: 8px 14px; }
+.btn-primary { background: var(--accent); box-shadow: none; }
+.btn-primary:hover { transform: none; box-shadow: none; background: var(--accent-ink); color: #fff; }
+.btn-secondary { box-shadow: none; }
+.btn-secondary:hover { transform: none; border-color: var(--ink-faint); background: var(--bg-soft); color: var(--ink); }
+.btn-light { box-shadow: none; }
+.btn-light:hover, .btn-outline-light:hover { transform: none; }
+.btn-outline-light { background: transparent; border-color: rgba(255,255,255,0.4); }
+.pricing-plan:not(.is-featured) .btn-primary:hover { box-shadow: none; background: var(--accent-ink); }
+
+/* Eyebrows, badges, chips: quiet text labels instead of glowing pills */
+.eyebrow { letter-spacing: 0.08em; font-weight: 600; }
+.eyebrow-pill { padding: 0; background: none; border: 0; border-radius: 0; letter-spacing: 0.08em; }
+.eyebrow-pill::before { display: none; }
+.badge, .plan-label, .plan-trial { border-radius: 4px; font-weight: 600; }
+.chip { border-radius: 8px; font-weight: 500; }
+
+/* Cards: hairline border, 8-12px radius, hover = border change only */
+.card, .feature, .plan, .insight-card, .update-card, .partner-card, .brand-card, .pricing-plan, .contact-card, .form-card { box-shadow: none; }
+.contact-card, .form-card { border-radius: 12px; }
+.card:hover, .feature:hover, .insight-card:hover, .update-card:hover, .partner-card:hover, .brand-card:hover { transform: none; box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+.icon-tile { width: 40px; height: 40px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); box-shadow: none; }
+.brand-initials { border-radius: 8px; }
+.split-media, .article-image { box-shadow: none; border: 1px solid var(--border); border-radius: 12px; }
+
+/* Stats and steps: solid numerals, no gradient fill */
+.step-no, .stat dd { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--ink); letter-spacing: -0.03em; }
+.step-no { color: var(--accent); }
+
+/* Dark band (panel): solid near-black, no glow, no glass */
+.panel { background: var(--dark-1); border: 0; box-shadow: none; border-radius: 12px; }
+.panel-glow { display: none; }
+.panel .eyebrow { color: #9db8ff; }
+.panel-item { background: rgba(255,255,255,0.04); backdrop-filter: none; border-radius: 8px; }
+.panel-item .icon-tile { background: rgba(255,255,255,0.1); color: #fff; }
+.panel-foot .btn-primary { box-shadow: none; }
+
+/* CTA band: solid brand blue, no grid wash */
+.cta-band { background: var(--accent); box-shadow: none; border-radius: 12px; }
+.cta-band::after { display: none; }
+.cta-band .btn-light { color: var(--accent-ink); }
+
+/* Pricing: featured plan = 2px accent border, label is a flat tag */
+.pricing-toolbar .filter-bar { border-radius: 8px; }
+.pricing-plan { border-radius: 12px; }
+.pricing-plan.is-featured { border: 2px solid var(--accent); background: var(--surface); box-shadow: none; }
+.plan-flag { background: var(--accent); border-radius: 4px; font-weight: 600; letter-spacing: 0.02em; }
+
+/* Brand strip: plain strip, flat chips */
+.brand-strip { background: var(--bg-soft); }
+.brand-strip::before { display: none; }
+.brand-strip-dot { background: var(--accent); box-shadow: none; }
+.brand-chip { border-radius: 8px; }
+.brand-chip-mark { background: var(--chip, var(--accent)); border-radius: 6px; }
+
+/* Footer: solid dark, no radial glow, flat CTA row */
+.site-footer { background: var(--dark-1); padding-top: var(--space-7); }
+.site-footer::before { display: none; }
+.footer-cta { background: transparent; backdrop-filter: none; border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; }
+.footer-col h2 { letter-spacing: 0.08em; font-weight: 600; }
+
+/* Forms */
+input, select, textarea { border-radius: 8px; }
+:focus-visible { outline-width: 2px; outline-offset: 2px; border-radius: 4px; }
+.feature-card:hover, a.card:hover { transform: none; box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+.step-card { box-shadow: none; }

@@ -10,6 +10,7 @@
 // =====================================================
 import { escapeHtml } from "../customer-layout.js";
 import { nonceToken, onClick } from "../../csp.js";
+import { liveAttrs, DEPLOYMENT_TRANSIENT } from "../../live.js";
 
 const STATUS_LABEL = {
   queued: "Queued",
@@ -81,23 +82,40 @@ function siteCard(site, deployments, latestVersion, canManage) {
     </div>`;
 }
 
-export function renderDeploymentsPage({ sites, deploymentsBySite, latestVersion, latestByLine = null, canManage }) {
-  const cards = sites.length
+/** The site cards. Used by the page and by the live-cards endpoint, so a refresh can never show something the page would not. */
+export function renderDeploymentCards({ sites, deploymentsBySite, latestVersion, latestByLine = null, canManage }) {
+  return sites.length
     ? sites.map((s) => siteCard(s, deploymentsBySite[s.id] || [], (latestByLine && latestByLine[s.template_line || "casino"]) || latestVersion, canManage)).join("")
     : `<div class="card"><p class="empty">Create a site first. Its deployments will show up here.</p></div>`;
+}
+
+/** True while any deployment is in flight (queued, building, migrating, deploying, checking): the page refreshes itself quickly. */
+export function deploymentsAreBusy(deploymentsBySite) {
+  return Object.values(deploymentsBySite || {}).some((list) => (list || []).some((d) => DEPLOYMENT_TRANSIENT.has(d.status)));
+}
+
+export function renderDeploymentsPage({ sites, deploymentsBySite, latestVersion, latestByLine = null, canManage, organizationId = null }) {
+  const cards = renderDeploymentCards({ sites, deploymentsBySite, latestVersion, latestByLine, canManage });
+  const liveSrc = organizationId ? `/api/organizations/${encodeURIComponent(organizationId)}/deployments/live-cards` : null;
 
   return `
     <h1>Deployments</h1>
     <p class="subtitle">See what version each site runs, update to the latest release, or go back to an earlier working version.</p>
-    ${cards}
+    <div id="deployments-live"${liveSrc ? liveAttrs(liveSrc, cards) : ""}>${cards}</div>
     <script nonce="${nonceToken()}">
       function lummetActiveOrgId() { var el = document.getElementById('org-switcher'); return el ? el.value : null; }
+
+      // After an action, fetch the cards again right now (no page reload, no flash); fall back to a reload without the live runtime.
+      function lummetRefreshCards() {
+        var box = document.getElementById('deployments-live');
+        if (window.lummetLiveRefresh && box && box.getAttribute('data-live-src')) { window.lummetLiveRefresh(box); } else { location.reload(); }
+      }
 
       function lummetDeployPost(url, body, done) {
         fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
           .then(function (r) { return r.json(); })
           .then(function (data) {
-            if (data.success) location.reload();
+            if (data.success) lummetRefreshCards();
             else alert(done + ': ' + (data.error || 'unknown error'));
           });
       }

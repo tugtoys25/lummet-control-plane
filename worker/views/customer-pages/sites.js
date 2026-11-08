@@ -1,5 +1,6 @@
 import { escapeHtml } from "../customer-layout.js";
 import { nonceToken, onClick } from "../../csp.js";
+import { liveAttrs, SITE_TRANSIENT } from "../../live.js";
 
 // A site can be deleted from any state except deleting/deleted, including one stuck in provisioning (its other jobs are cancelled first).
 const DELETABLE = new Set(["pending", "provisioning", "provisioned", "configuring", "deploying", "active", "suspended", "maintenance", "failed"]);
@@ -70,9 +71,10 @@ function setupSection(options, products) {
           <p id="site-setup-help" class="subtitle">A starting point decides which parts of the site are switched on (for example news only, or a casino list). You can change everything later in the site's Configuration. If you copy one of your own sites, its settings are copied, not its content or accounts.</p>`;
 }
 
-export function renderSitesPage({ sites, products, canManage, setupOptions = null, setupViews = null, platformDomains = [], siteHosts = {} }) {
+/** The table rows. Used by the page and by the live-rows endpoint, so a refresh can never show something the page would not. */
+export function renderSiteRows({ sites, canManage, setupViews = null, siteHosts = {} }) {
   const views = setupViews && typeof setupViews === "object" ? setupViews : {};
-  const rows = sites.length
+  return sites.length
     ? sites
         .map((site) => {
           const setup = describeSetup(Object.prototype.hasOwnProperty.call(views, site.id) ? views[site.id] : null, site.status);
@@ -90,6 +92,17 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
         })
         .join("")
     : `<tr><td colspan="7" class="empty">No sites yet — create one below.</td></tr>`;
+}
+
+/** True while any site is in flight (being set up, deployed or deleted) or has a first setup waiting to apply: the page refreshes itself quickly. */
+export function sitesAreBusy(sites, setupViews = null) {
+  const views = setupViews && typeof setupViews === "object" ? setupViews : {};
+  return sites.some((s) => SITE_TRANSIENT.has(s.status) || (s.status === "active" && views[s.id]?.status === "pending"));
+}
+
+export function renderSitesPage({ sites, products, canManage, setupOptions = null, setupViews = null, platformDomains = [], siteHosts = {}, organizationId = null }) {
+  const rows = renderSiteRows({ sites, canManage, setupViews, siteHosts });
+  const liveSrc = organizationId ? `/api/organizations/${encodeURIComponent(organizationId)}/sites/live-rows` : null;
 
   const productOptions = products
     .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`)
@@ -152,7 +165,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
     <div class="card">
       <table>
         <thead><tr><th>Name</th><th>Product</th><th>Status</th><th>Domain</th><th>Version</th><th>Setup</th><th>Actions</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody id="sites-live"${liveSrc ? liveAttrs(liveSrc, rows) : ""}>${rows}</tbody>
       </table>
     </div>
 
@@ -169,7 +182,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
         fetch('/api/organizations/' + lummetActiveOrgId() + '/sites/' + siteId + '/provision', { method: 'POST' })
           .then(function (r) { return r.json(); })
           .then(function (data) {
-            if (data.success) { location.reload(); }
+            if (data.success) { lummetRefreshRows(); }
             else { alert('Could not start provisioning: ' + (data.error || 'unknown error')); }
           });
       }
@@ -178,7 +191,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
         fetch('/api/organizations/' + lummetActiveOrgId() + '/sites/' + siteId + '/retry-provisioning', { method: 'POST' })
           .then(function (r) { return r.json(); })
           .then(function (data) {
-            if (data.success) { location.reload(); }
+            if (data.success) { lummetRefreshRows(); }
             else { alert('Could not retry provisioning: ' + (data.error || 'unknown error')); }
           });
       }
@@ -187,7 +200,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
         fetch('/api/organizations/' + lummetActiveOrgId() + '/sites/' + siteId + '/setup/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then(function (r) { return r.json(); })
           .then(function (data) {
-            if (data.success) { location.reload(); }
+            if (data.success) { lummetRefreshRows(); }
             else { alert('Could not retry the setup: ' + (data.error || 'unknown error')); }
           });
       }
@@ -361,19 +374,24 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
               if (data.success) {
                 close();
                 if (data.requiresApproval) { alert('Deletion requested. Another admin of this organization must approve it before anything is removed.'); }
-                location.reload();
+                lummetRefreshRows();
               } else { err.textContent = MSG[data.error] || ('Could not delete the site: ' + (data.error || 'unknown error')); go.disabled = false; }
             })
             .catch(function () { err.textContent = 'Could not reach the server. Try again.'; go.disabled = false; });
         });
       })();
 
+      // After an action, fetch the rows again right now (no page reload, no flash); fall back to a reload if the live runtime is missing.
+      function lummetRefreshRows() {
+        var tb = document.getElementById('sites-live');
+        if (window.lummetLiveRefresh && tb && tb.getAttribute('data-live-src')) { window.lummetLiveRefresh(tb); } else { location.reload(); }
+      }
       // ---- Pause / resume a live site (a pause takes it offline without deleting anything). ----
       var PAUSE_MSG = { already_paused: 'This site is already paused.', site_not_live: 'Only a live site can be paused.', suspended_by_lummet: 'Lummet suspended this site, so it cannot be resumed here. Contact support.', organization_not_active: 'Your organization is not active, so sites cannot be resumed. Check billing.', not_paused: 'This site is not paused.', site_not_found: 'This site no longer exists.' };
       function lummetSiteAction(siteId, action, okReload) {
         return fetch('/api/organizations/' + lummetActiveOrgId() + '/sites/' + encodeURIComponent(siteId) + '/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then(function (r) { return r.json(); })
-          .then(function (data) { if (data.success) { if (okReload) { location.reload(); } } else { alert(PAUSE_MSG[data.error] || ('Could not complete that: ' + (data.error || 'unknown error'))); } })
+          .then(function (data) { if (data.success) { if (okReload) { lummetRefreshRows(); } } else { alert(PAUSE_MSG[data.error] || ('Could not complete that: ' + (data.error || 'unknown error'))); } })
           .catch(function () { alert('Could not reach the server. Try again.'); });
       }
       function lummetPauseSite(siteId, siteName) {

@@ -15,6 +15,7 @@
 import * as sites from "./sites.js";
 import * as cloudflareProvider from "./infra-cloudflare.js";
 import * as resourcesRepo from "./repositories/site-resources.js";
+import * as releaseRepo from "./repositories/tenant-releases.js";
 
 export const MIN_PASSWORD_LENGTH = 12;
 export const MAX_PASSWORD_LENGTH = 200;
@@ -43,6 +44,9 @@ export function createTenantAdminService(infra) {
     const site = await sites.getSite(env, siteId);
     if (!site || site.organization_id !== organizationId) return { ok: false, status: 404, error: "not_found" };
     if (site.status !== "active" || !site.tenant_id) return { ok: false, status: 409, error: "site_not_live" };
+    // A brokerage site is a different application with its own database layout: its first administrator is created from Admin setup
+    // on the Deployments tab (a one-time code), never by writing a casino-style dashboard login into its database.
+    if ((await releaseRepo.lineOfSite(env, siteId)) === "brokerage") return { ok: false, status: 409, error: "use_admin_setup" };
 
     const d1 = await resourcesRepo.findActiveResource(env, siteId, "d1");
     if (!d1) return { ok: false, status: 409, error: "site_has_no_database" };

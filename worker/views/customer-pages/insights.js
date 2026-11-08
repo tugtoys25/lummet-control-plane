@@ -217,6 +217,18 @@ export function renderInsightContent({ sites, email, canManage }) {
   const rows = sites.map((s) => {
     const live = s.tenant_id && s.status === "active" && s.primary_domain;
     const base = live ? `https://${s.primary_domain}` : null;
+    // A brokerage site is a different application: it has no /en/dashboard and no dashboard password. Its first administrator is created
+    // from the Admin setup on the Deployments tab (a one-time setup code), so this row points there instead of offering a password field.
+    if (s.template_line === "brokerage") {
+      const links = base
+        ? `<a href="${e(base)}/admin/login" rel="noopener" target="_blank">Open admin</a> · <a href="${e(base)}/" rel="noopener" target="_blank">View site</a>`
+        : "Available when the site is live";
+      const guide = base && canManage
+        ? `<p class="subtitle">This is a brokerage site. Its administrator account is created from <strong>Admin setup</strong> on the Deployments tab, not with a password here.</p>
+           <p><a class="btn" href="/app/deployments">Go to Deployments</a></p>`
+        : "";
+      return `<tr><td>${e(s.name)}</td><td>${e(s.status)}</td><td>${links}${guide}</td></tr>`;
+    }
     const links = base
       ? `<a href="${e(base)}/en/dashboard" rel="noopener" target="_blank">Open dashboard</a> · <a href="${e(base)}/en/" rel="noopener" target="_blank">View site</a>`
       : "Available when the site is live";
@@ -231,7 +243,7 @@ export function renderInsightContent({ sites, email, canManage }) {
   <p class="subtitle">Pages, news, reviews, SEO, media and affiliate content are edited in each site's own dashboard.</p>
   <div class="card">${sites.length ? `<table><thead><tr><th>Site</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : "<p>You have no sites yet.</p>"}</div>
   <p class="subtitle">${canManage
-    ? `Sign in to a site's dashboard with <strong>${e(email || "your email address")}</strong> and the password you set here. Setting it again replaces the password and signs you out of that dashboard.`
+    ? `Sign in to a site's dashboard with <strong>${e(email || "your email address")}</strong> and the password you set here. Setting it again replaces the password and signs you out of that dashboard.${sites.some((x) => x.template_line === "brokerage") ? " Brokerage sites are set up from the Deployments tab instead." : ""}`
     : "Ask an organization admin to set up your dashboard access."}</p>
   <script nonce="${nonceToken()}">${SHARED_SCRIPT}
     function lummetSetDashboardPassword(form, siteId) {

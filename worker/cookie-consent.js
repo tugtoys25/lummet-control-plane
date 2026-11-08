@@ -69,7 +69,7 @@ const CSS = `
 .lummet-cookie__text a{color:inherit;font-weight:700;text-decoration:underline;margin-left:8px}
 .lummet-cookie__actions{display:flex;flex-wrap:wrap;gap:10px;flex:0 0 auto}
 .lummet-cookie__btn{font:inherit;font-weight:700;min-height:40px;padding:9px 18px;border-radius:999px;cursor:pointer;border:1px solid var(--border-strong,rgba(128,128,128,.5));background:transparent;color:inherit}
-.lummet-cookie__btn--primary{border-color:transparent;color:#fff;background:var(--grad,var(--accent,#5b47f5))}
+.lummet-cookie__btn--primary{border-color:transparent;color:#fff;background:var(--grad,var(--accent,#1a56db))}
 .lummet-cookie__btn:focus-visible{outline:3px solid var(--accent-soft,rgba(91,71,245,.35));outline-offset:2px}
 .lummet-cookie-settings{font:inherit;background:none;border:0;padding:0;margin:0 0 0 14px;color:inherit;text-decoration:underline;cursor:pointer;opacity:.85}
 @media (max-width:520px){.lummet-cookie{left:8px;right:8px;bottom:8px}.lummet-cookie__actions{width:100%}.lummet-cookie__btn{flex:1}}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.2 - Enterprise look: neutral canvas, one accent, flat surfaces
+
+Visual-only; no routes, data, migrations or behaviour change. Reference traits taken from Stripe, Cloudflare, Google/Material, Tesla, Canva, eBay, Amazon and Stake: neutral canvas, a single blue accent, hairline borders, small radii, flat shadows, one grotesque type family.
+
+- **Tokens** (`public/static/css/tokens.css`): accent is one blue (`#1a56db`, dark `#5b9bff`); `--grad`, `--grad-text` and `--accent-glow` are now solid/transparent so every existing rule that used them renders flat. Neutral slate greys replace the violet-tinted greys. Radii 6/8/12 px (pill radius is now 8 px). Shadows are 1-2 px hairlines. Display and body both use Instrument Sans; Bricolage Grotesque is no longer loaded or preloaded.
+- **Enterprise layer**: end of `components.css` (shared by public pages and customer auth pages) and end of `pages.css` (hero and page headers): solid white header with hairline rule and square brand mark, rectangular buttons with no lift or glow, text eyebrows instead of glowing pills, hero without radial halos or grid wash, flat dark band and solid-blue CTA band, 2 px accent border for the featured plan, plain brand strip, solid footer without glow.
+- **Dashboards** (`worker/views/shell-assets.js`): same palette (slate neutrals, blue accent), solid buttons and avatars, flat solid top bar (no blur, no gradient hairline), flat brand-partner cards.
+- `ASSET_VERSION` bumped to `ui9`; `config/asset-version.lock.json` re-recorded.
+
 ## 2.7.1 - Template lines: brokerage (luminousagents) as the second tenant application
 
 - A product now runs on a **template line** (`products.template_line`): `casino` (lummet-tenant, every existing product) or `brokerage` (luminousagents). Releases, rollouts, auto-deploy, bindings, cron schedule and health URL are all per line; see docs/TENANT_RELEASES.md.

@@ -2,7 +2,7 @@
 // AUTH SHELL (release 2.6.0.23, extended in 2.6.0.24)
 //
 // Log in / Create account for the customer portal, in the same look as the public site (2.6.0.20). It loads the public
-// design tokens (colors, Bricolage Grotesque + Instrument Sans, radii) from /static/css/tokens.css and adds a small inline
+// design tokens (colors, Instrument Sans, radii) from /static/css/tokens.css and adds a small inline
 // stylesheet for the auth card only. Since 2.6.0.24 every sign-in style page uses it: customer login/signup, forgot/reset/verify/invitation, 2FA enroll, IP-denied and the
 // staff console login (renderAuthShell in layout.js delegates here with audience "staff").
 //
@@ -29,10 +29,10 @@ const AUTH_CSS = `
   html { -webkit-text-size-adjust: 100%; }
   body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center;
     padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); font-family: var(--font-sans); font-size: 1rem; line-height: 1.5;
-    color: var(--ink); background: radial-gradient(900px 520px at 50% -8%, var(--accent-soft), transparent 70%), var(--bg-soft); }
+    color: var(--ink); background: var(--bg-soft); }
   .auth-brand { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 22px; font-family: var(--font-display); font-weight: 700; font-size: 1.6rem;
     letter-spacing: -0.02em; color: var(--ink); text-decoration: none; }
-  .auth-brand .dot { width: 30px; height: 30px; border-radius: 9px; background: var(--grad); box-shadow: 0 6px 18px -6px var(--accent-glow); }
+  .auth-brand .dot { width: 30px; height: 30px; border-radius: 6px; background: var(--accent); }
   .auth-card { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg); padding: 32px 28px 26px; }
   .auth-card h1 { margin: 0 0 6px; font-family: var(--font-display); font-weight: 700; font-size: 1.65rem; line-height: 1.15; letter-spacing: -0.02em; }
@@ -103,7 +103,6 @@ export function renderCustomerAuthShell({ title, bodyHtml, audience = "customer"
   <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
   ${chrome ? `<script nonce="${nonceToken()}" src="/static/js/theme.js?v=${ASSET_VERSION}"></script>` : `<script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>`}
   <link rel="preload" href="/static/fonts/instrument-400-v1.woff" as="font" type="font/woff" crossorigin />
-  <link rel="preload" href="/static/fonts/bricolage-700-v1.woff" as="font" type="font/woff" crossorigin />
   <link rel="stylesheet" href="/static/css/tokens.css?v=${ASSET_VERSION}" />
   ${chrome ? `<link rel="stylesheet" href="/static/css/base.css?v=${ASSET_VERSION}" />
   <link rel="stylesheet" href="/static/css/components.css?v=${ASSET_VERSION}" />` : ""}

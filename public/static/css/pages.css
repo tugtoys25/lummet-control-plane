@@ -85,3 +85,23 @@
   .timeline-date { text-align: right; padding-top: 22px; position: relative; }
   .timeline-date::after { content: ""; position: absolute; right: -25px; top: 26px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 }
+
+/* ENTERPRISE LAYER (2.7.2), page-specific part; shared rules are at the end of components.css */
+/* Hero: flat white canvas, left aligned, product card on the right, no halos */
+.hero { padding-block: clamp(3rem, 7vw, 6rem) clamp(2.5rem, 6vw, 5rem); border-bottom: 1px solid var(--border); background: var(--bg); }
+.hero-bg { display: none; }
+.hero-copy h1 em, .hero-copy h1 .grad { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--accent); }
+.hero-copy .lede { font-size: clamp(1.05rem, 1rem + 0.35vw, 1.25rem); }
+.hero-note { font-weight: 500; }
+.hero-note li::before { width: 6px; height: 6px; box-shadow: none; }
+.hero-card { background: var(--surface); backdrop-filter: none; box-shadow: var(--shadow-md); border-radius: 12px; }
+.hero-card::before { display: none; }
+.hg-link { animation: none; opacity: 0.5; }
+.hg-hub-halo { display: none; }
+.hg-dot { stroke: var(--accent); }
+
+/* Inner page headers */
+.page-hero { background: var(--bg-soft); border-bottom: 1px solid var(--border); padding-block: clamp(2rem, 5vw, 3.5rem); }
+.page-hero::before { display: none; }
+.page-hero h1 { font-size: clamp(2rem, 1.4rem + 2.4vw, 3rem); }
+

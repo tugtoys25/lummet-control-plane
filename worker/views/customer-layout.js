@@ -208,7 +208,6 @@ export function renderCustomerShell({ title, activeKey, customer, organizations 
   <title>${escapeHtml(title)} · Lummet</title>
   <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
   <link rel="preload" href="/static/fonts/instrument-400-v1.woff" as="font" type="font/woff" crossorigin />
-  <link rel="preload" href="/static/fonts/bricolage-700-v1.woff" as="font" type="font/woff" crossorigin />
   <link rel="stylesheet" href="${PORTAL_CSS_URL}" />
   <script nonce="${nonceToken()}" src="${SHELL_JS_URL}" defer></script>
 </head>

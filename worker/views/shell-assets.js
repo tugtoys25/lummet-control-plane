@@ -1,3 +1,4 @@
+import { LIVE_RUNTIME } from "./live-runtime.js";
 // =====================================================
 // DASHBOARD SHELL ASSETS
 // The stylesheet, icons and small client scripts used by
@@ -189,6 +190,7 @@ export const CLIENT_SCRIPT = `
     if (menu && menu.open && !menu.contains(e.target)) menu.open = false;
   });
 })();
+${LIVE_RUNTIME}
 `;
 
 export const STYLES = `

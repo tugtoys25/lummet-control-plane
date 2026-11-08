@@ -123,7 +123,8 @@ import * as commercialRepo from "./repositories/commercial.js";
 import { renderCustomerShell } from "./views/customer-layout.js";
 import { renderCustomerLoginPage } from "./views/customer-pages/login.js";
 import { renderOverviewPage } from "./views/customer-pages/overview.js";
-import { renderSitesPage } from "./views/customer-pages/sites.js";
+import { renderSitesPage, renderSiteRows, sitesAreBusy } from "./views/customer-pages/sites.js";
+import { liveHash } from "./live.js";
 import { renderSitePresetsPage } from "./views/pages/site-presets-admin.js";
 import { renderAccountPage } from "./views/customer-pages/account.js";
 import { renderBillingPage } from "./views/customer-pages/billing.js";
@@ -133,7 +134,7 @@ import { renderTeamPage } from "./views/customer-pages/team.js";
 import { renderSessionsPage, SESSIONS_PAGE_PATH } from "./views/customer-pages/sessions.js";
 import { handlePlanCatalogRoute } from "./plan-catalog-routes.js";
 import { qrForText } from "./qr.js";
-import { renderDeploymentsPage as renderCustomerDeploymentsPage } from "./views/customer-pages/deployments.js";
+import { renderDeploymentsPage as renderCustomerDeploymentsPage, renderDeploymentCards, deploymentsAreBusy } from "./views/customer-pages/deployments.js";
 import { renderDeveloperPage } from "./views/customer-pages/developer.js";
 import { renderBackupsPage } from "./views/customer-pages/backups.js";
 import { renderAutomationsPage } from "./views/customer-pages/automations.js";
@@ -309,6 +310,32 @@ import {
   submitDeleteHubPage,
   proxyHubEligibleCasinos
 } from "./views/pages/hub-pages.js";
+
+// ---- Data for the pages that refresh themselves (live regions). The page and its live endpoint call the SAME loader and renderer. ----
+async function loadSitesViewData(env, organizationId) {
+  const sitesList = await sites.listSitesForOrganization(env, organizationId);
+  // Independent reads run together; each is fail-open like the page always was.
+  const [setupViews, siteHosts] = await Promise.all([
+    siteSetup.getSetupViewsForOrganization(env, organizationId).catch(() => ({})),
+    platformDomainsModule.hostsForSites(env, sitesList).catch(() => ({}))
+  ]);
+  return { sitesList, setupViews, siteHosts };
+}
+
+/** Every site's deployments at once (it used to be one query after another, per site) and each application line's newest release. */
+async function loadDeploymentsViewData(env, organizationId) {
+  const sitesList = await sites.listSitesForOrganization(env, organizationId);
+  const lineKeys = [...new Set(sitesList.map((s) => s.template_line || "casino"))];
+  const [lists, releases] = await Promise.all([
+    Promise.all(sitesList.map((site) => deployments.listDeploymentsForSite(env, site.id))),
+    Promise.all(lineKeys.map((lineKey) => tenantTemplate.getCurrentRelease(env, lineKey)))
+  ]);
+  const deploymentsBySite = {};
+  sitesList.forEach((site, i) => { deploymentsBySite[site.id] = lists[i]; });
+  const latestByLine = {};
+  lineKeys.forEach((lineKey, i) => { if (releases[i].ok) latestByLine[lineKey] = releases[i].version; });
+  return { sitesList, deploymentsBySite, latestByLine };
+}
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -1843,6 +1870,21 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return json({ success: true, siteId: result.siteId, slug: result.slug, label: result.label, host: result.platformDomain?.host || null, setup: result.setup ? { kind: result.setup.kind, presetId: result.setup.presetId, status: result.setup.status } : null });
           }
 
+          // Live regions (see live.js): the Sites table and the Deployments cards refresh themselves. Any member may read; "canManage" decides whether
+          // action buttons are drawn, exactly as on the page. No caching: this is the current state.
+          if (method === "GET" && subPath === "/sites/live-rows") {
+            const canManageRows = !(await requireOrgRole(organizationId, "admin"));
+            const { sitesList, setupViews, siteHosts } = await loadSitesViewData(env, organizationId);
+            const rowsHtml = renderSiteRows({ sites: sitesList, canManage: canManageRows, setupViews, siteHosts });
+            return json({ success: true, data: { html: rowsHtml, hash: liveHash(rowsHtml), busy: sitesAreBusy(sitesList, setupViews) } }, 200, { "Cache-Control": "no-store" });
+          }
+          if (method === "GET" && subPath === "/deployments/live-cards") {
+            const canManageCards = !(await requireOrgRole(organizationId, "admin"));
+            const { sitesList, deploymentsBySite, latestByLine } = await loadDeploymentsViewData(env, organizationId);
+            const cardsHtml = renderDeploymentCards({ sites: sitesList, deploymentsBySite, latestVersion: latestByLine.casino || null, latestByLine, canManage: canManageCards });
+            return json({ success: true, data: { html: cardsHtml, hash: liveHash(cardsHtml), busy: deploymentsAreBusy(deploymentsBySite) } }, 200, { "Cache-Control": "no-store" });
+          }
+
           // Live address check for the create-site form: is <label>.<domain> free? Any member may ask. It says taken / not taken and
           // offers other words and other domains; it never says who holds an address.
           if (method === "GET" && subPath === "/sites/name-check") {
@@ -3128,23 +3170,26 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
         // Round 6.4C: the active organization's IP allowlist. A denied address sees a plain notice and no organization data; ?org= can still pick
         // another organization of the same person, which is checked on its own list.
-        const portalIpVerdict = await orgSecurityPolicy.evaluateOrgIpAccess(env, request, activeOrgId);
+        // The organization row and the plan's feature flags do not depend on the IP verdict, so they are read at the same time (a denied
+        // visitor simply never uses them); that removes two round trips from the start of every portal page.
+        const [portalIpVerdict, activeOrg, [hasBackups, hasAutomations, analyticsLevel, hasReports, hasAffiliate, hasAlerts, openNotifications]] = await Promise.all([
+          orgSecurityPolicy.evaluateOrgIpAccess(env, request, activeOrgId),
+          organizations.getOrganization(env, activeOrgId),
+          Promise.all([
+            entitlementsService.requireEntitlement(env, activeOrgId, "backups.enabled"),
+            entitlementsService.requireEntitlement(env, activeOrgId, "automations.enabled"),
+            entitlementsService.checkEntitlement(env, activeOrgId, "analytics.level"),
+            entitlementsService.requireEntitlement(env, activeOrgId, "reports.enabled"),
+            entitlementsService.requireEntitlement(env, activeOrgId, "affiliate.enabled"),
+            entitlementsService.requireEntitlement(env, activeOrgId, "alerts.enabled"),
+            notificationsRepo.countOpen(env, activeOrgId)
+          ])
+        ]);
         if (portalIpVerdict.wouldDeny && !portalIpVerdict.denied) console.log(JSON.stringify({ msg: "org_ip_allowlist_would_deny", organizationId: activeOrgId, mode: portalIpVerdict.mode }));
         if (portalIpVerdict.denied) return html(renderOrgIpDeniedPage(), 403, { "Cache-Control": "no-store" });
 
-        const activeOrg = await organizations.getOrganization(env, activeOrgId);
-        // Hide nav links for features this plan doesn't include, so a Starter
-        // customer isn't offered pages that only say "upgrade". Mirrors the
-        // route-level requireEntitlement checks; the routes remain the access control.
-        const [hasBackups, hasAutomations, analyticsLevel, hasReports, hasAffiliate, hasAlerts, openNotifications] = await Promise.all([
-          entitlementsService.requireEntitlement(env, activeOrgId, "backups.enabled"),
-          entitlementsService.requireEntitlement(env, activeOrgId, "automations.enabled"),
-          entitlementsService.checkEntitlement(env, activeOrgId, "analytics.level"),
-          entitlementsService.requireEntitlement(env, activeOrgId, "reports.enabled"),
-          entitlementsService.requireEntitlement(env, activeOrgId, "affiliate.enabled"),
-          entitlementsService.requireEntitlement(env, activeOrgId, "alerts.enabled"),
-          notificationsRepo.countOpen(env, activeOrgId)
-        ]);
+        // Hide nav links for features this plan doesn't include, so a Starter customer isn't offered pages that only say "upgrade".
+        // Mirrors the route-level requireEntitlement checks; the routes remain the access control.
         const hasAnalytics = !!analyticsLevel && analyticsLevel !== "none";
         const portalSessionsMode = customerSessions.sessionAdminMode(env);
         const portalSessionsVisible = portalSessionsMode !== "off" && (myOrgs.find((o) => o.id === activeOrgId) ? roleAtLeast(myOrgs.find((o) => o.id === activeOrgId).my_role, "admin") : false);
@@ -3228,12 +3273,16 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           const domainsBySite = {};
           const zonesBySite = {};
           const subdomainsBySite = {};
-          for (const site of sitesList) {
+          // Three reads per site, for every site at once (it used to be 3 x N round trips, one after another).
+          await Promise.all(sitesList.map(async (site) => {
+            const [list, zones, subs] = await Promise.all([
+              domains.listDomainsForSite(env, site.id), zoneDomains.listForSite(env, site.id), zoneDomains.listSubdomainsForSite(env, site.id)
+            ]);
             // Hostnames served through a delegated zone, and CNAME-connected subdomains, have their own cards.
-            domainsBySite[site.id] = (await domains.listDomainsForSite(env, site.id)).filter((d) => !d.method || d.method === "txt");
-            zonesBySite[site.id] = await zoneDomains.listForSite(env, site.id);
-            subdomainsBySite[site.id] = await zoneDomains.listSubdomainsForSite(env, site.id);
-          }
+            domainsBySite[site.id] = list.filter((d) => !d.method || d.method === "txt");
+            zonesBySite[site.id] = zones;
+            subdomainsBySite[site.id] = subs;
+          }));
           return html(
             shell({
               title: "Domains", activeKey: "domains", customer: portalCustomer,
@@ -3266,20 +3315,13 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         }
 
         if (path === "/app/deployments") {
-          const sitesList = await sites.listSitesForOrganization(env, activeOrgId);
-          const deploymentsBySite = {};
-          for (const site of sitesList) deploymentsBySite[site.id] = await deployments.listDeploymentsForSite(env, site.id);
           // The newest release of each application the organization's sites run (a site is compared with its own line's).
-          const latestByLine = {};
-          for (const lineKey of new Set(sitesList.map((s) => s.template_line || "casino"))) {
-            const found = await tenantTemplate.getCurrentRelease(env, lineKey);
-            if (found.ok) latestByLine[lineKey] = found.version;
-          }
+          const { sitesList, deploymentsBySite, latestByLine } = await loadDeploymentsViewData(env, activeOrgId);
           return html(
             shell({
               title: "Deployments", activeKey: "deployments", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderCustomerDeploymentsPage({ sites: sitesList, deploymentsBySite, latestVersion: latestByLine.casino || null, latestByLine, canManage })
+              bodyHtml: renderCustomerDeploymentsPage({ sites: sitesList, deploymentsBySite, latestVersion: latestByLine.casino || null, latestByLine, canManage, organizationId: activeOrgId })
             })
           );
         }
@@ -3332,24 +3374,20 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         }
 
         if (path === "/app/sites") {
-          const [sitesList, products] = await Promise.all([
-            sites.listSitesForOrganization(env, activeOrgId),
-            plans.listProducts(env, { scope: "site_types" })
+          // Everything the page needs is read together (it used to be four rounds, one after another). Each read is fail-open: if one
+          // fails the page still shows the sites and the plain create form.
+          const [{ sitesList, setupViews, siteHosts }, products, platformDomains] = await Promise.all([
+            loadSitesViewData(env, activeOrgId),
+            plans.listProducts(env, { scope: "site_types" }),
+            platformDomainsModule.customerDomainOptions(env, { organizationId: activeOrgId }).catch(() => [])
           ]);
-          // Phase 10 A2/A3: picker data and the newest setup request per site (one query each). Fail-open: if either read fails,
-          // the page still shows the sites and the plain create form.
-          const [setupOptions, setupViews] = await Promise.all([
-            siteSetup.getSetupOptions(env, { organizationId: activeOrgId, productId: products[0]?.id || null }).catch(() => null),
-            siteSetup.getSetupViewsForOrganization(env, activeOrgId).catch(() => ({}))
-          ]);
-          // Platform domains: the picker (only when there is a choice) and each site's address. Fail-open like the reads above.
-          const platformDomains = await platformDomainsModule.customerDomainOptions(env, { organizationId: activeOrgId }).catch(() => []);
-          const siteHosts = await platformDomainsModule.hostsForSites(env, sitesList).catch(() => ({}));
+          // The create form's starting points depend on the first product, so they follow the product list.
+          const setupOptions = await siteSetup.getSetupOptions(env, { organizationId: activeOrgId, productId: products[0]?.id || null }).catch(() => null);
           return html(
             shell({
               title: "Sites", activeKey: "sites", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderSitesPage({ sites: sitesList, products, canManage, setupOptions, setupViews, platformDomains, siteHosts })
+              bodyHtml: renderSitesPage({ sites: sitesList, products, canManage, setupOptions, setupViews, platformDomains, siteHosts, organizationId: activeOrgId })
             })
           );
         }
@@ -3366,9 +3404,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           let availablePlans = [];
           if (!subscription) {
             const products = await plans.listProducts(env, { scope: "plan_families" });
-            for (const product of products) {
-              availablePlans.push(...(await plans.listPlans(env, product.id)));
-            }
+            for (const planList of await Promise.all(products.map((product) => plans.listPlans(env, product.id)))) availablePlans.push(...planList);
           } else if (plan) {
             availablePlans = (await plans.listPlans(env, plan.product_id)).filter((p) => p.id !== plan.id || !subscription.provider);
           }

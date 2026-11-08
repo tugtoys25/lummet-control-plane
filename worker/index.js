@@ -147,6 +147,7 @@ import * as branding from "./branding.js";
 import * as changeRequests from "./change-requests.js";
 import * as siteLabels from "./site-labels.js";
 import * as siteTeardown from "./site-teardown.js";
+import * as sitePause from "./site-pause.js";
 import { listOrganizationAuditLog } from "./audit-log.js";
 import * as customerSessions from "./customer-sessions.js";
 import * as customerAuditCsv from "./customer-audit-csv.js";
@@ -1898,6 +1899,26 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // itself runs via ctx.waitUntil(), not inline in this
           // request (master prompt section 17).
           // -------------------------------------------
+
+          // Customer pause / resume of a live site (site-pause.js): offline without deleting. A site Lummet suspended cannot be resumed here.
+          const pauseMatch = subPath.match(/^\/sites\/([^/]+)\/(pause|resume)$/);
+          if (method === "POST" && pauseMatch) {
+            const guard = await requireOrgRole(organizationId, "admin");
+            if (guard) return guard;
+            const [, pauseSiteId, pauseAction] = pauseMatch;
+            const body = await request.json().catch(() => ({}));
+            const result = pauseAction === "pause"
+              ? await sitePause.pauseSite(env, { organizationId, siteId: pauseSiteId, actorUserId: customer.id, reason: body.reason })
+              : await sitePause.resumeSite(env, { organizationId, siteId: pauseSiteId, actorUserId: customer.id });
+            await logAudit(env, {
+              actorType: "customer_user", customerUserId: customer.id, organizationId,
+              endpoint: path, method, resource: "site", resourceId: pauseSiteId, action: pauseAction,
+              success: !!result.ok, statusCode: result.ok ? 200 : result.status || 400,
+              errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
+            });
+            if (!result.ok) return json({ success: false, error: result.error, ...(result.currentStatus ? { currentStatus: result.currentStatus } : {}) }, result.status || 400);
+            return json({ success: true });
+          }
 
           const provisionMatch = subPath.match(/^\/sites\/([^/]+)\/(provision|retry-provisioning)$/);
           if (method === "POST" && provisionMatch) {

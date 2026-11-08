@@ -159,7 +159,8 @@ export async function getSite(env, siteId) {
 
 export async function listSitesForOrganization(env, organizationId) {
   const result = await env.LUMMET_DB.prepare(
-    `SELECT s.*, p.name AS product_name, p.category AS product_category, p.template_line AS template_line
+    `SELECT s.*, p.name AS product_name, p.category AS product_category, p.template_line AS template_line,
+            CASE WHEN s.status = 'suspended' THEN (SELECT e.actor_type FROM site_status_events e WHERE e.site_id = s.id AND e.to_status = 'suspended' ORDER BY e.created_at DESC, e.id DESC LIMIT 1) END AS suspended_by
      FROM sites s JOIN products p ON p.id = s.product_id
      WHERE s.organization_id = ? AND s.status != 'deleted'
      ORDER BY s.created_at`

@@ -12,6 +12,13 @@ function actionsFor(site) {
   if (site.status === "failed") {
     actions.push(`<button class="btn"${onClick("lummetRetryProvision", [site.id])}>Retry provisioning</button>`);
   }
+  if (site.status === "active") {
+    actions.push(`<button class="btn"${onClick("lummetPauseSite", [site.id, site.name])}>Pause site</button>`);
+  } else if (site.status === "suspended") {
+    actions.push(site.suspended_by === "customer_user"
+      ? `<button class="btn"${onClick("lummetResumeSite", [site.id])}>Resume site</button>`
+      : `<span class="subtitle">Suspended by Lummet</span>`);
+  }
   if (DELETABLE.has(site.status)) {
     actions.push(`<button class="btn btn-danger"${onClick("lummetOpenDelete", [site.id, site.name, site.primary_domain || ""])}>Delete</button>`);
   } else if (site.status === "deleting") {
@@ -74,7 +81,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
           <tr id="${escapeHtml(site.id)}">
             <td>${escapeHtml(site.name)}</td>
             <td>${escapeHtml(site.product_name || "")}</td>
-            <td><span class="badge badge-${escapeHtml(site.status)}">${escapeHtml(site.status)}</span></td>
+            <td><span class="badge badge-${escapeHtml(site.status)}">${escapeHtml(site.status === "suspended" && site.suspended_by === "customer_user" ? "paused" : site.status)}</span></td>
             <td class="mono">${escapeHtml(site.primary_domain || siteHosts[site.id] || "—")}</td>
             <td>${escapeHtml(site.app_version || "—")}</td>
             <td>${escapeHtml(setup.text)}${retry}</td>
@@ -360,6 +367,19 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
             .catch(function () { err.textContent = 'Could not reach the server. Try again.'; go.disabled = false; });
         });
       })();
+
+      // ---- Pause / resume a live site (a pause takes it offline without deleting anything). ----
+      var PAUSE_MSG = { already_paused: 'This site is already paused.', site_not_live: 'Only a live site can be paused.', suspended_by_lummet: 'Lummet suspended this site, so it cannot be resumed here. Contact support.', organization_not_active: 'Your organization is not active, so sites cannot be resumed. Check billing.', not_paused: 'This site is not paused.', site_not_found: 'This site no longer exists.' };
+      function lummetSiteAction(siteId, action, okReload) {
+        return fetch('/api/organizations/' + lummetActiveOrgId() + '/sites/' + encodeURIComponent(siteId) + '/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+          .then(function (r) { return r.json(); })
+          .then(function (data) { if (data.success) { if (okReload) { location.reload(); } } else { alert(PAUSE_MSG[data.error] || ('Could not complete that: ' + (data.error || 'unknown error'))); } })
+          .catch(function () { alert('Could not reach the server. Try again.'); });
+      }
+      function lummetPauseSite(siteId, siteName) {
+        if (confirm('Pause ' + siteName + '? Visitors will no longer see the site until you resume it. Nothing is deleted.')) { lummetSiteAction(siteId, 'pause', true); }
+      }
+      function lummetResumeSite(siteId) { lummetSiteAction(siteId, 'resume', true); }
     </script>
   `;
 }

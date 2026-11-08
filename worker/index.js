@@ -3334,7 +3334,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (path === "/app/sites") {
           const [sitesList, products] = await Promise.all([
             sites.listSitesForOrganization(env, activeOrgId),
-            plans.listProducts(env)
+            plans.listProducts(env, { scope: "site_types" })
           ]);
           // Phase 10 A2/A3: picker data and the newest setup request per site (one query each). Fail-open: if either read fails,
           // the page still shows the sites and the plain create form.
@@ -3365,7 +3365,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // New customers see every plan; subscribers see the other plans of their own product (to switch).
           let availablePlans = [];
           if (!subscription) {
-            const products = await plans.listProducts(env);
+            const products = await plans.listProducts(env, { scope: "plan_families" });
             for (const product of products) {
               availablePlans.push(...(await plans.listPlans(env, product.id)));
             }

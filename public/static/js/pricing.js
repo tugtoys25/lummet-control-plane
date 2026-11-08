@@ -2,7 +2,7 @@
 (function () {
   var select = document.getElementById("pricing-family");
   if (!select) return;
-  select.addEventListener("change", function () {
+  function apply() {
     var value = select.value;
     document.querySelectorAll("[data-pricing-family]").forEach(function (node) {
       node.hidden = value !== "all" && node.getAttribute("data-pricing-family") !== value;
@@ -10,5 +10,7 @@
     document.querySelectorAll("[data-comparison-family]").forEach(function (node) {
       node.hidden = value !== "all" && node.getAttribute("data-comparison-family") !== value;
     });
-  });
+  }
+  select.addEventListener("change", apply);
+  if (select.value !== "all") apply(); // /pricing?family=<slug> opens with that family selected
 })();

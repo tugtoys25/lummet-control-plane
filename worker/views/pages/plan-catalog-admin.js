@@ -183,7 +183,7 @@ export async function renderPlanCatalogPage(env, admin, params = {}) {
       </form>
       <div class="pc-toolbar-end">
         <button type="button" class="btn btn-secondary" data-pc="labels">Labels</button>
-        <button type="button" class="btn btn-secondary" data-pc="product">New product</button>
+        <button type="button" class="btn btn-secondary" data-pc="product">Plan families &amp; site types</button>
         <a class="btn btn-secondary" href="/api/platform/saas/plan-catalog/export.csv">Export CSV</a>
         <button type="button" class="btn" data-pc="new">New plan</button>
       </div>

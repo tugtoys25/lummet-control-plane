@@ -22,7 +22,7 @@
           <a{{#if annual}} aria-current="true"{{/if}} class="chip{{#if annual}} is-active{{/if}}" href="/pricing?billing=annual">{{ui.pricing_annual}}</a>
         </div>
         {{/if}}
-        <div class="field pricing-family-filter"><label for="pricing-family">{{ui.pricing_family_label}}</label><select id="pricing-family"><option value="all">{{ui.pricing_family_all}}</option>{{#each families}}<option value="{{id}}">{{name}}</option>{{/each}}</select></div>
+        {{#if multi_family}}<div class="field pricing-family-filter"><label for="pricing-family">{{ui.pricing_family_label}}</label><select id="pricing-family"><option value="all">{{ui.pricing_family_all}}</option>{{#each families}}<option value="{{id}}"{{#if selected}} selected{{/if}}>{{name}}</option>{{/each}}</select></div>{{/if}}
       </div>
       {{#each groups}}
       <section class="pricing-family" data-pricing-family="{{id}}" aria-labelledby="pricing-family-title-{{id}}">

@@ -30,6 +30,7 @@ export const PLAN_CATALOG_CLIENT = String.raw`
     ends_before_start: 'The end must be after the start.', coupon_not_found: 'That coupon no longer exists.', coupon_is_organization_scoped: 'Organization-only coupons cannot be promoted publicly.',
     entitlement_type_mismatch: 'That key has a fixed type.', invalid_number: 'Entitlement numbers must be whole numbers.', invalid_boolean: 'Pick on or off.', duplicate_key: 'Duplicate entitlement key.',
     not_archived: 'Only retired plans can be restored.', nothing_selected: 'Select at least one plan.', too_many_selected: 'Select up to 100 plans at a time.', invalid_category: 'Pick a category.',
+    slug_taken: 'That slug is used (or was used) by another product.', invalid_slug: 'Slugs use lowercase letters, digits and hyphens.', reserved_slug: 'That word is reserved. Pick another slug.', invalid_public_name: 'The public name needs at least 2 characters.', invalid_sort_order: 'Sort order must be a whole number from -1000 to 1000.', source_has_no_plans: 'That product has no monthly plans to copy.',
     cross_site_request_blocked: 'Blocked: reload the page and try again.'
   };
   function errText(code) { return ERR[code] || ('Failed: ' + (code || 'unknown error')); }
@@ -272,16 +273,95 @@ export const PLAN_CATALOG_CLIENT = String.raw`
     });
   }
 
-  // ---------------------------------------------------------------- product modal
-  function openProductModal() {
+  // ---------------------------------------------------------------- plan families and site types
+  // One product record is both a plan family (what the pricing page groups plans under) and a site type (what a customer picks
+  // when creating a site). Here staff rename them, change the public address (slug), choose where each one appears, and clone a
+  // family into a generic one ("Starter / Growth / Pro" with no vertical in the name).
+  function slugify(t) { return String(t || '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64); }
+  function yesNo(v) { return v ? 'Yes' : 'No'; }
+  function openProductModal() { openProductsManager(); }
+
+  function openProductsManager() {
+    loadOptions(true).then(function (opt) {
+      var rows = opt.products.map(function (p) {
+        var edit = el('button', { type: 'button', class: 'btn btn-secondary', text: 'Edit' });
+        var cl = el('button', { type: 'button', class: 'btn btn-secondary', text: 'Clone as generic' });
+        edit.addEventListener('click', function () { openProductEditor(p); });
+        cl.addEventListener('click', function () { openCloneModal(p); });
+        return el('tr', null,
+          el('td', null, el('strong', { text: p.public_name || p.name }), p.public_name && p.public_name !== p.name ? el('div', { class: 'pc-dim', text: 'Staff label: ' + p.name }) : null),
+          el('td', null, el('code', { text: p.slug || '' })), el('td', { text: yesNo(p.show_on_pricing) }), el('td', { text: yesNo(p.show_in_site_creation) }),
+          el('td', { text: String(p.plan_count) }), el('td', { text: String(p.site_count) }), el('td', { text: p.status }), el('td', null, edit, ' ', cl));
+      });
+      var table = el('div', { class: 'pc-tablewrap' }, el('table', { class: 'pc-table' },
+        el('thead', null, el('tr', null, ['Name', 'Slug', 'On pricing page', 'Site type', 'Plans', 'Sites', 'Status', ''].map(function (h) { return el('th', { text: h }); }))),
+        el('tbody', null, rows)));
+      var add = el('button', { type: 'button', class: 'btn btn-secondary', text: 'New product' });
+      add.addEventListener('click', function () { openProductEditor(null); });
+      modal('Plan families and site types', [
+        el('p', { class: 'pc-p', text: 'A plan family groups plans on the pricing page. A site type is what customers choose when they create a site. They are separate switches, so one generic family (Starter, Growth, Pro) can serve every kind of site. Changing names, slugs or switches never changes a price, a limit or a subscription.' }),
+        table, el('div', { class: 'pc-row pc-addrow' }, add)
+      ], [{ label: 'Done', kind: 'ghost', onClick: function (m) { m.close(); location.reload(); } }], { wide: true });
+    });
+  }
+
+  function openProductEditor(p) {
+    var isNew = !p;
     loadOptions().then(function (opt) {
-      var name = el('input', { maxlength: '80', placeholder: 'e.g. Casino Reviews' });
-      var cat = el('select', null, opt.categories.map(function (c) { return el('option', { value: c, text: c }); }));
-      modal('New product', [el('p', { class: 'pc-p', text: 'A product is a family of plans (for example Casino News). Plans are grouped by product on the pricing page.' }), field('Name', name), field('Category', cat)], [
+      var f = {};
+      f.name = el('input', { maxlength: '80', value: p ? p.name : '', placeholder: 'Staff label, e.g. Platform' });
+      f.pub = el('input', { maxlength: '80', value: p && p.public_name ? p.public_name : '', placeholder: 'What customers see (empty = the staff label)' });
+      f.slug = el('input', { maxlength: '64', value: p ? (p.slug || '') : '', placeholder: 'auto from the name' });
+      f.desc = el('textarea', { rows: '2', maxlength: '400' }); f.desc.value = p && p.description ? p.description : '';
+      f.sort = el('input', { type: 'number', value: p ? String(p.sort_order) : '0' });
+      f.pricing = el('input', { type: 'checkbox', checked: p ? !!p.show_on_pricing : true });
+      f.site = el('input', { type: 'checkbox', checked: p ? !!p.show_in_site_creation : true });
+      f.cat = el('select', { disabled: !isNew }, opt.categories.map(function (c) { return el('option', { value: c, text: c, selected: p ? p.category === c : false }); }));
+      f.status = el('select', null, ['active', 'retired'].map(function (x) { return el('option', { value: x, text: x, selected: p ? p.status === x : x === 'active' }); }));
+      if (isNew) f.name.addEventListener('input', function () { if (!f.slug.dataset.touched) f.slug.value = slugify(f.name.value); });
+      f.slug.addEventListener('input', function () { f.slug.dataset.touched = '1'; });
+      var oldSlug = el('div', { class: 'pc-hint', text: p ? 'Renaming the slug keeps the old address working: /pricing?family=' + (p.slug || '') + ' still resolves.' : '' });
+      var nodes = [
+        field('Staff label', f.name, 'Used only in the staff console.'), field('Public name', f.pub, 'Shown on the pricing page. Leave empty to use the staff label. Keep it generic (for example "Platform") if the plans are not tied to one vertical.'),
+        field('Slug (public address)', f.slug, 'Lowercase letters, digits and hyphens. Changing it never breaks old links.'), oldSlug, field('Description', f.desc),
+        field('Sort order', f.sort, 'Lower numbers first on the pricing page and in the site type picker.'),
+        el('label', { class: 'pc-check' }, f.pricing, 'Show as a plan family on the public pricing page'),
+        el('label', { class: 'pc-check' }, f.site, 'Offer as a site type when a customer creates a site'),
+        isNew ? field('Category', f.cat) : null, field('Status', f.status, 'Retired products disappear from the pricing page and the site type picker. Existing sites and subscriptions are not affected.')
+      ];
+      modal(isNew ? 'New product' : 'Edit ' + (p.public_name || p.name), nodes, [
         { label: 'Cancel', kind: 'ghost', onClick: function (m) { m.close(); } },
-        { label: 'Create product', onClick: function (m) { m.setBusy(true); api('POST', '/products', { name: name.value, category: cat.value }).then(function (r) { m.setBusy(false); if (!r.success) return toast(errText(r.error), 'err'); toast('Product created.'); m.close(); loadOptions(true); setTimeout(function () { location.reload(); }, 600); }); } }
+        { label: isNew ? 'Create product' : 'Save', onClick: function (m) {
+          var body = { name: f.name.value, publicName: f.pub.value, slug: f.slug.value, description: f.desc.value, sortOrder: Number(f.sort.value || 0), showOnPricing: f.pricing.checked, showInSiteCreation: f.site.checked };
+          if (isNew) body.category = f.cat.value; else body.status = f.status.value;
+          m.setBusy(true);
+          api('POST', isNew ? '/products' : '/products/' + encodeURIComponent(p.id), body).then(function (r) {
+            m.setBusy(false); if (!r.success) return toast(errText(r.error), 'err');
+            toast(isNew ? 'Product created.' : 'Saved.'); m.close(); loadOptions(true).then(function () { openProductsManager(); });
+          });
+        } }
       ]);
     });
+  }
+
+  function openCloneModal(p) {
+    var name = el('input', { maxlength: '80', placeholder: 'e.g. Platform' });
+    var slug = el('input', { maxlength: '64', placeholder: 'auto from the name' });
+    name.addEventListener('input', function () { if (!slug.dataset.touched) slug.value = slugify(name.value); });
+    slug.addEventListener('input', function () { slug.dataset.touched = '1'; });
+    modal('Clone "' + (p.public_name || p.name) + '" as a generic family', [
+      el('p', { class: 'pc-p', text: 'Creates a new plan family with a draft copy of every monthly plan (name, limits, feature lines, labels). Prices, Stripe objects and subscriptions are not copied: set the prices on each draft plan, then publish. The new family is a plan family only, so customers still choose the kind of site when they create one.' }),
+      field('Family name', name, 'Customers see this. Use a generic name with no vertical in it.'), field('Slug', slug)
+    ], [
+      { label: 'Cancel', kind: 'ghost', onClick: function (m) { m.close(); } },
+      { label: 'Create draft family', onClick: function (m) {
+        m.setBusy(true);
+        api('POST', '/products/' + encodeURIComponent(p.id) + '/clone', { name: name.value, slug: slug.value }).then(function (r) {
+          m.setBusy(false); if (!r.success) return toast(errText(r.error), 'err');
+          toast('Draft family created. Set prices and publish its plans.'); m.close(); setTimeout(function () { location.reload(); }, 800);
+        });
+      } }
+    ]);
   }
 
   // ---------------------------------------------------------------- editor drawer

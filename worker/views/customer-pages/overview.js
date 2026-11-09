@@ -9,7 +9,7 @@ function trialCountdown(trialEndsAt) {
 }
 
 function renderTwoFactorNotice() {
-  return `<section class="card" role="note" aria-labelledby="two-factor-notice" style="border-left:4px solid var(--accent, #6d5efc);">
+  return `<section class="card" role="note" aria-labelledby="two-factor-notice" style="border-left:4px solid var(--accent, #1a56db);">
       <h2 id="two-factor-notice" style="margin-top:0;">Strengthen your account security</h2>
       <p style="color:var(--text-dim);font-size:14px;margin:0 0 12px;">Two-factor authentication adds a second check when you sign in, so your account and your sites stay protected even if your password is exposed. Setup takes about two minutes with any authenticator app.</p>
       <a class="btn" href="/app/security/2fa">Set up two-factor authentication</a>
@@ -87,13 +87,19 @@ export function renderOverviewPage({ organization, subscription, plan, usage, si
 
   const trialNote = subscription?.status === "trialing" ? trialCountdown(subscription.trial_ends_at) : null;
 
+  // One blue banner at most: the next thing the customer should do.
+  const banner = (title, text, href, label) =>
+    `<section class="cta-banner" aria-labelledby="next-step-title">
+       <div><h2 id="next-step-title">${escapeHtml(title)}</h2><p>${escapeHtml(text)}</p></div>
+       <a class="btn" href="${href}">${escapeHtml(label)}</a>
+     </section>`;
   const upgradeCta = !subscription
-    ? `<div class="card">
-         <h2>Get started</h2>
-         <p style="color:var(--text-dim);font-size:14px;">This organization has no plan yet — start a trial to create your first site.</p>
-         <a class="btn" href="/app/billing">Choose a plan</a>
-       </div>`
-    : "";
+    ? banner("Get started", "This organization has no plan yet — start a trial to create your first site.", "/app/billing", "Choose a plan")
+    : sites.length === 0
+      ? banner("Create your first site", "Your plan is ready. Create a site to see it live.", "/app/sites", "Create a site")
+      : trialNote
+        ? banner("Your trial is running", trialNote, "/app/billing", "Choose a plan")
+        : "";
 
   const sitesRows = sites.length
     ? sites

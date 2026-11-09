@@ -20,6 +20,7 @@
 </head>
 <body class="{{body_class}}">
   <a class="skip-link" href="#main">{{ui.skip_to_content}}</a>
+  {{> layout/announce}}
   {{> layout/header}}
   {{#if show_brand_strip}}{{#if site.has_brand_strip}}{{> components/brand-strip}}{{/if}}{{/if}}
   <main id="main">

@@ -7,7 +7,7 @@
 // =====================================================
 
 import { loadSiteData } from "./data.js";
-import { safeUrl, safeCssColor, initials } from "./format.js";
+import { safeUrl, safeCssColor, initials, isExternal } from "./format.js";
 import { iconSvg } from "./icons.js";
 import { isLiveHref } from "./links.js";
 import { cookieSettingsLabel } from "../cookie-consent.js";
@@ -135,11 +135,20 @@ export async function loadSite(env, url) {
       }
     : null;
 
+  // Optional announcement bar above the header (settings announce_text / announce_link_text / announce_url).
+  const announceText = (settings.announce_text || "").trim();
+  const announceUrl = safeUrl(settings.announce_url);
+  const announceLink = (settings.announce_link_text || "").trim();
+  const announce = announceText
+    ? { text: announceText, has_link: Boolean(announceUrl && announceLink), link_text: announceLink, url: announceUrl, external: Boolean(announceUrl && isExternal(announceUrl)) }
+    : null;
+
   return {
     settings,
     counts,
     ui,
     site: {
+      announce,
       contact_url: contactUrl,
       has_contact_url: Boolean(contactUrl),
       name,

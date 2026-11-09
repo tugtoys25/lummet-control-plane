@@ -75,11 +75,17 @@ main { flex: 1 0 auto; width: 100%; }
 .site-footer { position: relative; background: var(--dark-1); color: var(--on-dark-dim); padding: var(--space-8) 0 calc(var(--space-6) + env(safe-area-inset-bottom)); overflow: hidden; padding-top: var(--space-7); }
 
 .site-footer > .container { position: relative; }
-.footer-cta { display: grid; gap: var(--space-5); align-items: center; padding: clamp(1.5rem, 4vw, 2.5rem); margin-bottom: var(--space-8); border-radius: 12px; border: 1px solid rgba(255,255,255,0.14); background: transparent; }
-.footer-cta h2 { color: #fff; font-size: clamp(1.5rem, 1.2rem + 1.4vw, 2.2rem); margin: 0 0 var(--space-2); }
-.footer-cta p { margin: 0; color: var(--on-dark-dim); max-width: 52ch; }
-.footer-cta-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
-@media (min-width: 900px) { .footer-cta { grid-template-columns: 1fr auto; } }
+.footer-cta-strip { padding-block: var(--space-6) var(--space-7); }
+.footer-cta { text-align: center; padding: clamp(2.25rem, 6vw, 4rem) clamp(1.25rem, 4vw, 3rem); border-radius: 12px; background: var(--band); color: #fff; }
+.footer-cta h2 { color: #fff; font-size: clamp(1.5rem, 1.2rem + 1.4vw, 2.2rem); margin: 0 auto var(--space-2); max-width: 24ch; }
+.footer-cta p { margin: 0 auto var(--space-5); color: rgba(255,255,255,0.9); max-width: 52ch; }
+.footer-cta-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); }
+.footer-cta .btn-light { color: #1447b8; }
+.announce { background: var(--band); color: #fff; font-size: var(--fs-sm); line-height: 1.4; }
+.announce-inner { padding-block: 10px; text-align: center; }
+.announce p { margin: 0; }
+.announce a { color: #fff; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.announce a svg { width: 14px; height: 14px; vertical-align: -2px; }
 .footer-grid { display: grid; gap: var(--space-6); grid-template-columns: 1fr; }
 .site-footer .brand { color: #fff; }
 .footer-brand p { max-width: 36ch; color: var(--on-dark-dim); margin-top: var(--space-3); }

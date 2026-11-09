@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.7.4 - Solid blue bands (the "call to act" colour)
+
+Visual plus two small features; no migrations.
+
+- **Closing call to action**: on every public page that does not already end with a CTA band, the footer CTA is now a solid blue band above the dark footer (was a dark outlined box). Pages with their own CTA band, contact card or form still hide it.
+- **Announcement bar** on the public site: a solid blue strip above the header. New content settings `announce_text`, `announce_link_text` and `announce_url` (Content > Site settings); blank text hides it, links go through the same URL safety check as other settings.
+- **Customer Overview**: one blue banner at most with the next step: choose a plan (no plan), create your first site (plan, no site) or choose a plan (trial running). Replaces the plain "Get started" card.
+- **Pricing**: the featured plan gets a full-width blue header strip instead of a floating tag.
+- **Under the hero**: when a stats section directly follows the hero it renders as a solid blue strip with white figures.
+- Token `--band` (`#1a56db`; dark mode `#1d4ed8` so white text keeps contrast) is the fill for every blue band, including the existing CTA band, which had used the lighter dark-mode accent. Stale purple wording in the staff accent-colour hints and the 2FA notice fallback is corrected.
+- `ASSET_VERSION` is `ui11`. New test file `test/blue-bands.test.js`.
+- Tenant sites (`lummet-tenant`, separate patch): the default `promo` announcement tone is solid blue with white text instead of the amber gradient.
+
 ## 2.7.3 - Cleanup of the 2.7.2 restyle (no visual change intended)
 
 - The "enterprise layer" appended to `components.css` and `pages.css` in 2.7.2 is folded into the original rules, so each selector is defined once. Dead decorative rules are deleted: hero radial halos and grid wash, panel glow, hero-card gradient border, page-hero wash, footer glow, CTA grid overlay, brand-strip gradient bar, hub halo and the unused `hg-flow` / `hg-pulse` keyframes.

@@ -8,7 +8,7 @@
 .btn:active { transform: translateY(1px); }
 .btn-lg { padding: 14px 24px; font-size: var(--fs-base); }
 .btn-sm { padding: 8px 14px; font-size: var(--fs-xs); }
-.btn-primary { color: #fff; background: var(--accent); box-shadow: none; }
+.btn-primary { color: #fff; background: var(--band); box-shadow: none; }
 .btn-primary:hover { transform: none; box-shadow: none; color: #fff; background: var(--accent-ink); }
 .btn-secondary { color: var(--ink); background: var(--surface); border-color: var(--border-strong); box-shadow: none; }
 .btn-secondary:hover { border-color: var(--ink-faint); color: var(--ink); transform: none; background: var(--bg-soft); }
@@ -99,7 +99,7 @@ a.card:hover .card-cta svg { transform: translateX(4px); }
 .cta-band { position: relative; overflow: hidden; text-align: center; border-radius: 12px; padding: clamp(2.5rem, 7vw, 5.5rem) clamp(1.25rem, 4vw, 3rem); color: #fff; background: var(--accent); box-shadow: none; }
 
 .cta-band > * { position: relative; z-index: 1; }
-.cta-band .btn-light { color: var(--accent-ink); }
+.cta-band .btn-light { color: #1447b8; }
 .cta-band h2 { color: #fff; max-width: 20ch; margin-inline: auto; }
 .cta-band .lede { color: rgba(255,255,255,0.9); margin: 0 auto var(--space-5); }
 .cta-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); }
@@ -157,9 +157,9 @@ a.card:hover .card-cta svg { transform: translateX(4px); }
 .pricing-plan { gap: 0; padding: clamp(1.6rem, 3vw, 2.1rem); border-radius: 12px; }
 .pricing-plan:hover { box-shadow: var(--shadow-md); }
 .pricing-plan h3 { font-size: 1.35rem; margin-bottom: var(--space-3); }
-.pricing-plan.is-featured { border: 2px solid var(--accent); background: var(--surface); box-shadow: none; }
+.pricing-plan.is-featured { border: 2px solid var(--band); background: var(--surface); box-shadow: none; overflow: hidden; padding-top: 3.4rem; }
 @media (min-width: 760px) { .pricing-plan.is-featured { transform: translateY(-10px); } .pricing-plan.is-featured:hover { transform: translateY(-14px); } }
-.plan-flag { position: absolute; top: -13px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 4px; background: var(--accent); color: #fff; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
+.plan-flag { position: absolute; top: 0; left: 0; right: 0; padding: 8px 14px; text-align: center; background: var(--band); color: #fff; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .pricing-plan .pricing-price { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 0; font-size: var(--fs-sm); color: var(--ink-dim); }
 .pricing-plan .pricing-price strong { font-family: var(--font-display); font-size: clamp(2.6rem, 2rem + 2vw, 3.4rem); line-height: 1; letter-spacing: -0.04em; color: var(--ink); font-weight: 700; }
 .pricing-saving { margin: var(--space-2) 0 0 !important; color: var(--ok) !important; font-weight: 700; font-size: var(--fs-xs) !important; }
@@ -246,7 +246,7 @@ a.card:hover .card-cta svg { transform: translateX(4px); }
 /* CTA band text sits on a saturated background: beat the .prose colours */
 .cta-band .lede, .cta-band .lede p, .cta-band .prose p { color: rgba(255, 255, 255, 0.92); }
 /* Pages that already end with a CTA band do not repeat it in the footer */
-body:has(.cta-band, .contact-card, .form-layout) .footer-cta { display: none; }
+body:has(.cta-band, .contact-card, .form-layout) .footer-cta-strip { display: none; }
 body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var(--space-7); }
 
 /* Staff-managed plan presentation (labels, tagline, promotion, excluded features). All optional: absent = no markup. */
@@ -297,3 +297,6 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
   .brand-marquee-dup, .brand-strip-pause { display: none; }
   .brand-chip { transition: none; }
 }
+.hero + .stats-section, .hero + .banner-ad + .stats-section { background: var(--band); border-block: 0; color: #fff; }
+.hero + .stats-section .stat dd, .hero + .banner-ad + .stats-section .stat dd { color: #fff; }
+.hero + .stats-section .stat dt, .hero + .banner-ad + .stats-section .stat dt { color: rgba(255,255,255,0.85); }

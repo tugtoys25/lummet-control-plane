@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.8.1 - Media library: add by link, copy and share
+
+One additive migration (0097); no new bindings.
+
+- **Add by link** (Media library page, `POST /api/platform/saas/media/from-url`), like the tenant's "Add image from external URL": an image that stays at its own https address is kept in the library without uploading it. Works without the `PLATFORM_MEDIA` bucket. Address must be https, no credentials or spaces, 500 characters at most; the type comes from the file name's extension; width and height are optional. The same address is stored once. Deleting a link never touches R2.
+- A library link used as an icon is checked like a stored file: its type, and its size when width and height were given. A link used by a branding value cannot be deleted.
+- **Copy link** and **Share** buttons on every image card (Share opens the phone's share sheet, and falls back to copying where there is none). Stored files copy as a full address on this site; links copy as they are.
+- Migration 0097: `platform_media.external_url` (+ unique index). A link row's `r2_key` is the placeholder `ext:<id>`, which is never a valid object key.
+- Tests: 3 more in `test/portal-branding.test.js` (24).
+
 ## 2.8.0 - Portal branding and the control plane's own media library
 
 Additive; one migration (0096), one optional R2 binding.

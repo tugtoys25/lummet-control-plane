@@ -6,6 +6,7 @@
 //   PUT    /api/platform/saas/branding             { values: {key: value}, reason }   empty value clears; all-or-nothing
 //   GET    /api/platform/saas/media                ?folder=&q=&accept=image/png,image/svg+xml&page=
 //   POST   /api/platform/saas/media                multipart: file, folder?, alt_text?
+//   POST   /api/platform/saas/media/from-url      { url, filename?, folder?, altText?, width?, height? }  keeps the image at its own https address
 //   PATCH  /api/platform/saas/media/:id            { altText?, folder? }
 //   DELETE /api/platform/saas/media/:id            refused (409 media_in_use) while a branding value points at the file
 //
@@ -23,8 +24,9 @@ export async function handlePortalBrandingRoute(ctx) {
   const { env, request, url, method, path, admin, requestId, ipHash, json, logAudit } = ctx;
   const isBranding = path === "/api/platform/saas/branding";
   const isMediaList = path === "/api/platform/saas/media";
-  const idMatch = ID.exec(path);
-  if (!isBranding && !isMediaList && !idMatch) return null;
+  const isFromUrl = path === "/api/platform/saas/media/from-url";
+  const idMatch = isFromUrl ? null : ID.exec(path);
+  if (!isBranding && !isMediaList && !isFromUrl && !idMatch) return null;
 
   const actorId = `staff:${admin.id}`;
   const audit = (resource, resourceId, action, result, reason = "") => logAudit(env, {
@@ -68,6 +70,14 @@ export async function handlePortalBrandingRoute(ctx) {
       return result.ok ? json({ success: true, duplicate: !!result.duplicate, media: result.media }, result.duplicate ? 200 : 201) : fail(result);
     }
     return null;
+  }
+
+  if (isFromUrl) {
+    if (method !== "POST") return null;
+    const body = await request.json().catch(() => ({}));
+    const result = await media.addFromUrl(env, { url: body.url, filename: body.filename, folder: body.folder, altText: body.altText ?? body.alt_text, width: body.width, height: body.height, actorId });
+    await audit("platform_media", result.ok ? result.media.id : null, result.ok && result.duplicate ? "add_link_duplicate" : "add_link", result, result.ok ? result.media.url : "");
+    return result.ok ? json({ success: true, duplicate: !!result.duplicate, media: result.media }, result.duplicate ? 200 : 201) : fail(result);
   }
 
   const id = idMatch[1];

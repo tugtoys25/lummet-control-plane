@@ -49,6 +49,20 @@ export function ownKeyFromUrl(value, origin = "") {
   return KEY_RE.test(key) ? key : null;
 }
 
+/** An https address safe to keep and to put in src/href: no credentials, no spaces or quote characters, 500 characters at most. Returns the normalised address or null. */
+// eslint-disable-next-line no-control-regex
+const BAD_URL_CHARS = /[\u0000-\u0020\u007f"'<>\\`]/;
+export function cleanExternalUrl(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s || s.length > 500 || BAD_URL_CHARS.test(s)) return null;
+  try {
+    const u = new URL(s);
+    return u.protocol === "https:" && !u.username && !u.password && u.hostname.includes(".") ? u.href : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 export function cleanFolder(raw) {
   const s = String(raw ?? "").trim().toLowerCase() || DEFAULT_FOLDER;
   return FOLDER_RE.test(s) ? s : null;
@@ -67,8 +81,9 @@ export function toPublic(row) {
   return {
     id: row.id,
     filename: row.filename,
-    url: publicPathOf(row.r2_key),
-    key: row.r2_key,
+    url: row.external_url || publicPathOf(row.r2_key),
+    external: Boolean(row.external_url),
+    key: row.external_url ? null : row.r2_key,
     mimeType: row.mime_type,
     size: row.size,
     width: row.width ?? null,
@@ -124,12 +139,43 @@ export async function uploadMedia(env, { file, folder, altText, actorId }) {
   return { ok: true, duplicate: false, media: toPublic(await repo.getById(env, id)) };
 }
 
+/**
+ * Adds an image that stays at its own https address (nothing is downloaded or stored in R2), like the tenant's "add image from external
+ * URL". The type comes from the file name's extension; width and height are optional and only used to check icon sizes.
+ * Returns {ok:true, media, duplicate} or {ok:false, status, error, detail?}.
+ */
+export async function addFromUrl(env, { url, filename, folder, altText, width, height, actorId }) {
+  const address = cleanExternalUrl(url);
+  if (!address) return { ok: false, status: 422, error: "invalid_image_address", detail: "an https address, no spaces, 500 characters at most" };
+  const cleanedFolder = cleanFolder(folder);
+  if (!cleanedFolder) return { ok: false, status: 422, error: "invalid_folder" };
+  const name = cleanFilename(filename || new URL(address).pathname.split("/").pop());
+  const ext = extensionOf(name);
+  if (!ALLOWED_EXTENSIONS.includes(ext)) return { ok: false, status: 422, error: "unsupported_file_type", detail: `the file name needs one of: ${ALLOWED_EXTENSIONS.join(", ")}` };
+  const type = Object.values(IMAGE_TYPES).find((t) => t.extensions.includes(ext));
+  const dim = (v) => { const n = Number.parseInt(v, 10); return Number.isFinite(n) && n > 0 && n <= 16384 ? n : null; };
+  const existing = await repo.getByExternalUrl(env, address);
+  if (existing) return { ok: true, duplicate: true, media: toPublic(existing) };
+  const id = `pm_${randomHex(8)}`;
+  try {
+    await repo.insert(env, { id, r2Key: `ext:${id}`, externalUrl: address, filename: name, mimeType: type.mime, size: 0, width: dim(width), height: dim(height), altText: cleanAlt(altText), folder: cleanedFolder, uploadedBy: actorId == null ? null : String(actorId) });
+  } catch (error) {
+    console.error(JSON.stringify({ msg: "platform_media_link_insert_failed", error: String(error?.message || error).slice(0, 200) }));
+    return { ok: false, status: 500, error: "add_failed" };
+  }
+  return { ok: true, duplicate: false, media: toPublic(await repo.getById(env, id)) };
+}
+
 export async function getMedia(env, id) {
   const row = await repo.getById(env, String(id || ""));
   return row ? toPublic(row) : null;
 }
 
 export async function getMediaByUrl(env, value, origin = "") {
+  if (/^https:\/\//i.test(String(value || "").trim())) {
+    const linked = await repo.getByExternalUrl(env, String(value).trim());
+    return linked ? toPublic(linked) : null;
+  }
   const key = ownKeyFromUrl(value, origin);
   if (!key) return null;
   const row = await repo.getByKey(env, key);
@@ -164,18 +210,19 @@ export async function updateMedia(env, id, { altText, folder }) {
 /** Branding values that point at this file. */
 export async function usageOf(env, media) {
   const rows = await brandingRepo.listAll(env);
-  return rows.filter((r) => ownKeyFromUrl(r.value) === media.key).map((r) => r.key);
+  return rows.filter((r) => (media.external ? r.value === media.url : ownKeyFromUrl(r.value) === media.key)).map((r) => r.key);
 }
 
 /** Deletes the file and its row. Refused while a branding value still points at it, so the portal never ends up with a broken icon. */
 export async function deleteMedia(env, id) {
-  if (!storageConfigured(env)) return { ok: false, status: 503, error: "media_storage_not_configured" };
   const row = await repo.getById(env, String(id || ""));
   if (!row) return { ok: false, status: 404, error: "media_not_found" };
+  if (!row.external_url && !storageConfigured(env)) return { ok: false, status: 503, error: "media_storage_not_configured" };
   const media = toPublic(row);
   const inUse = await usageOf(env, media);
   if (inUse.length) return { ok: false, status: 409, error: "media_in_use", detail: inUse.join(", "), usedBy: inUse };
   await repo.remove(env, row.id);
+  if (row.external_url) return { ok: true, id: row.id }; // a link: there is no stored object
   await env.PLATFORM_MEDIA.delete(row.r2_key).catch((error) => console.error(JSON.stringify({ msg: "platform_media_object_delete_failed", key: row.r2_key, error: String(error?.message || error).slice(0, 200) })));
   return { ok: true, id: row.id };
 }

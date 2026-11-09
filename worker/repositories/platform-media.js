@@ -1,12 +1,12 @@
 // Control-plane media library (migration 0096). All SQL for platform_media lives here.
 
-const COLUMNS = "id, r2_key, filename, mime_type, size, width, height, alt_text, folder, sha256, uploaded_by, created_at";
+const COLUMNS = "id, r2_key, filename, mime_type, size, width, height, alt_text, folder, sha256, uploaded_by, created_at, external_url";
 
 export async function insert(env, row) {
   await env.LUMMET_DB.prepare(
-    `INSERT INTO platform_media (id, r2_key, filename, mime_type, size, width, height, alt_text, folder, sha256, uploaded_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(row.id, row.r2Key, row.filename, row.mimeType, row.size, row.width ?? null, row.height ?? null, row.altText || "", row.folder, row.sha256 ?? null, row.uploadedBy ?? null).run();
+    `INSERT INTO platform_media (id, r2_key, filename, mime_type, size, width, height, alt_text, folder, sha256, uploaded_by, external_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(row.id, row.r2Key, row.filename, row.mimeType, row.size, row.width ?? null, row.height ?? null, row.altText || "", row.folder, row.sha256 ?? null, row.uploadedBy ?? null, row.externalUrl ?? null).run();
 }
 
 export async function getById(env, id) {
@@ -15,6 +15,10 @@ export async function getById(env, id) {
 
 export async function getByKey(env, r2Key) {
   return env.LUMMET_DB.prepare(`SELECT ${COLUMNS} FROM platform_media WHERE r2_key = ?`).bind(r2Key).first();
+}
+
+export async function getByExternalUrl(env, url) {
+  return env.LUMMET_DB.prepare(`SELECT ${COLUMNS} FROM platform_media WHERE external_url = ?`).bind(url).first();
 }
 
 export async function findBySha(env, sha256, folder) {

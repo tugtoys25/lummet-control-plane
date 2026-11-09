@@ -404,3 +404,61 @@ test('an oversized upload is refused before it is read', async () => {
   const r = await call(env, 'POST', '/api/platform/saas/media', { cookie, form: new FormData(), headers: { 'Content-Length': String(media.MAX_IMAGE_BYTES + 1024 * 1024) } });
   assert.deepEqual([r.status, r.json.error], [413, 'file_too_large']);
 });
+
+// ---------- add by link (2.8.1) ----------
+test('add by link: kept at its own https address, nothing stored, works without file storage', async () => {
+  const env = makeEnv({ PLATFORM_MEDIA: undefined });
+  const add = (extra) => media.addFromUrl(env, { actorId: 'staff:1', ...extra });
+  const r = await add({ url: 'https://cdn.example.com/brand/Logo.PNG?v=2', altText: ' Our logo ', width: '128', height: 'x' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual([r.media.external, r.media.url, r.media.filename, r.media.mimeType, r.media.width, r.media.height, r.media.altText, r.media.size, r.media.key], [true, 'https://cdn.example.com/brand/Logo.PNG?v=2', 'Logo.PNG', 'image/png', 128, null, 'Our logo', 0, null]);
+  const again = await add({ url: 'https://cdn.example.com/brand/Logo.PNG?v=2' });
+  assert.deepEqual([again.duplicate, again.media.id === r.media.id], [true, true]);
+  assert.equal((await media.listMedia(env)).items[0].external, true);
+  for (const bad of ['http://cdn.example.com/a.png', 'https://user:pw@cdn.example.com/a.png', 'https://cdn.example.com/a b.png', 'javascript:alert(1)', 'https://localhost/a.png', 'https://cdn.example.com/a"x.png', '']) {
+    assert.equal((await add({ url: bad, filename: 'a.png' })).error, 'invalid_image_address', bad);
+  }
+  assert.equal((await add({ url: 'https://cdn.example.com/download' })).error, 'unsupported_file_type', 'no usable extension');
+  assert.equal((await add({ url: 'https://cdn.example.com/download', filename: 'x.svg' })).media.mimeType, 'image/svg+xml', 'a file name can supply the type');
+  assert.equal((await add({ url: 'https://cdn.example.com/b.png', folder: '../x' })).error, 'invalid_folder');
+});
+
+test('a link in the library is checked like a file when used as an icon; deleting a link needs no storage and respects use', async () => {
+  const env = makeEnv({ PLATFORM_MEDIA: undefined });
+  const svgLink = (await media.addFromUrl(env, { url: 'https://cdn.example.com/i.svg' })).media;
+  const small = (await media.addFromUrl(env, { url: 'https://cdn.example.com/s.png', width: 64, height: 64 })).media;
+  const right = (await media.addFromUrl(env, { url: 'https://cdn.example.com/r.png', width: 96, height: 96 })).media;
+  assert.equal((await save(env, { favicon_96: svgLink.url })).errors.favicon_96.error, 'wrong_image_type');
+  assert.equal((await save(env, { favicon_96: small.url })).errors.favicon_96.error, 'wrong_dimensions');
+  assert.equal((await save(env, { favicon_96: right.url })).ok, true);
+  assert.equal((await save(env, { favicon_96: 'https://elsewhere.example.com/not-in-library.png' })).ok, true, 'an address that is not in the library is accepted, as before');
+  await save(env, { favicon_svg: svgLink.url });
+  const refused = await media.deleteMedia(env, svgLink.id);
+  assert.deepEqual([refused.error, refused.usedBy], ['media_in_use', ['favicon_svg']]);
+  await save(env, { favicon_svg: '' });
+  assert.equal((await media.deleteMedia(env, svgLink.id)).ok, true);
+  assert.equal(await media.getMedia(env, svgLink.id), null);
+});
+
+test('through the Worker: add by link, copy and share buttons, and the link form on the page', async () => {
+  const env = makeEnv();
+  const cookie = await staffCookie(env);
+  const add = await call(env, 'POST', '/api/platform/saas/media/from-url', { cookie, body: { url: 'https://cdn.example.com/hero.webp', altText: 'hero' } });
+  assert.deepEqual([add.status, add.json.media.external, add.json.media.filename], [201, true, 'hero.webp']);
+  const dup = await call(env, 'POST', '/api/platform/saas/media/from-url', { cookie, body: { url: 'https://cdn.example.com/hero.webp' } });
+  assert.deepEqual([dup.status, dup.json.duplicate], [200, true]);
+  assert.equal((await call(env, 'POST', '/api/platform/saas/media/from-url', { cookie, body: { url: 'http://x.example.com/a.png' } })).status, 422);
+  assert.equal((await call(env, 'GET', '/api/platform/saas/media/from-url', { cookie })).status !== 200, true);
+  const up = await upload(env, cookie, png(32, 32), 'own.png');
+  const page = await call(env, 'GET', '/platform/saas/media', { cookie });
+  assert.equal(page.status, 200);
+  assert.ok(page.text.includes('id="lib-link"') && page.text.includes('Add from link'));
+  assert.ok(page.text.includes('data-media-act="copy"') && page.text.includes('data-media-act="share"'));
+  assert.ok(page.text.includes('data-url="https://cdn.example.com/hero.webp"'), 'a link is copied as is');
+  assert.ok(page.text.includes(`data-url="${up.json.media.url}"`), 'a stored file is copied as a path that the browser makes absolute');
+  for (const m of page.text.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)) { if (!/src=/.test(m[1])) assert.doesNotThrow(() => new vm.Script(m[2])); }
+  const del = await call(env, 'DELETE', `/api/platform/saas/media/${add.json.media.id}`, { cookie });
+  assert.equal(del.status, 200);
+  const rows = (await env.LUMMET_DB.prepare("SELECT action, success FROM lummet_audit_logs WHERE resource = 'platform_media' AND action LIKE 'add_link%'").all()).results;
+  assert.deepEqual(rows.map((r) => r.action).sort(), ['add_link', 'add_link', 'add_link_duplicate']);
+});

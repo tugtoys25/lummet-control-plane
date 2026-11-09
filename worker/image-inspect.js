@@ -189,3 +189,81 @@ export function extensionMatches(type, filename) {
   const ext = extensionOf(filename);
   return !!IMAGE_TYPES[type] && IMAGE_TYPES[type].extensions.includes(ext);
 }
+
+// =====================================================
+// VIDEO AND DOCUMENTS (media library, 2.8.2)
+//
+// Same rule as for images: what a file IS comes from its bytes. A name that says .mp4 over something that is not an MP4 is refused.
+// =====================================================
+
+export const FILE_TYPES = {
+  ...IMAGE_TYPES,
+  mp4: { mime: "video/mp4", extensions: ["mp4", "m4v"], kind: "video" },
+  mov: { mime: "video/quicktime", extensions: ["mov"], kind: "video" },
+  webm: { mime: "video/webm", extensions: ["webm"], kind: "video" },
+  ogg: { mime: "video/ogg", extensions: ["ogg", "ogv"], kind: "video" },
+  pdf: { mime: "application/pdf", extensions: ["pdf"], kind: "document" },
+  txt: { mime: "text/plain", extensions: ["txt"], kind: "document" },
+  doc: { mime: "application/msword", extensions: ["doc"], kind: "document" },
+  docx: { mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", extensions: ["docx"], kind: "document" }
+};
+for (const t of Object.values(IMAGE_TYPES)) t.kind = "image";
+
+Object.assign(MIME_TO_EXT, {
+  "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm", "video/ogg": "ogg",
+  "application/pdf": "pdf", "text/plain": "txt", "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx"
+});
+
+/** "image", "video" or "document" for a content type. */
+export const kindOfMime = (mime) => (String(mime).startsWith("image/") ? "image" : String(mime).startsWith("video/") ? "video" : "document");
+
+/** The type entry (key and details) for a file name's extension, or null. */
+export function typeForExtension(filename) {
+  const ext = extensionOf(filename);
+  const key = Object.keys(FILE_TYPES).find((k) => FILE_TYPES[k].extensions.includes(ext));
+  return key ? { key, ...FILE_TYPES[key] } : null;
+}
+
+const startsWith = (b, sig, at = 0) => sig.every((v, i) => b[at + i] === v);
+
+/**
+ * Checks any allowed file against its name: the extension picks the expected type and the bytes have to agree.
+ * Returns {ok:true, type, mime, kind, width, height} or {ok:false, error, detail?}.
+ */
+export function inspectFile(bytes, filename) {
+  const expected = typeForExtension(filename);
+  if (!expected) return { ok: false, error: "unsupported_file_type" };
+  if (!(bytes instanceof Uint8Array) || (bytes.length < 8 && expected.key !== "txt")) return { ok: false, error: expected.kind === "image" ? "not_an_image" : "not_a_valid_file" };
+  const bad = { ok: false, error: expected.kind === "image" ? "not_an_image" : "not_a_valid_file", detail: `the file does not look like a .${extensionOf(filename)}` };
+  const good = { ok: true, type: expected.key, mime: expected.mime, kind: expected.kind, width: null, height: null, sizes: null };
+  switch (expected.key) {
+    case "mp4": case "mov":
+      if (ascii(bytes, 4, 4) !== "ftyp" && !(expected.key === "mov" && ["moov", "mdat", "free", "wide", "skip"].includes(ascii(bytes, 4, 4)))) return bad;
+      return good;
+    case "webm":
+      return startsWith(bytes, [0x1a, 0x45, 0xdf, 0xa3]) ? good : bad;
+    case "ogg":
+      return ascii(bytes, 0, 4) === "OggS" ? good : bad;
+    case "pdf":
+      return ascii(bytes, 0, Math.min(1024, bytes.length)).includes("%PDF-") ? good : bad;
+    case "doc":
+      return startsWith(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) ? good : bad;
+    case "docx": {
+      if (!startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) return bad;
+      const head = ascii(bytes, 0, Math.min(2000, bytes.length));
+      return head.includes("[Content_Types].xml") || head.includes("word/") ? good : bad;
+    }
+    case "txt": {
+      if (bytes.includes(0)) return bad;
+      try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (_) { return bad; }
+      return good;
+    }
+    default: {
+      const seen = inspectImage(bytes);
+      if (!seen.ok) return seen;
+      if (!extensionMatches(seen.type, filename)) return { ok: false, error: "extension_mismatch", detail: `the file is a ${seen.type.toUpperCase()}, not a .${extensionOf(filename)}` };
+      return { ...seen, kind: "image" };
+    }
+  }
+}

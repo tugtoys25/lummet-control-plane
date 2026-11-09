@@ -5,9 +5,15 @@ import { renderShell, escapeHtml as h } from "../layout.js";
 import { nonceToken } from "../../csp.js";
 import * as branding from "../../portal-branding.js";
 import * as media from "../../platform-media.js";
+import { MIME_TO_EXT } from "../../image-inspect.js";
 
+const thumb = (m) => (m.kind === "video"
+  ? `<video src="${h(m.url)}" preload="metadata" controls muted playsinline></video>`
+  : m.kind === "document"
+    ? `<span class="pm-tile">${h(typeLabel(m.mimeType).toUpperCase())}</span>`
+    : `<img src="${h(m.url)}" alt="${h(m.altText)}" loading="lazy" />`);
 const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-const typeLabel = (mime) => String(mime || "").replace("image/", "").replace("svg+xml", "svg").replace("x-icon", "ico");
+const typeLabel = (mime) => MIME_TO_EXT[mime] || String(mime || "file").split("/").pop();
 
 const STYLE = `<style>
 .pm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
@@ -17,6 +23,8 @@ button.pm-item:hover:not(:disabled){border-color:var(--accent)}
 .pm-item:disabled{opacity:.45;cursor:not-allowed}
 .pm-thumb{height:96px;display:flex;align-items:center;justify-content:center;background:repeating-conic-gradient(rgba(128,128,128,.12) 0 25%,transparent 0 50%) 50%/16px 16px;border-radius:var(--radius-sm);overflow:hidden}
 .pm-thumb img{max-width:100%;max-height:96px;object-fit:contain}
+.pm-thumb video{max-width:100%;max-height:96px}
+.pm-tile{font-weight:700;font-size:20px;letter-spacing:.05em;color:var(--text-dim)}
 .pm-name{font-size:12px;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pm-meta{font-size:11px;color:var(--text-dim)}
 .pm-overlay{position:fixed;inset:0;background:var(--overlay,rgba(0,0,0,.55));z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
@@ -50,7 +58,8 @@ const SCRIPT = String.raw`
     return fetch(url, opts).then(function (r) { return r.json().catch(function () { return { success: false, error: 'bad_response' }; }); });
   }
   function human(code, detail) { return (code || 'failed').replace(/_/g, ' ') + (detail ? ' (' + detail + ')' : ''); }
-  function typeName(m) { return String(m || '').replace('image/', '').replace('svg+xml', 'svg').replace('x-icon', 'ico'); }
+  var EXT = { 'image/svg+xml': 'svg', 'image/x-icon': 'ico', 'image/jpeg': 'jpg', 'video/quicktime': 'mov', 'application/msword': 'doc', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx', 'text/plain': 'txt' };
+  function typeName(m) { return EXT[m] || String(m || '').split('/').pop(); }
 
   function close() { if (st.overlay) st.overlay.hidden = true; st.onPick = null; }
   function setStatus(t) { var s = document.getElementById('pm-status'); if (s) s.textContent = t || ''; }
@@ -64,7 +73,7 @@ const SCRIPT = String.raw`
       b.type = 'button';
       b.disabled = !ok;
       if (!ok) b.title = 'This field needs ' + st.size + ' by ' + st.size + ' pixels';
-      var th = el('div', 'pm-thumb'); var img = el('img'); img.alt = m.altText || ''; img.loading = 'lazy'; img.src = m.url; th.appendChild(img);
+      var th = el('div', 'pm-thumb'); if (m.kind === 'image' || !m.kind) { var img = el('img'); img.alt = m.altText || ''; img.loading = 'lazy'; img.src = m.url; th.appendChild(img); } else { th.appendChild(el('span', 'pm-tile', typeName(m.mimeType).toUpperCase())); }
       b.appendChild(th);
       b.appendChild(el('div', 'pm-name', m.filename));
       b.appendChild(el('div', 'pm-meta', typeName(m.mimeType) + (m.width ? ' · ' + m.width + '×' + m.height : '') + (m.external ? ' · link' : ' · ' + Math.max(1, Math.round(m.size / 1024)) + ' KB')));
@@ -92,14 +101,23 @@ const SCRIPT = String.raw`
     });
   }
 
-  function upload(file) {
-    var fd = new FormData(); fd.append('file', file); fd.append('folder', 'branding');
-    setStatus('Uploading…');
-    api('/api/platform/saas/media', { method: 'POST', body: fd }).then(function (d) {
-      if (!d.success) { setStatus('Upload failed: ' + human(d.error, d.detail)); return; }
-      setStatus(d.duplicate ? 'That file was already in the library.' : 'Uploaded.');
-      st.page = 1; load();
-    });
+  // One request per file, one after another: a failure names its file and the rest still go up, and the Worker never holds more than one file.
+  function uploadMany(files, folder, alt, progress) {
+    var list = Array.prototype.slice.call(files); var done = 0; var failed = []; var added = 0;
+    return list.reduce(function (chain, f, i) {
+      return chain.then(function () {
+        progress('Uploading ' + (i + 1) + ' of ' + list.length + ': ' + f.name + '…');
+        var fd = new FormData(); fd.append('file', f); fd.append('folder', folder || 'branding'); if (alt) fd.append('alt_text', alt);
+        return api('/api/platform/saas/media', { method: 'POST', body: fd }).then(function (d) {
+          if (d.success) { done += 1; if (!d.duplicate) added += 1; } else failed.push(f.name + ': ' + human(d.error, d.detail));
+        });
+      });
+    }, Promise.resolve()).then(function () { return { total: list.length, done: done, added: added, failed: failed }; });
+  }
+  function summary(r) { return r.done + ' of ' + r.total + ' uploaded' + (r.done > r.added ? ' (' + (r.done - r.added) + ' already in the library)' : '') + '.' + (r.failed.length ? ' Not uploaded: ' + r.failed.join('; ') : ''); }
+  window.lummetUploadMany = uploadMany; window.lummetUploadSummary = summary;
+  function upload(files) {
+    uploadMany(files, 'branding', '', setStatus).then(function (r) { setStatus(summary(r)); st.page = 1; load(); });
   }
 
   function build() {
@@ -112,9 +130,9 @@ const SCRIPT = String.raw`
     var q = el('input'); q.type = 'search'; q.placeholder = 'Search…'; q.id = 'pm-q'; q.setAttribute('aria-label', 'Search the library');
     var t; q.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { st.q = q.value; st.page = 1; load(); }, 300); });
     var f = el('select'); f.id = 'pm-folder'; f.setAttribute('aria-label', 'Folder'); f.addEventListener('change', function () { st.folder = f.value; st.page = 1; load(); });
-    var up = el('label', 'btn btn-small'); up.id = 'pm-upload-wrap'; up.textContent = '+ Upload new ';
-    var fi = el('input'); fi.type = 'file'; fi.accept = '.png,.jpg,.jpeg,.gif,.webp,.ico,.svg'; fi.hidden = true;
-    fi.addEventListener('change', function () { if (fi.files && fi.files[0]) upload(fi.files[0]); fi.value = ''; });
+    var up = el('label', 'btn btn-small'); up.id = 'pm-upload-wrap'; up.textContent = '+ Upload (one or more) ';
+    var fi = el('input'); fi.type = 'file'; fi.multiple = true; fi.accept = '.png,.jpg,.jpeg,.gif,.webp,.ico,.svg'; fi.hidden = true;
+    fi.addEventListener('change', function () { if (fi.files && fi.files.length) upload(fi.files); fi.value = ''; });
     up.appendChild(fi);
     bar.appendChild(q); bar.appendChild(f); bar.appendChild(up); body.appendChild(bar);
     var s = el('div', 'pm-status'); s.id = 'pm-status'; s.setAttribute('role', 'status'); body.appendChild(s);
@@ -178,11 +196,13 @@ const SCRIPT = String.raw`
 
   // ----- library page -----
   window.lummetMediaUpload = function (form) {
-    var f = form.querySelector('input[type=file]').files[0]; var s = document.getElementById('lib-status');
-    if (!f) { s.textContent = 'Choose a file first.'; return; }
-    var fd = new FormData(); fd.append('file', f); fd.append('folder', form.folder.value || 'branding'); fd.append('alt_text', form.alt_text.value || '');
-    s.textContent = 'Uploading…';
-    api('/api/platform/saas/media', { method: 'POST', body: fd }).then(function (d) { if (d.success) location.reload(); else s.textContent = 'Upload failed: ' + human(d.error, d.detail); });
+    var files = form.querySelector('input[type=file]').files; var s = document.getElementById('lib-status');
+    if (!files || !files.length) { s.textContent = 'Choose one or more files first.'; return; }
+    var btn = form.querySelector('button[type=submit]'); btn.disabled = true;
+    uploadMany(files, form.folder.value || 'branding', form.alt_text.value || '', function (t) { s.textContent = t; }).then(function (r) {
+      s.textContent = summary(r);
+      if (!r.failed.length) setTimeout(function () { location.reload(); }, 700); else btn.disabled = false;
+    });
   };
   window.lummetMediaSave = function (id) {
     var row = document.querySelector('[data-media-id="' + id + '"]');
@@ -276,13 +296,14 @@ export async function renderBrandingSection(env) {
 }
 
 /** Staff console: the control plane's media library. */
-export async function renderMediaLibraryPage(env, admin, { folder = "", q = "", page = 1 } = {}) {
-  const data = await media.listMedia(env, { folder, search: q, page });
+export async function renderMediaLibraryPage(env, admin, { folder = "", q = "", page = 1, kind = "" } = {}) {
+  const kindKey = media.KIND_FILTERS[kind] ? kind : "";
+  const data = await media.listMedia(env, { folder, search: q, page, accept: kindKey ? media.KIND_FILTERS[kindKey] : null });
   const storage = media.storageConfigured(env);
   const pages = Math.max(1, Math.ceil(data.total / data.pageSize));
-  const link = (p) => `/platform/saas/media?${new URLSearchParams({ ...(folder ? { folder } : {}), ...(q ? { q } : {}), page: String(p) })}`;
+  const link = (p) => `/platform/saas/media?${new URLSearchParams({ ...(folder ? { folder } : {}), ...(q ? { q } : {}), ...(kindKey ? { kind: kindKey } : {}), page: String(p) })}`;
   const cards = data.items.map((m) => `<div class="card" data-media-id="${h(m.id)}" style="margin:0">
-      <div class="pm-thumb"><img src="${h(m.url)}" alt="${h(m.altText)}" loading="lazy" /></div>
+      <div class="pm-thumb">${thumb(m)}</div>
       <div class="pm-name" title="${h(m.filename)}">${h(m.filename)}</div>
       <div class="pm-meta">${h(typeLabel(m.mimeType))}${m.width ? ` · ${m.width}×${m.height}` : ""} · ${m.external ? "link" : h(kb(m.size))}</div>
       ${m.external ? `<div class="pm-meta" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${h(m.url)}">${h(m.url)}</div>` : ""}
@@ -298,8 +319,9 @@ export async function renderMediaLibraryPage(env, admin, { folder = "", q = "", 
   const upload = storage
     ? `<form id="lib-upload" class="card" style="max-width:560px">
         <h3 style="margin-top:0">Upload</h3>
-        <label for="lib-file">Image (PNG, JPEG, GIF, WebP, ICO or SVG, up to ${Math.round(media.MAX_IMAGE_BYTES / 1048576)} MB)</label>
-        <input id="lib-file" type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.ico,.svg" required />
+        <label for="lib-file">Files (choose one or several)</label>
+        <input id="lib-file" type="file" multiple accept="${media.ALLOWED_EXTENSIONS.map((e) => `.${e}`).join(",")}" required />
+        <p class="pm-meta" style="margin:0 0 8px">Images (PNG, JPEG, GIF, WebP, ICO, SVG) up to ${Math.round(media.MAX_IMAGE_BYTES / 1048576)} MB, video (MP4, MOV, WebM, OGG) up to ${Math.round(media.MAX_VIDEO_BYTES / 1048576)} MB, documents (PDF, TXT, DOC, DOCX) up to ${Math.round(media.MAX_DOCUMENT_BYTES / 1048576)} MB. They go up one after another.</p>
         <label for="lib-folder">Folder</label><input id="lib-folder" name="folder" value="branding" maxlength="32" />
         <label for="lib-alt">Alt text</label><input id="lib-alt" name="alt_text" maxlength="200" />
         <div id="lib-status" class="pm-status" role="status"></div>
@@ -319,11 +341,12 @@ export async function renderMediaLibraryPage(env, admin, { folder = "", q = "", 
       </form>`;
   const body = `${STYLE}
     <h1>Media library</h1>
-    <p class="subtitle">Platform · The control plane's own images: logos, favicons and app icons. Separate from every tenant's media library. Use them in <a href="/platform/saas/settings#branding">Branding</a>.</p>
+    <p class="subtitle">Platform · The control plane's own images, video and documents: logos, favicons and app icons, and anything else you want a link to. Separate from every tenant's media library. Use them in <a href="/platform/saas/settings#branding">Branding</a>.</p>
     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">${upload}${linkForm}</div>
     <form method="get" style="display:flex;gap:8px;margin:16px 0;flex-wrap:wrap">
       <input type="search" name="q" value="${h(q)}" placeholder="Search file name or alt text" style="width:auto;margin:0" />
       <select name="folder" style="width:auto;margin:0"><option value="">All folders</option>${data.folders.map((f) => `<option value="${h(f.folder)}"${f.folder === folder ? " selected" : ""}>${h(f.folder)} (${h(f.n)})</option>`).join("")}</select>
+      <select name="kind" style="width:auto;margin:0"><option value="">All types</option>${[["image", "Images"], ["video", "Video"], ["file", "Documents"]].map(([k, l]) => `<option value="${k}"${k === kindKey ? " selected" : ""}>${l}</option>`).join("")}</select>
       <button class="btn btn-secondary" type="submit">Filter</button>
     </form>
     ${cards ? `<div class="pm-grid" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr))">${cards}</div>` : `<p style="color:var(--text-dim)">No files yet.</p>`}

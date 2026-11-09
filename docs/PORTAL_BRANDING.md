@@ -7,3 +7,5 @@ Fields (same ideas as the tenant's `site_*` icon settings): `brand_name`, `brand
 Markers (site-chrome.js): `<!--lummet:head-icons-->` (all shells), `<!--lummet:portal-brand-->` and `<!--lummet:portal-name-->` (staff console only). The public site gets the tags through `site.icon_links_html` in `public/templates/layout/base.html`.
 
 Operations: values are cached 15 s per isolate; unreadable storage falls back to the built-in look. Deleting a file that a field uses is refused. Uploads need the `PLATFORM_MEDIA` R2 binding; an https address works without it. Every write is in the audit log (`portal_branding`, `platform_media`).
+
+Media library (2.8.1): files may be images, video (mp4/m4v/mov/webm/ogg/ogv) or documents (pdf/txt/doc/docx), or a link to one (`external_url`, migration 0097). `worker/image-inspect.js` `inspectFile` checks the bytes against the extension. Limits: image 5 MB, document 10 MB, video 25 MB, 10 files per request. `/brand-media/<key>` answers Range requests for video.

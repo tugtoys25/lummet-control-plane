@@ -18,17 +18,28 @@
 
 import * as repo from "./repositories/platform-media.js";
 import * as brandingRepo from "./repositories/portal-branding.js";
-import { inspectImage, extensionOf, extensionMatches, MIME_TO_EXT, IMAGE_TYPES } from "./image-inspect.js";
+import { inspectFile, extensionOf, MIME_TO_EXT, FILE_TYPES, kindOfMime, typeForExtension } from "./image-inspect.js";
 
 export const PUBLIC_PREFIX = "/brand-media/";
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+// A Worker reads the whole file into memory (and hashes it), so video is capped well below the tenant's 100 MB.
+export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+export const MAX_BYTES = { image: MAX_IMAGE_BYTES, document: MAX_DOCUMENT_BYTES, video: MAX_VIDEO_BYTES };
+export const MAX_REQUEST_BYTES = MAX_VIDEO_BYTES + 1024 * 1024;
+export const MAX_FILES_PER_REQUEST = 10;
+export const KIND_FILTERS = {
+  image: ["image/png", "image/jpeg", "image/gif", "image/webp", "image/x-icon", "image/svg+xml"],
+  video: ["video/mp4", "video/quicktime", "video/webm", "video/ogg"],
+  file: ["application/pdf", "text/plain", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+};
 export const DEFAULT_FOLDER = "branding";
 export const PAGE_SIZE = 24;
-export const ALLOWED_EXTENSIONS = Object.values(IMAGE_TYPES).flatMap((t) => t.extensions);
-export const ALLOWED_MIMES = Object.values(IMAGE_TYPES).map((t) => t.mime);
+export const ALLOWED_EXTENSIONS = Object.values(FILE_TYPES).flatMap((t) => t.extensions);
+export const ALLOWED_MIMES = Object.values(FILE_TYPES).map((t) => t.mime);
 
 const FOLDER_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
-const KEY_RE = /^[a-z0-9][a-z0-9-]{0,31}\/[0-9]{10,16}-[0-9a-f]{16}\.(?:png|jpg|gif|webp|ico|svg)$/;
+const KEY_RE = /^[a-z0-9][a-z0-9-]{0,31}\/[0-9]{10,16}-[0-9a-f]{16}\.(?:png|jpg|gif|webp|ico|svg|mp4|webm|ogg|mov|pdf|txt|doc|docx)$/;
 
 const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 const randomHex = (n) => hex(crypto.getRandomValues(new Uint8Array(n)));
@@ -83,6 +94,7 @@ export function toPublic(row) {
     filename: row.filename,
     url: row.external_url || publicPathOf(row.r2_key),
     external: Boolean(row.external_url),
+    kind: kindOfMime(row.mime_type),
     key: row.external_url ? null : row.r2_key,
     mimeType: row.mime_type,
     size: row.size,
@@ -107,16 +119,15 @@ export async function uploadMedia(env, { file, folder, altText, actorId }) {
   const cleanedFolder = cleanFolder(folder);
   if (!cleanedFolder) return { ok: false, status: 422, error: "invalid_folder" };
   if (!(file.size > 0)) return { ok: false, status: 422, error: "empty_file" };
-  if (file.size > MAX_IMAGE_BYTES) return { ok: false, status: 413, error: "file_too_large", detail: `${Math.round(MAX_IMAGE_BYTES / 1048576)} MB at most` };
-
   const filename = cleanFilename(file.name);
-  const ext = extensionOf(filename);
-  if (!ALLOWED_EXTENSIONS.includes(ext)) return { ok: false, status: 415, error: "unsupported_file_type", detail: `allowed: ${ALLOWED_EXTENSIONS.join(", ")}` };
+  const expected = typeForExtension(filename);
+  if (!expected) return { ok: false, status: 415, error: "unsupported_file_type", detail: `allowed: ${ALLOWED_EXTENSIONS.join(", ")}` };
+  const limit = MAX_BYTES[expected.kind];
+  if (file.size > limit) return { ok: false, status: 413, error: "file_too_large", detail: `${Math.round(limit / 1048576)} MB at most for ${expected.kind === "document" ? "a document" : expected.kind === "video" ? "a video" : "an image"}` };
 
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const seen = inspectImage(bytes);
+  const seen = inspectFile(bytes, filename);
   if (!seen.ok) return { ok: false, status: 422, error: seen.error, detail: seen.detail };
-  if (!extensionMatches(seen.type, filename)) return { ok: false, status: 422, error: "extension_mismatch", detail: `the file is a ${seen.type.toUpperCase()}, not a .${ext}` };
 
   const sha = await sha256Hex(bytes);
   const existing = await repo.findBySha(env, sha, cleanedFolder);
@@ -152,7 +163,7 @@ export async function addFromUrl(env, { url, filename, folder, altText, width, h
   const name = cleanFilename(filename || new URL(address).pathname.split("/").pop());
   const ext = extensionOf(name);
   if (!ALLOWED_EXTENSIONS.includes(ext)) return { ok: false, status: 422, error: "unsupported_file_type", detail: `the file name needs one of: ${ALLOWED_EXTENSIONS.join(", ")}` };
-  const type = Object.values(IMAGE_TYPES).find((t) => t.extensions.includes(ext));
+  const type = typeForExtension(name);
   const dim = (v) => { const n = Number.parseInt(v, 10); return Number.isFinite(n) && n > 0 && n <= 16384 ? n : null; };
   const existing = await repo.getByExternalUrl(env, address);
   if (existing) return { ok: true, duplicate: true, media: toPublic(existing) };
@@ -227,27 +238,68 @@ export async function deleteMedia(env, id) {
   return { ok: true, id: row.id };
 }
 
-const EXT_MIME = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp", ico: "image/x-icon", svg: "image/svg+xml" };
+const EXT_MIME = Object.fromEntries(Object.entries(MIME_TO_EXT).map(([mime, ext]) => [ext, mime]));
 const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox";
+const DOWNLOAD_ONLY = new Set(["doc", "docx"]);
 
-/** GET/HEAD /brand-media/<key>. Public, no session. The content type comes from the key's extension, which upload fixed from the bytes. */
+/** Parses "bytes=a-b", "bytes=a-" or "bytes=-n" for a file of `size` bytes: {start,end} (inclusive), "unsatisfiable", or null (not a single range). */
+export function parseByteRange(header, size) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(header || "").trim());
+  if (!m || (m[1] === "" && m[2] === "")) return null;
+  let start;
+  let end;
+  if (m[1] === "") {
+    const suffix = Number(m[2]);
+    if (suffix === 0) return "unsatisfiable";
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1);
+  }
+  return !Number.isFinite(start) || !Number.isFinite(end) || start >= size || start > end ? "unsatisfiable" : { start, end };
+}
+
+/**
+ * GET/HEAD /brand-media/<key>. Public, no session. The content type comes from the key's extension, which upload fixed from the bytes.
+ * Video honours byte ranges (Safari and iPhones need them). Word files download instead of opening; plain text is served as text.
+ */
 export async function serveMedia(request, env, rawKey) {
   const key = String(rawKey || "");
   if (!KEY_RE.test(key)) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=60" } });
   if (!storageConfigured(env)) return new Response("Media storage is not configured", { status: 503, headers: { "Cache-Control": "no-store" } });
-  const object = await env.PLATFORM_MEDIA.get(key);
-  if (!object) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=60" } });
   const ext = key.slice(key.lastIndexOf(".") + 1);
   const type = EXT_MIME[ext];
   const headers = new Headers({
-    "Content-Type": type,
+    "Content-Type": type === "text/plain" ? "text/plain; charset=utf-8" : type,
     "Cache-Control": "public, max-age=31536000, immutable",
     "X-Content-Type-Options": "nosniff",
     "Cross-Origin-Resource-Policy": "cross-origin",
-    "Content-Disposition": "inline"
+    "Accept-Ranges": "bytes",
+    "Content-Disposition": DOWNLOAD_ONLY.has(ext) ? `attachment; filename="${key.split("/").pop()}"` : "inline"
   });
-  if (object.httpEtag) headers.set("ETag", object.httpEtag);
   if (ext === "svg") headers.set("Content-Security-Policy", SVG_CSP);
+
+  const range = request.headers.get("Range");
+  if (range && typeof env.PLATFORM_MEDIA.head === "function") {
+    const head = await env.PLATFORM_MEDIA.head(key);
+    if (!head) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=60" } });
+    const parsed = parseByteRange(range, head.size);
+    if (parsed === "unsatisfiable") { headers.set("Content-Range", `bytes */${head.size}`); return new Response(null, { status: 416, headers }); }
+    if (parsed) {
+      const length = parsed.end - parsed.start + 1;
+      const part = request.method === "HEAD" ? null : await env.PLATFORM_MEDIA.get(key, { range: { offset: parsed.start, length } });
+      if (request.method !== "HEAD" && !part) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=60" } });
+      headers.set("Content-Range", `bytes ${parsed.start}-${parsed.end}/${head.size}`);
+      headers.set("Content-Length", String(length));
+      if (head.httpEtag) headers.set("ETag", head.httpEtag);
+      return new Response(part ? part.body : null, { status: 206, headers });
+    }
+  }
+
+  const object = await env.PLATFORM_MEDIA.get(key);
+  if (!object) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=60" } });
+  if (object.httpEtag) headers.set("ETag", object.httpEtag);
   const inm = request.headers.get("If-None-Match");
   if (inm && object.httpEtag && inm === object.httpEtag) return new Response(null, { status: 304, headers });
   return new Response(request.method === "HEAD" ? null : object.body, { status: 200, headers });

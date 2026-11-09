@@ -10,6 +10,7 @@
     "test": "node scripts/test-by-file.mjs",
     "package:phase": "node scripts/package-phase.mjs",
     "check:config": "node scripts/check-config.mjs",
+    "audit:bands": "node scripts/band-audit.mjs",
     "check:phase2": "node scripts/phase-gate.mjs --phase 2",
     "catalog:check": "node scripts/stripe-sync.mjs --offline",
     "test:serial": "node scripts/test-by-file.mjs",

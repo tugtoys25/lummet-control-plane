@@ -28,8 +28,8 @@
         {{#if site.has_contact}}<a class="footer-mail" href="mailto:{{site.contact_email}}">{{site.contact_email}}</a>{{/if}}
       </div>
       {{#each site.footer_columns}}
-      <nav class="footer-col" aria-label="{{title}}">
-        <h2>{{title}}</h2>
+      <nav class="footer-col{{#if wide}} footer-col--wide{{/if}}" aria-label="{{title}}">
+        {{#if title}}<h2>{{title}}</h2>{{/if}}
         <ul>
           {{#each links}}
           <li><a href="{{href}}">{{label}}</a></li>
@@ -39,8 +39,20 @@
       {{/each}}
     </div>
     <div class="footer-bottom">
-      <span>&copy; {{site.year}} {{site.name}}. {{ui.rights}}</span>
-      {{#if site.cookie_settings_label}}<button type="button" class="lummet-cookie-settings" data-cookie-settings>{{site.cookie_settings_label}}</button>{{/if}}
+      <p class="footer-copy">&copy; {{site.year}} {{site.name}}. {{ui.rights}}</p>
+      {{#if site.footer_legal}}
+      <nav class="footer-legal" aria-label="{{site.footer_legal_title}}">
+        <ul>
+          {{#each site.footer_legal}}
+          <li><a href="{{href}}">{{label}}</a></li>
+          {{/each}}
+        </ul>
+      </nav>
+      {{/if}}
+      <div class="footer-tools">
+        {{#if site.cookie_settings_label}}<button type="button" class="lummet-cookie-settings" data-cookie-settings>{{site.cookie_settings_label}}</button>{{/if}}
+        <a class="footer-top" href="#top">{{site.footer_top_label}} {{{icons.arrow}}}</a>
+      </div>
     </div>
   </div>
 </footer>

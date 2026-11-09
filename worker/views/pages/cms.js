@@ -129,10 +129,11 @@ function renderField(field, value, options) {
   }
 
   if (field.type === "select") {
+    const current = val === "" && field.default !== undefined ? String(field.default) : String(val);
     const opts = (field.options || [])
-      .map((o) => `<option value="${escapeHtml(o)}" ${String(val) === o ? "selected" : ""}>${escapeHtml(o)}</option>`)
+      .map((o) => `<option value="${escapeHtml(o)}" ${current === o ? "selected" : ""}>${escapeHtml((field.optionLabels && field.optionLabels[o]) || o)}</option>`)
       .join("");
-    return `<label>${escapeHtml(field.label)}</label><select name="${field.name}">${opts}</select>`;
+    return `<label>${escapeHtml(field.label)}${field.hint ? ` <span style="color:var(--text-dim);font-weight:400;">— ${escapeHtml(field.hint)}</span>` : ""}</label><select name="${field.name}">${opts}</select>`;
   }
 
   if (field.type === "number") {
@@ -226,6 +227,8 @@ const SETTING_LABELS = {
   logo_url: "Logo image URL",
   accent_color: "Primary accent color",
   accent_color_secondary: "Secondary accent color",
+  section_background: "Default section background",
+  page_header_background: "Page header band",
   hero_eyebrow: "Hero eyebrow text",
   hero_title: "Hero title",
   hero_subtitle: "Hero subtitle",
@@ -247,9 +250,28 @@ const SETTING_HINTS = {
   logo_url: "Shown in the header instead of the dot icon. Leave blank to use the default mark.",
   accent_color: "Hex color, e.g. #1a56db. Leave blank for the default blue.",
   accent_color_secondary: "Optional second accent colour. The standard theme does not use it yet.",
+  section_background: "Used by homepage sections whose own Background is left on Default. Normally white; pick Blue band to make every such section blue.",
+  page_header_background: "Colour behind the title on inner pages (brands, updates, insights, partners, pricing, forms) and on pages left on Default. Soft grey is the original look.",
   announce_text: "Solid blue bar above the header on every public page. Leave blank to hide it.",
   announce_url: "Optional. Shown as a link after the text when the link label is also filled in."
 };
+
+const BAND_LABELS = { default: "White (no band)", soft: "Soft grey", blue: "Blue band", dark: "Dark band" };
+const SETTING_SELECTS = {
+  section_background: { options: ["default", "soft", "blue", "dark"], blank: "default" },
+  page_header_background: { options: ["soft", "default", "blue", "dark"], blank: "soft" }
+};
+
+function settingInput(key, settings) {
+  const sel = SETTING_SELECTS[key];
+  const value = settings[key] || "";
+  if (sel) {
+    const current = value || sel.blank;
+    const opts = sel.options.map((o) => `<option value="${o}" ${current === o ? "selected" : ""}>${escapeHtml(BAND_LABELS[o])}</option>`).join("");
+    return `<select name="${key}">${opts}</select>`;
+  }
+  return `<input type="text" name="${key}" value="${escapeHtml(value)}" />`;
+}
 
 export async function renderSiteSettingsPage(env, admin, flash) {
   const activeKey = "cms-site-settings";
@@ -272,15 +294,15 @@ export async function renderSiteSettingsPage(env, admin, flash) {
     ${flashHtml(flash)}
     <form method="POST" action="/cms/settings" class="card">
       <h3 style="margin-top:0;">Branding</h3>
-      ${["site_name", "logo_url", "accent_color", "accent_color_secondary"].map((key) => {
+      ${["site_name", "logo_url", "accent_color", "accent_color_secondary", "section_background", "page_header_background"].map((key) => {
         const hint = SETTING_HINTS[key];
         return `<div class="form-group">
           <label>${escapeHtml(SETTING_LABELS[key] || key)}${hint ? ` <span style="color:var(--text-dim);font-weight:400;">— ${escapeHtml(hint)}</span>` : ""}</label>
-          <input type="text" name="${key}" value="${escapeHtml(settings[key] || "")}" />
+          ${settingInput(key, settings)}
         </div>`;
       }).join("")}
       <h3>Homepage copy</h3>
-      ${SITE_SETTING_KEYS.filter((k) => !["site_name", "logo_url", "accent_color", "accent_color_secondary"].includes(k))
+      ${SITE_SETTING_KEYS.filter((k) => !["site_name", "logo_url", "accent_color", "accent_color_secondary", "section_background", "page_header_background"].includes(k))
         .map((key) => {
           const isLong = ["hero_subtitle", "footer_text", "site_description", "brands_intro", "updates_intro", "insights_intro", "partners_intro"].includes(key);
           return `<div class="form-group">

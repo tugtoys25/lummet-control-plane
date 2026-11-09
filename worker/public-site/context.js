@@ -10,6 +10,7 @@ import { loadSiteData } from "./data.js";
 import { safeUrl, safeCssColor, initials, isExternal } from "./format.js";
 import { iconSvg } from "./icons.js";
 import { isLiveHref } from "./links.js";
+import { normalizeBg } from "./backgrounds.js";
 import { cookieSettingsLabel } from "../cookie-consent.js";
 import { brandStripModels } from "./models.js";
 import { loadBranding, iconLinksHtml } from "../portal-branding.js";
@@ -153,6 +154,7 @@ export async function loadSite(env, url) {
     ui,
     site: {
       announce,
+      page_header_bg: normalizeBg(settings.page_header_background, "soft"),
       contact_url: contactUrl,
       has_contact_url: Boolean(contactUrl),
       name,

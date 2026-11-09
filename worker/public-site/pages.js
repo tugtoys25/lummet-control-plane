@@ -16,6 +16,7 @@ import { renderPage, textResponse } from "./render.js";
 import { API_V1_SCOPES, WEBHOOK_EVENT_TYPES, buildOpenApiSpec } from "./openapi.js";
 import { buildHead, breadcrumbLd, organizationLd, websiteLd, absoluteUrl } from "./seo.js";
 import { buildHome } from "./home.js";
+import { headerBg } from "./backgrounds.js";
 import { stripTags, truncate, safeUrl, readingMinutes } from "./format.js";
 
 const UPDATES_PER_PAGE = 10;
@@ -319,7 +320,7 @@ export async function authorPage(ctx, { slug }) {
 export async function cmsPage(ctx, { slug }) {
   const row = await data.getPage(ctx.env, slug);
   if (!row) return null;
-  const { site, ui } = ctx.siteCtx;
+  const { site, settings, ui } = ctx.siteCtx;
   const path = pageCanonicalPath(slug);
   const contentHtml = sanitizeHtml(row.content || "");
   const trail = [crumb(ui.crumb_home, "/"), crumb(row.title, path)];
@@ -329,6 +330,7 @@ export async function cmsPage(ctx, { slug }) {
     excerpt: row.excerpt || "",
     content_html: contentHtml,
     updated_iso: (row.updated_at || "").slice(0, 10),
+    header_bg: headerBg(row.header_background, settings.page_header_background),
     reading_minutes: readingMinutes(contentHtml),
     author_name: row.author_name || "",
     author_url: row.author_slug ? `/authors/${row.author_slug}` : ""

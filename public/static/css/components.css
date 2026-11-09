@@ -300,3 +300,21 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
 .hero + .stats-section, .hero + .banner-ad + .stats-section { background: var(--band); border-block: 0; color: #fff; }
 .hero + .stats-section .stat dd, .hero + .banner-ad + .stats-section .stat dd { color: #fff; }
 .hero + .stats-section .stat dt, .hero + .banner-ad + .stats-section .stat dt { color: rgba(255,255,255,0.85); }
+
+/* ---- Background bands for homepage sections and page headers (bg-soft | bg-blue | bg-dark; default = none) ---- */
+.page-hero.bg-default { background: var(--bg); }
+.section.bg-blue, .page-hero.bg-blue { background: var(--band); }
+.section.bg-dark, .page-hero.bg-dark { background: var(--dark-1); }
+.section.bg-blue, .section.bg-dark, .page-hero.bg-blue, .page-hero.bg-dark { color: #fff; border-color: transparent; }
+:is(.bg-blue, .bg-dark) .section-head h2, :is(.bg-blue, .bg-dark) h1 { color: #fff; }
+:is(.bg-blue, .bg-dark) :is(.lede, .lede p, .prose p, .prose li) { color: rgba(255, 255, 255, 0.9); }
+:is(.bg-blue, .bg-dark) .lede a, :is(.bg-blue, .bg-dark) .prose a { color: #fff; text-decoration: underline; }
+:is(.bg-blue, .bg-dark) > .container > .eyebrow, :is(.bg-blue, .bg-dark) .section-head .eyebrow, :is(.bg-blue, .bg-dark) .page-hero .eyebrow { color: rgba(255, 255, 255, 0.8); }
+:is(.bg-blue, .bg-dark) .breadcrumbs ol, :is(.bg-blue, .bg-dark) .breadcrumbs a { color: rgba(255, 255, 255, 0.8); }
+:is(.bg-blue, .bg-dark) .breadcrumbs li + li::before { color: rgba(255, 255, 255, 0.5); }
+.section.bg-blue .btn-primary { background: #fff; color: #1447b8; }
+.section.bg-blue .btn-primary:hover { background: #eef3ff; color: #1447b8; }
+.section.bg-blue .btn-secondary { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.5); }
+.section.bg-blue .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: #fff; }
+.section.bg-blue.stats-section .stat dd, .section.bg-dark.stats-section .stat dd { color: #fff; }
+.section.bg-blue.stats-section .stat dt, .section.bg-dark.stats-section .stat dt { color: rgba(255, 255, 255, 0.85); }

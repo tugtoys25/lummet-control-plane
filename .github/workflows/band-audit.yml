@@ -1,0 +1,34 @@
+name: Band audit
+# Real-browser contrast audit of the blue and dark background bands (text, hover, focus ring, form fields), run on pull requests that
+# touch the public site's styles or markup. Nothing here deploys. Playwright is installed on demand and is not a repo dependency,
+# so package.json and the lockfile stay as they are. To make it a merge requirement, add "band-audit" to the branch protection rules.
+on:
+  pull_request:
+    paths:
+      - "public/static/**"
+      - "worker/public-site/**"
+      - "scripts/band-audit.mjs"
+      - ".github/workflows/band-audit.yml"
+  workflow_dispatch:
+jobs:
+  band-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Reject incomplete or inconsistent lockfile
+        run: node scripts/lockfile-check.mjs
+      - run: npm ci --no-audit --no-fund
+      - name: Install Playwright and Chromium (not saved to package.json)
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Audit every route in the blue and dark band, in the light and dark theme
+        run: node scripts/band-audit.mjs --shots band-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: band-audit-screenshots
+          path: band-shots

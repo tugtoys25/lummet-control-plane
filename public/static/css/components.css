@@ -331,6 +331,8 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
 :is(.bg-blue, .bg-dark) :is(.lede, .lede p, .prose p, .prose li) { color: rgba(255, 255, 255, 0.92); }
 :is(.bg-blue, .bg-dark) :is(.lede, .prose) a { color: #fff; text-decoration: underline; }
 :is(.bg-blue, .bg-dark) .breadcrumbs li + li::before { color: rgba(255, 255, 255, 0.55); }
+/* Keyboard focus: the default ring is --accent (blue), which is 1:1 against a blue band. White reads on both bands. */
+:is(.section, .page-hero):is(.bg-blue, .bg-dark) :focus-visible { outline-color: #fff; }
 /* Logos and brand marks are artwork drawn for a light tile, so they keep a white tile on any band. */
 :is(.bg-blue, .bg-dark) :is(.brand-hero-logo, .brand-thumb) { background: #fff; border-color: rgba(255, 255, 255, 0.6); }
 :is(.bg-blue, .bg-dark) .step-no { color: #fff; }

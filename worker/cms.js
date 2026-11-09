@@ -158,6 +158,8 @@ export const SITE_SETTING_KEYS = [
   "logo_url",
   "accent_color",
   "accent_color_secondary",
+  "section_background",
+  "page_header_background",
   "hero_eyebrow",
   "hero_title",
   "hero_subtitle",

@@ -13,6 +13,7 @@ import { safeUrl, isExternal, formatDate } from "./format.js";
 import { heroGraphSvg } from "./hero-graph.js";
 import { isLiveHref } from "./links.js";
 import { plansTeaser } from "./plans-teaser.js";
+import { sectionBg } from "./backgrounds.js";
 
 const KINDS = new Set([
   "text", "features", "steps", "checklist", "panel", "brands", "stats",
@@ -34,7 +35,7 @@ function sectionShell(row, extra = {}) {
     key: row.section_key || `section-${row.id}`,
     kind: row.kind,
     [`is_${row.kind}`]: true,
-    bg: ["soft", "dark"].includes(row.background) ? row.background : "default",
+    bg: row.__bg || sectionBg(row.background, null),
     title: row.title,
     eyebrow: row.subtitle || "",
     body_html: sanitizeHtml(row.body || ""),
@@ -78,6 +79,7 @@ export async function buildHome(ctx) {
 
   for (const row of rows) {
     if (!KINDS.has(row.kind)) continue;
+    row.__bg = sectionBg(row.background, settings.section_background);
     const group = row.feature_group || "";
     const items = (featuresByGroup.get(group) || []).map(featureModel);
 

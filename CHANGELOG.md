@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.8.2 - Background colour for homepage sections, pages and settings
+
+One additive migration (`0098_page_header_background.sql`, adds `lummet_pages.header_background`, default `default`); no existing row changes appearance.
+
+- **Homepage sections form:** Background colour is now Default / Soft grey / Blue band / Dark band. Blue band is pre-selected for new sections; existing sections keep their value. Blue and Dark bands now actually render (white headings and text, light buttons on blue). Cards inside a band keep their own surface.
+- **Pages form:** new Header band colour (same four choices, Blue band pre-selected for new pages). `Default` follows the site setting.
+- **Site settings:** two new selects under Branding. *Default section background* (applies to homepage sections left on Default; unset = white) and *Page header band* (inner pages: brands, updates, insights, partners, pricing, forms, and CMS pages left on Default; unset = soft grey, the current look).
+- Values outside the four choices are treated as Default, so a bad edit cannot inject a class name. `worker/public-site/backgrounds.js` holds the rule.
+- `ASSET_VERSION` is `ui12`. New test file `test/section-backgrounds.test.js`.
+
 ## 2.8.1 - Media library: add by link, copy and share
 
 One additive migration (0097); no new bindings.

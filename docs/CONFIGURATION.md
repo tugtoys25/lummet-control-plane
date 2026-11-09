@@ -55,7 +55,7 @@ price stamped with the other mode) and `STRIPE_API_VERSION`. The sync reads the 
 
 **Trust pages (v2.6.0.4).** These four settings are production-required even while `PUBLIC_TRUST_PAGES=off`. Use owner-approved values only. `/contact-sales` reuses the published `contact` form and the existing `PUBLIC_FORMS_TURNSTILE_REQUIRED` setting (Turnstile stays opt-in and needs both `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`). Move to `on` only after every Round 6.2A `[OPEN]` item in `docs/PLACEHOLDERS.md` is closed.
 
-Bindings (in `wrangler.jsonc`): `LUMMET_DB` (D1), `AI`, `BACKUPS` and `TENANT_TEMPLATES` (R2), `ASSETS`; optional
+Bindings (in `wrangler.jsonc`): `LUMMET_DB` (D1), `AI`, `BACKUPS`, `TENANT_TEMPLATES` and `PLATFORM_MEDIA` (R2; the last is the media library for portal branding, optional), `ASSETS`; optional
 `JOB_QUEUE` (Queue).
 
 ## Optional

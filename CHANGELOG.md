@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.8.0 - Portal branding and the control plane's own media library
+
+Additive; one migration (0096), one optional R2 binding.
+
+- **Branding** section in Platform settings (`/platform/saas/settings#branding`): portal name, short name, logo, social share image, favicons (SVG, ICO, 96 px), Apple home-screen icon (180), app icons (192, 512), display mode, theme and background colours. Mirrors the tenant's "Favicons & App Icons" settings. Saved together, all or nothing, with an audited reason.
+- **Typed and sized**: an own-library icon must be the right type and exactly the right size (a 96 px favicon must be a 96 by 96 PNG). https addresses are accepted as in the tenant (type and size cannot be checked for those).
+- **Media library** (`/platform/saas/media`, nav: Platform > Media library) with a **picker** (Choose... next to each image field, with search, folder filter, paging and upload in the modal). Files live in R2 (`PLATFORM_MEDIA`), records in D1 (`platform_media`). Separate from every tenant's library. Stricter than the tenant: content type is read from the bytes, the extension must agree, truncated PNG/ICO files are refused, SVG with script, event handlers, foreignObject, external links or CSS imports is refused, identical files are stored once, 5 MB cap. A file a branding value uses cannot be deleted (409 `media_in_use`).
+- **Where it shows**: name and logo in the staff console (sidebar, page title); favicons, app icons, manifest and theme colour on every page the Worker renders (staff console, sign-in pages, customer dashboard, public site). Nothing set = exactly the old look. New public routes: `/brand-media/<key>` (immutable cache, `nosniff`, SVG served under a sandbox CSP), `/favicon.ico` (redirects to the ICO/PNG/SVG when set, else unchanged), `/site.webmanifest` (404 until an app icon is set).
+- CSP: `manifest-src 'none'` is now `'self'` so the manifest can load.
+- Config: new optional R2 binding `PLATFORM_MEDIA` (`wrangler r2 bucket create lummet-platform-media`). Without it uploads answer 503 `media_storage_not_configured` and the page says so; everything else works. `scripts/ensure-staging-resources.mjs` creates the staging bucket.
+- API (super admin, audited): `GET/PUT /api/platform/saas/branding`, `GET/POST /api/platform/saas/media`, `PATCH/DELETE /api/platform/saas/media/:id`.
+- Tests: `test/portal-branding.test.js` (21). `test/admin-shell.test.js` expects the new nav link.
+- Not changed: tenant sites, per-organization white label (`organization_branding`).
+
 ## 2.7.4 - Solid blue bands (the "call to act" colour)
 
 Visual plus two small features; no migrations.

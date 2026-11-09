@@ -100,7 +100,7 @@ export function renderCustomerAuthShell({ title, bodyHtml, audience = "customer"
   <meta name="color-scheme" content="light dark" />
   <meta name="robots" content="noindex" />
   <title>${escapeHtml(title)} · Lummet</title>
-  <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
+  <!--lummet:head-icons-->
   ${chrome ? `<script nonce="${nonceToken()}" src="/static/js/theme.js?v=${ASSET_VERSION}"></script>` : `<script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>`}
   <link rel="preload" href="/static/fonts/instrument-400-v1.woff" as="font" type="font/woff" crossorigin />
   <link rel="stylesheet" href="/static/css/tokens.css?v=${ASSET_VERSION}" />

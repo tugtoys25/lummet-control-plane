@@ -12,6 +12,9 @@
 //   <!--lummet:cookie-banner-->        the cookie consent banner (see cookie-consent.js)
 //   <!--lummet:site-brand-->           the dashboard sidebar logo icon and site name (same logo and name as the public header)
 //   <!--lummet:site-name-->            the site name as plain text (dashboard breadcrumb)
+//   <!--lummet:portal-brand-->         the STAFF console's sidebar logo and name: portal branding (Platform settings) when set, else the site's own
+//   <!--lummet:portal-name-->          the staff console's name as plain text (breadcrumb, page title)
+//   <!--lummet:head-icons-->           favicon, app icon, manifest and theme-colour tags from portal branding; the built-in favicon when none are set
 //   <!--lummet:brand-band-->           the customer dashboard's brand partners strip (staff render theirs directly, see layout.js)
 //
 // Editing the footer text, links or cookie text in the staff console therefore changes every page at once. Fail soft: if the site data
@@ -22,6 +25,7 @@ import { loadSite } from "./public-site/context.js";
 import { renderTemplate } from "./public-site/template.js";
 import { renderCookieBannerWithScript, cookieSettingsButton } from "./cookie-consent.js";
 import { loadBrandBand, renderBrandBand } from "./brand-band.js";
+import { headIconsHtml, FALLBACK_ICON_LINK, portalIdentity } from "./portal-branding.js";
 
 export const MARKERS = {
   header: "<!--lummet:site-header-->",
@@ -30,6 +34,9 @@ export const MARKERS = {
   cookie: "<!--lummet:cookie-banner-->",
   brand: "<!--lummet:site-brand-->",
   siteName: "<!--lummet:site-name-->",
+  portalBrand: "<!--lummet:portal-brand-->",
+  portalName: "<!--lummet:portal-name-->",
+  headIcons: "<!--lummet:head-icons-->",
   brandBand: "<!--lummet:brand-band-->"
 };
 export const CHROME_HEADER = "x-lummet-chrome";
@@ -64,6 +71,14 @@ function brandMark(site) {
     : `<span class="brand-icon brand-icon-fallback" aria-hidden="true">${esc(site.initials || "L")}</span>`;
   return `${icon}<span class="brand-label">${esc(site.name)}</span>`;
 }
+// Staff console brand: portal branding wins over the site's own name and logo, field by field. An own-library logo is a path, so it is safe in src.
+function portalBrandMark(site, identity) {
+  const name = identity.name || site.name;
+  const icon = identity.logo || site.has_logo
+    ? `<img class="brand-icon" src="${esc(identity.logo || site.logo_url)}" alt="" width="30" height="30">`
+    : `<span class="brand-icon brand-icon-fallback" aria-hidden="true">${esc((identity.name ? identity.name.trim().charAt(0).toUpperCase() : site.initials) || "L")}</span>`;
+  return `${icon}<span class="brand-label">${esc(name)}</span>`;
+}
 const FALLBACK_BRAND = `<span class="brand-icon brand-icon-fallback" aria-hidden="true">L</span><span class="brand-label">Lummet</span>`;
 
 const FALLBACK_HEADER = `<header class="site-header"><div class="container header-inner"><a class="brand" href="/" aria-label="Home"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Lummet</span></a></div></header>`;
@@ -88,6 +103,19 @@ export async function injectSiteChrome(htmlText, env, url) {
   await fill(MARKERS.footerCompact, (c) => compactFooter(c.site, c.ui), FALLBACK_FOOTER);
   await fill(MARKERS.brand, (c) => brandMark(c.site), FALLBACK_BRAND);
   await fill(MARKERS.siteName, (c) => esc(c.site.name), "Lummet");
+
+  // Portal branding. Never throws and never needs the site data: any problem leaves the built-in look.
+  if (wants(MARKERS.headIcons)) {
+    let tags = FALLBACK_ICON_LINK;
+    try { tags = await headIconsHtml(env); } catch (err) { console.error(JSON.stringify({ msg: "site_chrome_render_failed", marker: MARKERS.headIcons, error: err?.message || String(err) })); }
+    out = out.split(MARKERS.headIcons).join(tags);
+  }
+  if (wants(MARKERS.portalBrand) || wants(MARKERS.portalName)) {
+    let identity = { name: null, logo: null };
+    try { identity = await portalIdentity(env); } catch (err) { console.error(JSON.stringify({ msg: "site_chrome_render_failed", marker: MARKERS.portalBrand, error: err?.message || String(err) })); }
+    await fill(MARKERS.portalBrand, (c) => portalBrandMark(c.site, identity), identity.name ? portalBrandMark({ name: identity.name, has_logo: false, initials: "L" }, identity) : FALLBACK_BRAND);
+    await fill(MARKERS.portalName, (c) => esc(identity.name || c.site.name), esc(identity.name || "Lummet"));
+  }
   if (wants(MARKERS.brandBand)) {
     let band = "";
     try { band = renderBrandBand(await loadBrandBand(env), { manage: false }); } catch (err) { console.error(JSON.stringify({ msg: "site_chrome_render_failed", marker: MARKERS.brandBand, error: err?.message || String(err) })); }

@@ -12,6 +12,7 @@ import { iconSvg } from "./icons.js";
 import { isLiveHref } from "./links.js";
 import { cookieSettingsLabel } from "../cookie-consent.js";
 import { brandStripModels } from "./models.js";
+import { loadBranding, iconLinksHtml } from "../portal-branding.js";
 
 // Column titles come from lummet_ui_strings (footer_<name>_title).
 const FOOTER_COLUMNS = [
@@ -113,6 +114,9 @@ export async function loadSite(env, url) {
 
   const brandStrip = brandStripModels(brandRows);
 
+  // Favicons, app icons, manifest and theme colour from portal branding (Platform settings). Empty = the template keeps its own favicon.
+  const iconLinks = iconLinksHtml(await loadBranding(env));
+
   const name = (settings.site_name && settings.site_name.trim()) || "Lummet";
   const logo = safeUrl(settings.logo_url);
 
@@ -158,6 +162,7 @@ export async function loadSite(env, url) {
       og_image: safeUrl(settings.og_image),
       logo_url: logo,
       has_logo: Boolean(logo),
+      icon_links_html: iconLinks,
       initials: initials(name),
       accent_css: accentCss(settings),
       footer_text: (settings.footer_text && settings.footer_text.trim()) || "",

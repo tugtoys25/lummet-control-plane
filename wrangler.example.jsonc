@@ -64,7 +64,10 @@
   //   wrangler r2 bucket create lummet-tenant-templates
   "r2_buckets": [
     { "binding": "BACKUPS", "bucket_name": "lummet-backups" },
-    { "binding": "TENANT_TEMPLATES", "bucket_name": "lummet-tenant-templates" }
+    { "binding": "TENANT_TEMPLATES", "bucket_name": "lummet-tenant-templates" },
+    // The control plane's own media library for portal branding (logos, favicons, app icons). Optional and fail-closed: without it
+    // uploads answer 503 and the Branding form still accepts https addresses. Create with: wrangler r2 bucket create lummet-platform-media
+    { "binding": "PLATFORM_MEDIA", "bucket_name": "lummet-platform-media" }
   ],
 
   // Secrets (set via `wrangler secret put`, never here):

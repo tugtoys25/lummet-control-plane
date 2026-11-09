@@ -108,7 +108,7 @@ export function cspMode(env) {
 }
 
 /** Directives that apply to every response (the v7 baseline). */
-export const BASE_CSP = "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; connect-src 'self'; frame-src 'none'; worker-src 'none'; manifest-src 'none'; img-src 'self' data: https:";
+export const BASE_CSP = "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; connect-src 'self'; frame-src 'none'; worker-src 'none'; manifest-src 'self'; img-src 'self' data: https:";
 
 /** The directives v7E adds for HTML pages. */
 export function scriptDirectives(nonce, allowTurnstile = false) {

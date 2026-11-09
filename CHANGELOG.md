@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.8.4 - Turnstile on custom forms
+
+No migration; no new setting.
+
+- `PUBLIC_FORMS_TURNSTILE_REQUIRED` now also covers the custom forms made in the dashboard (`/forms/:key`), not only `/contact`, `/demo` and `/contact-sales`. When it is `on` (with both Turnstile keys), a custom form shows the widget, the CSP allows `https://challenges.cloudflare.com` on that page, and a missing, wrong or unverifiable token is refused before anything is stored. Off by default, as before.
+- Tests: 1 more in `test/forms.test.js`.
+
 ## 2.8.3 - Enterprise footer
 
 Presentation only; no migration. Pattern taken from Stripe, Amazon, Cloudflare and Apple: brand block plus link columns, one hairline, a slim legal row.

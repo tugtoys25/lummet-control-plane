@@ -233,6 +233,9 @@ const SETTING_LABELS = {
   hero_cta_primary_href: "Primary CTA link",
   hero_cta_secondary_label: "Secondary CTA label",
   hero_cta_secondary_href: "Secondary CTA link",
+  announce_text: "Announcement bar text",
+  announce_link_text: "Announcement bar link label",
+  announce_url: "Announcement bar link URL",
   contact_email: "Contact email",
   footer_text: "Footer text"
 };
@@ -242,8 +245,10 @@ const SETTING_HINTS = {
   canonical_url: "Full origin used for canonical links, Open Graph URLs and the sitemap, e.g. https://lummet.com. Blank uses the address the visitor arrived on.",
   contact_email: "Shown in the footer and the Get in Touch section. If blank, the CONTACT_EMAIL Worker variable is used; if neither is set, contact blocks are hidden.",
   logo_url: "Shown in the header instead of the dot icon. Leave blank to use the default mark.",
-  accent_color: "Hex color, e.g. #6d5bf6. Leave blank for the default purple.",
-  accent_color_secondary: "Hex color used for gradients alongside the primary accent."
+  accent_color: "Hex color, e.g. #1a56db. Leave blank for the default blue.",
+  accent_color_secondary: "Optional second accent colour. The standard theme does not use it yet.",
+  announce_text: "Solid blue bar above the header on every public page. Leave blank to hide it.",
+  announce_url: "Optional. Shown as a link after the text when the link label is also filled in."
 };
 
 export async function renderSiteSettingsPage(env, admin, flash) {

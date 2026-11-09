@@ -209,6 +209,7 @@ export const STYLES = `
     --text-dim: #b4bac6;
     --accent: #5b9bff;
     --accent-strong: #3b82f6;
+    --band: #1d4ed8;
     --accent-ink: #ffffff;
     --accent-soft: rgba(91, 155, 255, 0.14);
     --ok: #3ccf96;
@@ -236,6 +237,7 @@ export const STYLES = `
     --text-dim: #4b5563;
     --accent: #1a56db;
     --accent-strong: #1447b8;
+    --band: #1a56db;
     --accent-soft: rgba(26, 86, 219, 0.08);
     --ok: #0f7a55;
     --warn: #96560a;
@@ -485,6 +487,11 @@ export const STYLES = `
   .card { border-radius: var(--radius); }
   .btn, .btn-primary { background: var(--accent); color: #fff; border-radius: 8px; padding: 9px 16px; box-shadow: none; font-weight: 600; transition: background-color .15s ease; }
   .btn:hover, .btn-primary:hover { background: var(--accent-strong); filter: none; }
+  .cta-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 16px; padding: 20px 24px; border-radius: var(--radius); background: var(--band); color: #fff; }
+  .cta-banner h2 { margin: 0 0 4px; font-size: 18px; color: #fff; }
+  .cta-banner p { margin: 0; font-size: 14px; color: rgba(255, 255, 255, 0.88); }
+  .cta-banner .btn { background: #fff; color: #1447b8; border: 0; }
+  .cta-banner .btn:hover { background: #eef3ff; }
   .btn-secondary { background: transparent; color: var(--text); border-color: var(--panel-border); box-shadow: none; }
   .btn-secondary:hover { background: var(--accent-soft); filter: none; }
   .btn-danger, .btn-danger:hover { background: var(--danger); color: #fff; box-shadow: none; }

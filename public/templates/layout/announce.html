@@ -1,0 +1,7 @@
+{{#if site.announce}}
+<div class="announce">
+  <div class="container announce-inner">
+    <p>{{site.announce.text}}{{#if site.announce.has_link}} <a href="{{site.announce.url}}"{{#if site.announce.external}} target="_blank" rel="noopener noreferrer"{{/if}}>{{site.announce.link_text}} {{{icons.arrow}}}</a>{{/if}}</p>
+  </div>
+</div>
+{{/if}}

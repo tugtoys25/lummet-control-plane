@@ -59,7 +59,7 @@ const SCRIPT = String.raw`
     var grid = document.getElementById('pm-grid');
     grid.textContent = '';
     (data.items || []).forEach(function (m) {
-      var ok = !st.size || (m.width === st.size && m.height === st.size);
+      var ok = !st.size || (m.width === st.size && m.height === st.size) || (m.external && !m.width);
       var b = el('button', 'pm-item');
       b.type = 'button';
       b.disabled = !ok;
@@ -67,7 +67,7 @@ const SCRIPT = String.raw`
       var th = el('div', 'pm-thumb'); var img = el('img'); img.alt = m.altText || ''; img.loading = 'lazy'; img.src = m.url; th.appendChild(img);
       b.appendChild(th);
       b.appendChild(el('div', 'pm-name', m.filename));
-      b.appendChild(el('div', 'pm-meta', typeName(m.mimeType) + (m.width ? ' · ' + m.width + '×' + m.height : '') + ' · ' + Math.max(1, Math.round(m.size / 1024)) + ' KB'));
+      b.appendChild(el('div', 'pm-meta', typeName(m.mimeType) + (m.width ? ' · ' + m.width + '×' + m.height : '') + (m.external ? ' · link' : ' · ' + Math.max(1, Math.round(m.size / 1024)) + ' KB')));
       b.addEventListener('click', function () { var cb = st.onPick; close(); if (cb) cb(m); });
       grid.appendChild(b);
     });
@@ -193,10 +193,25 @@ const SCRIPT = String.raw`
     if (!confirm('Delete this file? It cannot be undone.')) return;
     api('/api/platform/saas/media/' + encodeURIComponent(id), { method: 'DELETE' }).then(function (d) { if (d.success) location.reload(); else alert('Not deleted: ' + human(d.error, d.detail)); });
   };
+  function fullUrl(url) { return new URL(url, location.origin).href; }
+  function flash(btn, text) { var old = btn.getAttribute('data-label') || btn.textContent; btn.setAttribute('data-label', old); btn.textContent = text; setTimeout(function () { btn.textContent = old; }, 1800); }
   window.lummetMediaCopy = function (btn, url) {
-    var full = location.origin + url;
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(full).then(function () { btn.textContent = 'Copied'; });
+    var full = fullUrl(url);
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(full).then(function () { flash(btn, 'Copied'); }, function () { window.prompt('Copy this address', full); });
     else window.prompt('Copy this address', full);
+  };
+  window.lummetMediaShare = function (btn, url, name) {
+    var full = fullUrl(url);
+    if (navigator.share) { navigator.share({ title: name || 'Image', url: full }).catch(function () {}); return; }
+    window.lummetMediaCopy(btn, url); // no share sheet on this browser: copy the address instead
+  };
+  window.lummetMediaAddLink = function (form) {
+    var s = document.getElementById('link-status');
+    var body = { url: form.url.value, filename: form.filename.value, folder: form.folder.value || 'branding', altText: form.alt_text.value, width: form.width.value, height: form.height.value };
+    if (!body.url.trim()) { s.textContent = 'Paste an image address first.'; return; }
+    s.textContent = 'Adding…';
+    api('/api/platform/saas/media/from-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (d) { if (d.success) location.reload(); else s.textContent = 'Not added: ' + human(d.error, d.detail); });
   };
   document.addEventListener('click', function (e) {
     var t = e.target && e.target.closest ? e.target : null; if (!t) return;
@@ -205,8 +220,13 @@ const SCRIPT = String.raw`
     if (act === 'save') window.lummetMediaSave(id);
     else if (act === 'delete') window.lummetMediaDelete(id);
     else if (act === 'copy') window.lummetMediaCopy(a, a.getAttribute('data-url'));
+    else if (act === 'share') window.lummetMediaShare(a, a.getAttribute('data-url'), a.getAttribute('data-name'));
   });
-  document.addEventListener('submit', function (e) { var f = e.target; if (f && f.id === 'lib-upload') { e.preventDefault(); window.lummetMediaUpload(f); } });
+  document.addEventListener('submit', function (e) {
+    var f = e.target; if (!f) return;
+    if (f.id === 'lib-upload') { e.preventDefault(); window.lummetMediaUpload(f); }
+    else if (f.id === 'lib-link') { e.preventDefault(); window.lummetMediaAddLink(f); }
+  });
 })();
 `;
 
@@ -264,12 +284,14 @@ export async function renderMediaLibraryPage(env, admin, { folder = "", q = "", 
   const cards = data.items.map((m) => `<div class="card" data-media-id="${h(m.id)}" style="margin:0">
       <div class="pm-thumb"><img src="${h(m.url)}" alt="${h(m.altText)}" loading="lazy" /></div>
       <div class="pm-name" title="${h(m.filename)}">${h(m.filename)}</div>
-      <div class="pm-meta">${h(typeLabel(m.mimeType))}${m.width ? ` · ${m.width}×${m.height}` : ""} · ${h(kb(m.size))}</div>
+      <div class="pm-meta">${h(typeLabel(m.mimeType))}${m.width ? ` · ${m.width}×${m.height}` : ""} · ${m.external ? "link" : h(kb(m.size))}</div>
+      ${m.external ? `<div class="pm-meta" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${h(m.url)}">${h(m.url)}</div>` : ""}
       <label style="margin-top:8px">Alt text</label><input name="alt" value="${h(m.altText)}" maxlength="200" />
       <label>Folder</label><input name="folder" value="${h(m.folder)}" maxlength="32" />
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
         <button type="button" class="btn btn-small" data-media-act="save" data-id="${h(m.id)}">Save</button>
-        <button type="button" class="btn btn-secondary btn-small" data-media-act="copy" data-id="${h(m.id)}" data-url="${h(m.url)}">Copy address</button>
+        <button type="button" class="btn btn-secondary btn-small" data-media-act="copy" data-id="${h(m.id)}" data-url="${h(m.url)}">Copy link</button>
+        <button type="button" class="btn btn-secondary btn-small" data-media-act="share" data-id="${h(m.id)}" data-url="${h(m.url)}" data-name="${h(m.filename)}">Share</button>
         <button type="button" class="btn btn-danger btn-small" data-media-act="delete" data-id="${h(m.id)}">Delete</button>
       </div>
     </div>`).join("");
@@ -284,10 +306,21 @@ export async function renderMediaLibraryPage(env, admin, { folder = "", q = "", 
         <button class="btn" type="submit">Upload</button>
       </form>`
     : `<div class="flash flash-error">File storage is not set up: the <code>PLATFORM_MEDIA</code> R2 bucket is not bound, so uploads are off. See DEPLOYMENT.md.</div>`;
+  const linkForm = `<form id="lib-link" class="card" style="max-width:560px">
+        <h3 style="margin-top:0">Add by link</h3>
+        <p style="font-size:13px;color:var(--text-dim);margin-top:0">Keeps an image that is already hosted elsewhere in the library without uploading it. Works without file storage. The image stays at its own address: if it moves or is removed there, it stops showing here.</p>
+        <label for="link-url">Image address (https) *</label><input id="link-url" name="url" type="url" required maxlength="500" placeholder="https://…" />
+        <label for="link-name">File name</label><input id="link-name" name="filename" maxlength="120" placeholder="logo.png (taken from the address when empty)" />
+        <label for="link-folder">Folder</label><input id="link-folder" name="folder" value="branding" maxlength="32" />
+        <label for="link-alt">Alt text</label><input id="link-alt" name="alt_text" maxlength="200" />
+        <div style="display:flex;gap:8px"><div style="flex:1"><label for="link-w">Width (optional)</label><input id="link-w" name="width" type="number" min="1" max="16384" /></div><div style="flex:1"><label for="link-h">Height (optional)</label><input id="link-h" name="height" type="number" min="1" max="16384" /></div></div>
+        <div id="link-status" class="pm-status" role="status"></div>
+        <button class="btn" type="submit">Add from link</button>
+      </form>`;
   const body = `${STYLE}
     <h1>Media library</h1>
     <p class="subtitle">Platform · The control plane's own images: logos, favicons and app icons. Separate from every tenant's media library. Use them in <a href="/platform/saas/settings#branding">Branding</a>.</p>
-    ${upload}
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">${upload}${linkForm}</div>
     <form method="get" style="display:flex;gap:8px;margin:16px 0;flex-wrap:wrap">
       <input type="search" name="q" value="${h(q)}" placeholder="Search file name or alt text" style="width:auto;margin:0" />
       <select name="folder" style="width:auto;margin:0"><option value="">All folders</option>${data.folders.map((f) => `<option value="${h(f.folder)}"${f.folder === folder ? " selected" : ""}>${h(f.folder)} (${h(f.n)})</option>`).join("")}</select>

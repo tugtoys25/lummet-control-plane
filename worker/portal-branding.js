@@ -105,7 +105,14 @@ export async function validateValue(env, definition, raw) {
         return { ok: true, value: media.publicPathOf(key) };
       }
       const external = externalUrl(s);
-      return external ? { ok: true, value: external } : bad("invalid_image_address", "a file from the media library, or an https address");
+      if (!external) return bad("invalid_image_address", "a file from the media library, or an https address");
+      // An address that is in the library is checked like a stored file: its type (from the file name) and, when known, its size.
+      const linked = await media.getMediaByUrl(env, external);
+      if (linked) {
+        if (!definition.accept.includes(linked.mimeType)) return bad("wrong_image_type", `${definition.label} needs ${definition.accept.map((m) => m.replace("image/", "").replace("svg+xml", "svg").replace("x-icon", "ico")).join(" / ")}, this link is ${linked.mimeType.replace("image/", "")}`);
+        if (definition.size && linked.width && linked.height && (linked.width !== definition.size || linked.height !== definition.size)) return bad("wrong_dimensions", `${definition.label} must be ${definition.size} by ${definition.size} pixels, this link is ${linked.width} by ${linked.height}`);
+      }
+      return { ok: true, value: external };
     }
     default:
       return bad("invalid_value");

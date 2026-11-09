@@ -109,9 +109,14 @@ export async function loadSite(env, url) {
   const onBar = (href) => { const p = String(href || "").split(/[?#]/)[0]; return p === "/pricing" || p === "/login" || p === "/app/signup"; };
   const navMain = byPlacement("header").map((l) => ({ ...l, active: isActive(l.href, path), on_bar: onBar(l.href) }));
   const navCta = byPlacement("header_cta").map((l, i, arr) => ({ ...l, is_primary: i === arr.length - 1, on_bar: onBar(l.href) }));
-  const footerColumns = FOOTER_COLUMNS.map((c) => ({ title: ui[c.titleKey] || "", links: byPlacement(c.placement) })).filter(
-    (c) => c.links.length
-  );
+  // Link columns (Platform, Company). The Legal group is shown inline in the bottom bar, as on Stripe, Amazon and Apple.
+  const footerColumns = FOOTER_COLUMNS.filter((c) => c.placement !== "footer_legal")
+    .map((c) => {
+      const links = byPlacement(c.placement);
+      return { title: ui[c.titleKey] || "", links, wide: links.length > 6 };
+    })
+    .filter((c) => c.links.length);
+  const footerLegal = byPlacement("footer_legal");
 
   const brandStrip = brandStripModels(brandRows);
 
@@ -186,6 +191,9 @@ export async function loadSite(env, url) {
       footer_cta: footerCta,
       footer_columns: footerColumns,
       has_footer_columns: footerColumns.length > 0,
+      footer_legal: footerLegal,
+      footer_legal_title: ui.footer_legal_title || "Legal",
+      footer_top_label: ui.footer_back_to_top || "Back to top",
       cookie_settings_label: cookieSettingsLabel(env, ui)
     },
     icons: {

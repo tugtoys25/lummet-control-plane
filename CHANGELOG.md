@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.8.3 - Enterprise footer
+
+Presentation only; no migration. Pattern taken from Stripe, Amazon, Cloudflare and Apple: brand block plus link columns, one hairline, a slim legal row.
+
+- **Layout:** brand block (logo, footer text, contact email) on the left, then the Platform and Company link columns. A column with more than six links (Platform) is laid out in two columns on tablet and desktop.
+- **Legal links** (the `footer_legal` nav group, still edited under Nav links) now sit inline in the bottom bar next to the copyright line, instead of a third column.
+- **Bottom bar:** copyright, legal links, Cookie settings (when enabled) and a *Back to top* link (`<body id="top">`; label from the `footer_back_to_top` UI string, default "Back to top").
+- **Type and colour:** column headings in white 14 px semibold (were small, dim uppercase); links 14 px at 72% white, underline on hover; hairline rules at 14% white. Same dark footer colour.
+- `ASSET_VERSION` is `ui13`. New test file `test/enterprise-footer.test.js`.
+
 ## 2.8.2 - Background colour for homepage sections, pages and settings
 
 One additive migration (`0098_page_header_background.sql`, adds `lummet_pages.header_background`, default `default`); no existing row changes appearance.

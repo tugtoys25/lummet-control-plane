@@ -39,9 +39,10 @@ export function formPath(key) {
   return key === "contact" || key === "demo" || key === CONTACT_SALES_KEY ? `/${key}` : `/forms/${key}`;
 }
 
-// The public forms that carry the optional Turnstile check (PUBLIC_FORMS_TURNSTILE_REQUIRED). /contact-sales has always been protected
-// like /contact; giving it its own record key (H.5) must not drop that.
-const isProtectedForm = (key) => key === "contact" || key === "demo" || key === CONTACT_SALES_KEY;
+// Every public form carries the optional Turnstile check (PUBLIC_FORMS_TURNSTILE_REQUIRED): /contact, /demo, /contact-sales and the custom
+// /forms/:key forms made in the dashboard. /contact-sales has always been protected like /contact; giving it its own record key (H.5)
+// must not drop that.
+const turnstileOn = (env) => String(env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on";
 
 /**
  * The form record and fields to show for `key`. /contact-sales (H.5) stores its inquiries under its own key `contact-sales`, so sales
@@ -234,9 +235,9 @@ async function renderForm(ctx, { key, path: pathOverride, form, fields, values =
       has_errors: hasErrors,
       honeypot: HONEYPOT_FIELD,
       turnstile: {
-        required: isProtectedForm(key) && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on",
-        enabled: isProtectedForm(key) && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && Boolean(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
-        misconfigured: isProtectedForm(key) && String(ctx.env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && !(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
+        required: turnstileOn(ctx.env),
+        enabled: turnstileOn(ctx.env) && Boolean(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
+        misconfigured: turnstileOn(ctx.env) && !(ctx.env.TURNSTILE_SITE_KEY && ctx.env.TURNSTILE_SECRET_KEY),
         siteKey: String(ctx.env.TURNSTILE_SITE_KEY || "")
       },
       crumbs: trail
@@ -296,9 +297,9 @@ export async function submitForm(ctx, { key, path, fallbackKey = null }) {
   // Honeypot: a human never sees this field. Pretend it worked, store nothing.
   if (String(formData.get(HONEYPOT_FIELD) || "").trim() !== "") return redirectToSent();
 
-  // Public contact/demo bot protection is opt-in and fail-closed. Generic custom forms
-  // are intentionally unaffected; no token is ever logged or persisted.
-  if (isProtectedForm(key) && String(env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on") {
+  // Public form bot protection (contact, demo, contact-sales and every custom /forms/:key form) is opt-in and fail-closed.
+  // No token is ever logged or persisted.
+  if (turnstileOn(env)) {
     const token = String(formData.get("cf-turnstile-response") || "").trim();
     if (!env.TURNSTILE_SECRET_KEY || !env.TURNSTILE_SITE_KEY || !token) {
       return fail(503, "This form is temporarily unavailable because bot protection is not configured. Please contact support directly.");

@@ -78,7 +78,9 @@ export async function renderPage(ctx, { template, data = {}, head = "", status =
     for (const m of html.matchAll(/<link rel="preload" href="(\/static\/fonts\/[^"]+)" as="font" type="([^"]+)" crossorigin>/g)) hints.push(`<${m[1]}>; rel=preload; as=font; type="${m[2]}"; crossorigin`);
     if (hints.length) response.headers.set("link", hints.join(", "));
   }
-  const isPublicForm = ["/contact", "/demo", "/contact-sales"].includes(url.pathname.replace(/\/+$/, "") || "/");
+  const formPath = url.pathname.replace(/\/+$/, "") || "/";
+  // The form pages: /contact, /demo, /contact-sales and the custom forms at /forms/:key (they all show the Turnstile widget when it is on).
+  const isPublicForm = ["/contact", "/demo", "/contact-sales"].includes(formPath) || /^\/forms\/[^/]+$/.test(formPath);
   const turnstileEnabled = isPublicForm && String(env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && Boolean(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY);
   if (!turnstileEnabled) return response;
   const headers = new Headers(response.headers);

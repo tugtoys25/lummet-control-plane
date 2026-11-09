@@ -227,6 +227,45 @@ test('public Turnstile validates the provider result hostname and never stores i
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('custom /forms/:key forms carry Turnstile too: widget and CSP when on, fail closed without a token, nothing stored', async () => {
+  const env = createPublicEnv();
+  await env.db.prepare(`INSERT INTO lummet_forms (form_key, title, submit_label, success_title, success_message, status) VALUES ('press','Press enquiries','Send','Sent','<p>Done.</p>','published')`).run();
+  await env.db.prepare(`INSERT INTO lummet_form_fields (form_key, field_key, label, type, required, sort_order) VALUES ('press','email','Email','email',1,1)`).run();
+  const body = { f_email: 'ada@example.test' };
+  // Off by default: no widget, no extra CSP origin, submission stored.
+  const off = await get(handlePublicRoute, env, '/forms/press');
+  assert.doesNotMatch(await text(off), /cf-turnstile|challenges\.cloudflare\.com/);
+  assert.doesNotMatch(off.headers.get('content-security-policy') || '', /challenges\.cloudflare\.com/);
+  assert.equal((await post(handlePublicRoute, env, '/forms/press', body)).status, 303);
+  assert.equal((await inquiries(env)).length, 1);
+
+  env.PUBLIC_FORMS_TURNSTILE_REQUIRED = 'on';
+  env.TURNSTILE_SITE_KEY = 'site-key-press'; env.TURNSTILE_SECRET_KEY = 'secret';
+  const on = await get(handlePublicRoute, env, '/forms/press');
+  assert.match(await text(on), /class="cf-turnstile" data-sitekey="site-key-press"/);
+  const csp = on.headers.get('content-security-policy');
+  assert.match(csp, /script-src 'self' https:\/\/challenges\.cloudflare\.com/);
+  assert.match(csp, /connect-src 'self' https:\/\/challenges\.cloudflare\.com/);
+  assert.match(csp, /frame-src https:\/\/challenges\.cloudflare\.com/);
+
+  const realFetch = globalThis.fetch;
+  try {
+    const missing = await post(handlePublicRoute, env, '/forms/press', body);
+    assert.equal(missing.status, 503);
+    assert.equal((await inquiries(env)).length, 1);
+    globalThis.fetch = async () => new Response(JSON.stringify({ success: true, hostname: 'attacker.test' }), { status: 200 });
+    const wrongHost = await post(handlePublicRoute, env, '/forms/press', { ...body, 'cf-turnstile-response': 'bad' });
+    assert.equal(wrongHost.status, 422);
+    assert.equal((await inquiries(env)).length, 1);
+    globalThis.fetch = async () => new Response(JSON.stringify({ success: true, hostname: 'lummet.test' }), { status: 200 });
+    const ok = await post(handlePublicRoute, env, '/forms/press', { ...body, 'cf-turnstile-response': 'good-token' });
+    assert.equal(ok.status, 303);
+    const rows = await inquiries(env);
+    assert.equal(rows.length, 2);
+    assert.doesNotMatch(JSON.stringify(rows[1]), /good-token|secret/);
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('invalid submissions re-render the form with field errors and keep what was typed; nothing is stored', async () => {
   const env = createPublicEnv();
   const res = await post(handlePublicRoute, env, '/contact', { f_name: '', f_email: 'not-an-email', f_message: 'Keep this text' });

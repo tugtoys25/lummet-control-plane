@@ -91,7 +91,7 @@ export const SETTINGS = [
   def("PUBLIC_LEGAL_PAGES", "Public site", "enum", { options: ["off", "draft", "on"], default: "off", help: "Legal pages: off, draft (watermarked, noindex) or on. on only with recorded counsel approval per market." }),
   def("DEMO_PAGE_PLANS", "Public site", "enum", { options: ON_OFF, default: "off", help: "List plans under the /demo form." }),
   def("DEMO_PLANS_PRODUCT", "Public site", "text", { max: 80, pattern: /^[A-Za-z0-9_.:-]+$/, default: "", help: "Optional product id that picks which plan family /demo shows." }),
-  def("PUBLIC_FORMS_TURNSTILE_REQUIRED", "Public site", "enum", { options: ON_OFF, default: "off", help: "Require Turnstile on the contact and demo forms (needs the site key and secret)." }),
+  def("PUBLIC_FORMS_TURNSTILE_REQUIRED", "Public site", "enum", { options: ON_OFF, default: "off", help: "Require Turnstile on the contact and demo forms and on every custom /forms/... form (needs the site key and secret)." }),
   def("CUSTOMER_TURNSTILE_REQUIRED", "Public site", "enum", { options: ON_OFF, default: "off", help: "Require Turnstile on customer sign-up, sign-in and forgot-password (needs the site key and secret)." }),
   def("CONTACT_EMAIL", "Public site", "email", { default: "", help: "Shown on the homepage 'Get in Touch' section as a mailto link." }),
   def("STATUS_PROVIDER_URL", "Public site", "url", { default: "", help: "Public status page address (https)." }),

@@ -5565,7 +5565,7 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas/jobs") return html(await renderJobsPage(env, admin, { status: url.searchParams.get("status") || "", type: url.searchParams.get("type") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/email") return html(await renderEmailPage(env, admin));
         if (path === "/platform/saas/settings") return html(await renderPlatformSettingsPage(env, admin));
-        if (path === "/platform/saas/media") return html(await renderMediaLibraryPage(env, admin, { folder: url.searchParams.get("folder") || "", q: url.searchParams.get("q") || "", page: url.searchParams.get("page") || 1 }));
+        if (path === "/platform/saas/media") return html(await renderMediaLibraryPage(env, admin, { folder: url.searchParams.get("folder") || "", q: url.searchParams.get("q") || "", page: url.searchParams.get("page") || 1, kind: url.searchParams.get("kind") || "" }));
         if (path === "/platform/saas/notifications") return html(await renderNotificationsPage(env, admin, { organization: url.searchParams.get("organization") || "", kind: url.searchParams.get("kind") || "", state: url.searchParams.get("state") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/releases") return html(await renderTenantTemplatePage(env, admin));
         if (path === "/platform/saas/site-presets") return html(await renderSitePresetsPage(env, admin, { status: url.searchParams.get("status") || "" }));

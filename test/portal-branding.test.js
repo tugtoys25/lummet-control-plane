@@ -37,7 +37,8 @@ function fakeR2() {
   return {
     m,
     async put(k, v, o) { m.set(k, { body: v, o }); },
-    async get(k) { const e = m.get(k); return e ? { body: e.body, httpEtag: `"${k.length}-${e.body.length}"`, httpMetadata: e.o?.httpMetadata } : null; },
+    async get(k, opts) { const e = m.get(k); if (!e) return null; const body = opts?.range ? e.body.slice(opts.range.offset, opts.range.offset + opts.range.length) : e.body; return { body, httpEtag: `"${k.length}-${e.body.length}"`, httpMetadata: e.o?.httpMetadata }; },
+    async head(k) { const e = m.get(k); return e ? { size: e.body.length, httpEtag: `"${k.length}-${e.body.length}"` } : null; },
     async delete(k) { m.delete(k); }
   };
 }
@@ -401,7 +402,7 @@ test('uploads without storage answer 503 and the page says so; a cross-site uplo
 test('an oversized upload is refused before it is read', async () => {
   const env = makeEnv();
   const cookie = await staffCookie(env);
-  const r = await call(env, 'POST', '/api/platform/saas/media', { cookie, form: new FormData(), headers: { 'Content-Length': String(media.MAX_IMAGE_BYTES + 1024 * 1024) } });
+  const r = await call(env, 'POST', '/api/platform/saas/media', { cookie, form: new FormData(), headers: { 'Content-Length': String(media.MAX_REQUEST_BYTES + 1) } });
   assert.deepEqual([r.status, r.json.error], [413, 'file_too_large']);
 });
 
@@ -461,4 +462,103 @@ test('through the Worker: add by link, copy and share buttons, and the link form
   assert.equal(del.status, 200);
   const rows = (await env.LUMMET_DB.prepare("SELECT action, success FROM lummet_audit_logs WHERE resource = 'platform_media' AND action LIKE 'add_link%'").all()).results;
   assert.deepEqual(rows.map((r) => r.action).sort(), ['add_link', 'add_link', 'add_link_duplicate']);
+});
+
+// ---------- video, documents, several files at once (2.8.2) ----------
+const mp4 = () => new Uint8Array([0, 0, 0, 24, ...enc('ftypisom'), 0, 0, 2, 0, ...enc('isomiso2'), 1, 2, 3, 4, 5, 6, 7, 8]);
+const webm = () => new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+const pdf = () => enc('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+const docx = () => new Uint8Array([0x50, 0x4b, 0x03, 0x04, 20, 0, 0, 0, 8, 0, 0, 0, 0, 0, ...enc('[Content_Types].xml'), 1, 2, 3, 4]);
+const doc = () => new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0]);
+
+test('video and documents are recognised from their bytes, and a wrong name is refused', async () => {
+  const env = makeEnv();
+  const up = (bytes, name) => media.uploadMedia(env, { file: file(bytes, name) });
+  const ok = { 'clip.mp4': mp4(), 'clip.MOV': mp4(), 'clip.webm': webm(), 'guide.pdf': pdf(), 'notes.txt': enc('hello, plain text \u00e9'), 'a.docx': docx(), 'old.doc': doc(), 'x.txt': enc('hi') };
+  const kinds = {};
+  for (const [name, bytes] of Object.entries(ok)) { const r = await up(bytes, name); assert.equal(r.ok, true, `${name} ${JSON.stringify(r)}`); kinds[name] = [r.media.kind, r.media.mimeType, r.media.width]; }
+  assert.deepEqual(kinds['clip.mp4'], ['video', 'video/mp4', null]);
+  assert.deepEqual(kinds['guide.pdf'], ['document', 'application/pdf', null]);
+  assert.equal(kinds['a.docx'][1], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  assert.equal((await up(pdf(), 'fake.mp4')).error, 'not_a_valid_file');
+  assert.equal((await up(mp4(), 'fake.pdf')).error, 'not_a_valid_file');
+  assert.equal((await up(new Uint8Array([0xff, 0xfe, 0, 1, 2, 3, 4, 5]), 'bin.txt')).error, 'not_a_valid_file');
+  assert.equal((await up(enc('PK\u0003\u0004 not word at all......'), 'fake.docx')).error, 'not_a_valid_file');
+  assert.equal((await up(png(8, 8), 'pic.mp4')).error, 'not_a_valid_file');
+  assert.equal((await up(mp4(), 'pic.png')).error, 'not_an_image');
+  assert.equal((await up(mp4(), 'run.exe')).error, 'unsupported_file_type');
+  assert.equal((await media.listMedia(env, { accept: media.KIND_FILTERS.video })).total, 2);
+  assert.equal((await media.listMedia(env, { accept: media.KIND_FILTERS.file })).total, 5);
+});
+
+test('each kind has its own size limit', async () => {
+  const env = makeEnv();
+  const pad = (head, n) => { const b = new Uint8Array(n); b.set(head); return b; };
+  const up = (bytes, name) => media.uploadMedia(env, { file: file(bytes, name) });
+  assert.equal((await up(pad(pdf(), media.MAX_DOCUMENT_BYTES + 1), 'big.pdf')).error, 'file_too_large');
+  assert.equal((await up(pad(mp4(), media.MAX_VIDEO_BYTES + 1), 'big.mp4')).error, 'file_too_large');
+  assert.equal((await up(pad(mp4(), media.MAX_IMAGE_BYTES + 1024), 'ok.mp4')).ok, true, 'a video may be larger than an image may');
+  assert.equal((await up(pad(png(8, 8), media.MAX_IMAGE_BYTES + 1), 'big.png')).error, 'file_too_large');
+});
+
+test('several files in one go: each is checked on its own and a bad one does not stop the others', async () => {
+  const env = makeEnv();
+  const cookie = await staffCookie(env);
+  const form = new FormData();
+  form.append('file', file(png(16, 16), 'a.png')); form.append('file', file(mp4(), 'b.mp4')); form.append('file', file(enc('nope'), 'c.png')); form.append('file', file(pdf(), 'd.pdf')); form.append('file', file(png(16, 16), 'a-again.png'));
+  const r = await call(env, 'POST', '/api/platform/saas/media', { cookie, form });
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual([r.json.success, r.json.uploaded, r.json.failed], [true, 4, 1]);
+  assert.deepEqual(r.json.results.map((x) => [x.name, x.ok]), [['a.png', true], ['b.mp4', true], ['c.png', false], ['d.pdf', true], ['a-again.png', true]]);
+  assert.equal(r.json.results[2].error, 'not_an_image');
+  assert.equal(r.json.results[4].duplicate, true);
+  assert.equal(env.PLATFORM_MEDIA.m.size, 3);
+  const tooMany = new FormData(); for (let i = 0; i < media.MAX_FILES_PER_REQUEST + 1; i += 1) tooMany.append('file', file(png(8 + i, 8), `f${i}.png`));
+  assert.deepEqual([(await call(env, 'POST', '/api/platform/saas/media', { cookie, form: tooMany })).json.error], ['too_many_files']);
+  const allBad = new FormData(); allBad.append('file', file(enc('x'), 'a.png')); allBad.append('file', file(enc('y'), 'b.png'));
+  assert.equal((await call(env, 'POST', '/api/platform/saas/media', { cookie, form: allBad })).json.success, false);
+  const rows = (await env.LUMMET_DB.prepare("SELECT COUNT(*) AS n FROM lummet_audit_logs WHERE resource = 'platform_media' AND action LIKE 'upload%'").first()).n;
+  assert.equal(Number(rows), 5 + 1 + 2, 'one audit row per file read (5 + 2), and one for the batch refused as too many (1)');
+});
+
+test('video plays with byte ranges; documents and text are served safely', async () => {
+  const env = makeEnv();
+  const cookie = await staffCookie(env);
+  const body = new Uint8Array(1000); body.set(mp4()); for (let i = 40; i < 1000; i += 1) body[i] = i % 251;
+  const v = (await upload(env, cookie, body, 'clip.mp4')).json.media;
+  const full = await call(env, 'GET', v.url);
+  assert.deepEqual([full.status, full.headers.get('Content-Type'), full.headers.get('Accept-Ranges'), full.buf.length], [200, 'video/mp4', 'bytes', 1000]);
+  const part = await call(env, 'GET', v.url, { headers: { Range: 'bytes=100-199' } });
+  assert.deepEqual([part.status, part.headers.get('Content-Range'), part.headers.get('Content-Length'), part.buf.length, part.buf[0]], [206, 'bytes 100-199/1000', '100', 100, body[100]]);
+  const tail = await call(env, 'GET', v.url, { headers: { Range: 'bytes=-50' } });
+  assert.deepEqual([tail.status, tail.headers.get('Content-Range')], [206, 'bytes 950-999/1000']);
+  assert.equal((await call(env, 'GET', v.url, { headers: { Range: 'bytes=5000-6000' } })).status, 416);
+  assert.equal((await call(env, 'GET', v.url, { headers: { Range: 'bytes=0-0,5-9' } })).status, 200, 'a multi-range request gets the whole file');
+  const d = (await upload(env, cookie, docx(), 'report.docx')).json.media;
+  const dl = await call(env, 'GET', d.url);
+  assert.match(dl.headers.get('Content-Disposition'), /^attachment/);
+  const t = (await upload(env, cookie, enc('<b>not html</b>'), 'n.txt')).json.media;
+  const txt = await call(env, 'GET', t.url);
+  assert.deepEqual([txt.headers.get('Content-Type'), txt.headers.get('X-Content-Type-Options'), txt.headers.get('Content-Disposition')], ['text/plain; charset=utf-8', 'nosniff', 'inline']);
+  const p = (await upload(env, cookie, pdf(), 'g.pdf')).json.media;
+  assert.equal((await call(env, 'GET', p.url)).headers.get('Content-Type'), 'application/pdf');
+});
+
+test('library page: several files, type filter, video and document cards; links to video and documents work', async () => {
+  const env = makeEnv();
+  const cookie = await staffCookie(env);
+  await upload(env, cookie, mp4(), 'clip.mp4'); await upload(env, cookie, pdf(), 'guide.pdf'); await upload(env, cookie, png(16, 16), 'pic.png');
+  const page = await call(env, 'GET', '/platform/saas/media', { cookie });
+  assert.ok(/id="lib-file" type="file" multiple accept="[^"]*\.mp4[^"]*\.pdf/.test(page.text));
+  assert.ok(page.text.includes('<video src="/brand-media/branding/') && page.text.includes('class="pm-tile">PDF'));
+  const videos = await call(env, 'GET', '/platform/saas/media?kind=video', { cookie });
+  assert.ok(videos.text.includes('clip.mp4') && !videos.text.includes('guide.pdf') && !videos.text.includes('pic.png'));
+  assert.ok(videos.text.includes('<option value="video" selected>'));
+  const files = await call(env, 'GET', '/api/platform/saas/media?kind=file', { cookie });
+  assert.deepEqual(files.json.items.map((i) => i.filename), ['guide.pdf']);
+  for (const m of page.text.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)) { if (!/src=/.test(m[1])) assert.doesNotThrow(() => new vm.Script(m[2])); }
+  const link = await media.addFromUrl(env, { url: 'https://cdn.example.com/promo.mp4' });
+  assert.deepEqual([link.ok, link.media.kind], [true, 'video']);
+  assert.equal((await media.addFromUrl(env, { url: 'https://cdn.example.com/menu.pdf' })).media.kind, 'document');
+  assert.equal((await save(env, { logo: link.media.url })).errors.logo.error, 'wrong_image_type', 'a video cannot be a logo');
 });

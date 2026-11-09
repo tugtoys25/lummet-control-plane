@@ -4,8 +4,8 @@
 //
 //   GET    /api/platform/saas/branding             every branding field with its value, plus whether file storage is set up
 //   PUT    /api/platform/saas/branding             { values: {key: value}, reason }   empty value clears; all-or-nothing
-//   GET    /api/platform/saas/media                ?folder=&q=&accept=image/png,image/svg+xml&page=
-//   POST   /api/platform/saas/media                multipart: file, folder?, alt_text?
+//   GET    /api/platform/saas/media                ?folder=&q=&kind=image|video|file&accept=image/png,image/svg+xml&page=
+//   POST   /api/platform/saas/media                multipart: file (one or up to 10), folder?, alt_text?. One file: {media}. Several: {results:[...]}
 //   POST   /api/platform/saas/media/from-url      { url, filename?, folder?, altText?, width?, height? }  keeps the image at its own https address
 //   PATCH  /api/platform/saas/media/:id            { altText?, folder? }
 //   DELETE /api/platform/saas/media/:id            refused (409 media_in_use) while a branding value points at the file
@@ -17,8 +17,8 @@ import * as branding from "./portal-branding.js";
 import * as media from "./platform-media.js";
 
 const ID = /^\/api\/platform\/saas\/media\/([A-Za-z0-9_-]{1,64})$/;
-// A multipart body is a little bigger than the file inside it. Anything much bigger than the cap is refused before it is read.
-const MAX_BODY = media.MAX_IMAGE_BYTES + 512 * 1024;
+// Anything bigger than the largest allowed upload (a video) plus its multipart wrapping is refused before it is read.
+const MAX_BODY = media.MAX_REQUEST_BYTES;
 
 export async function handlePortalBrandingRoute(ctx) {
   const { env, request, url, method, path, admin, requestId, ipHash, json, logAudit } = ctx;
@@ -53,7 +53,8 @@ export async function handlePortalBrandingRoute(ctx) {
 
   if (isMediaList) {
     if (method === "GET") {
-      const accept = (url.searchParams.get("accept") || "").split(",").map((m) => m.trim()).filter(Boolean);
+      const kind = media.KIND_FILTERS[url.searchParams.get("kind") || ""] || null;
+      const accept = kind || (url.searchParams.get("accept") || "").split(",").map((m) => m.trim()).filter(Boolean);
       const data = await media.listMedia(env, { folder: url.searchParams.get("folder") || "", search: url.searchParams.get("q") || "", accept: accept.length ? accept : null, page: url.searchParams.get("page") || 1 });
       return json({ success: true, ...data, storageConfigured: media.storageConfigured(env) });
     }
@@ -63,11 +64,20 @@ export async function handlePortalBrandingRoute(ctx) {
       if (Number.isFinite(declared) && declared > MAX_BODY) { const r = { ok: false, status: 413, error: "file_too_large" }; await audit("platform_media", null, "upload", r); return fail(r); }
       let form;
       try { form = await request.formData(); } catch (_) { form = null; }
-      const file = form && form.get("file");
-      if (!file || typeof file === "string") { const r = { ok: false, status: 400, error: "no_file" }; await audit("platform_media", null, "upload", r); return fail(r); }
-      const result = await media.uploadMedia(env, { file, folder: form.get("folder") || undefined, altText: form.get("alt_text") || "", actorId });
-      await audit("platform_media", result.ok ? result.media.id : null, result.ok && result.duplicate ? "upload_duplicate" : "upload", result, result.ok ? result.media.filename : "");
-      return result.ok ? json({ success: true, duplicate: !!result.duplicate, media: result.media }, result.duplicate ? 200 : 201) : fail(result);
+      const files = form ? form.getAll("file").filter((f) => f && typeof f !== "string") : [];
+      if (!files.length) { const r = { ok: false, status: 400, error: "no_file" }; await audit("platform_media", null, "upload", r); return fail(r); }
+      if (files.length > media.MAX_FILES_PER_REQUEST) { const r = { ok: false, status: 413, error: "too_many_files", detail: `${media.MAX_FILES_PER_REQUEST} at most per request` }; await audit("platform_media", null, "upload", r); return fail(r); }
+      const folder = form.get("folder") || undefined;
+      const altText = form.get("alt_text") || "";
+      const results = [];
+      for (const file of files) {
+        const result = await media.uploadMedia(env, { file, folder, altText, actorId });
+        await audit("platform_media", result.ok ? result.media.id : null, result.ok && result.duplicate ? "upload_duplicate" : "upload", result, result.ok ? result.media.filename : file.name);
+        results.push({ name: file.name, ...result });
+      }
+      if (files.length === 1) { const result = results[0]; return result.ok ? json({ success: true, duplicate: !!result.duplicate, media: result.media }, result.duplicate ? 200 : 201) : fail(result); }
+      const uploaded = results.filter((r) => r.ok).length;
+      return json({ success: uploaded > 0, uploaded, failed: results.length - uploaded, results: results.map((r) => (r.ok ? { name: r.name, ok: true, duplicate: !!r.duplicate, media: r.media } : { name: r.name, ok: false, error: r.error, detail: r.detail || null })) });
     }
     return null;
   }

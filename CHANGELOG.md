@@ -20,7 +20,7 @@ One additive migration (`0098_page_header_background.sql`, adds `lummet_pages.he
 - Values outside the four choices are treated as Default, so a bad edit cannot inject a class name. `worker/public-site/backgrounds.js` holds the rule.
 - `ASSET_VERSION` is `ui12`. New test file `test/section-backgrounds.test.js`.
 
-## 2.8.1 - Media library: add by link, copy and share
+## 2.8.1 - Media library: add by link, copy and share, several files, video and documents
 
 One additive migration (0097); no new bindings.
 
@@ -28,7 +28,9 @@ One additive migration (0097); no new bindings.
 - A library link used as an icon is checked like a stored file: its type, and its size when width and height were given. A link used by a branding value cannot be deleted.
 - **Copy link** and **Share** buttons on every image card (Share opens the phone's share sheet, and falls back to copying where there is none). Stored files copy as a full address on this site; links copy as they are.
 - Migration 0097: `platform_media.external_url` (+ unique index). A link row's `r2_key` is the placeholder `ext:<id>`, which is never a valid object key.
-- Tests: 3 more in `test/portal-branding.test.js` (24).
+- **Several files at once**: the upload form and the picker take many files. The browser sends them one request at a time (the Worker never holds more than one file); each is checked on its own, a bad one is named and the rest still go up. The API also accepts up to 10 `file` parts in one request and answers `{results:[...]}`; one file still answers `{media}`.
+- **Video and documents** besides images: MP4/M4V, MOV, WebM, OGG/OGV; PDF, TXT, DOC, DOCX. Like images, the type comes from the bytes and the name has to agree (`not_a_valid_file` otherwise). Limits by kind: image 5 MB, document 10 MB, video 25 MB (a Worker reads the file into memory, so it is below the tenant's 100 MB). Video is served with byte ranges (iPhone/Safari), Word files download instead of opening, text is served as `text/plain; charset=utf-8`. Library page: Type filter (Images / Video / Documents), video player and document tiles on the cards; `?kind=` on the list API. Icon fields still accept images only.
+- Tests: 8 more in `test/portal-branding.test.js` (29).
 
 ## 2.8.0 - Portal branding and the control plane's own media library
 

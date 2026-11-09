@@ -301,20 +301,44 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
 .hero + .stats-section .stat dd, .hero + .banner-ad + .stats-section .stat dd { color: #fff; }
 .hero + .stats-section .stat dt, .hero + .banner-ad + .stats-section .stat dt { color: rgba(255,255,255,0.85); }
 
-/* ---- Background bands for homepage sections and page headers (bg-soft | bg-blue | bg-dark; default = none) ---- */
+/* ---- Background bands for homepage sections and page headers (bg-soft | bg-blue | bg-dark; default = none) ----
+   Every component reads colour TOKENS (--ink, --ink-dim, --surface, --border, --accent-ink, --ok ...). On a blue or dark band we
+   re-point those tokens to light-on-dark values ONCE, here, instead of patching components one by one. Cards, checklists, FAQ items,
+   stats, badges, chips, the "cancel anytime" notes, tables and brand categories then follow automatically and cannot end up
+   white-on-white or dark-on-blue. A new component needs no band rule as long as it uses the tokens for text and surfaces
+   (never a hard-coded #fff or #111). --accent and --band are left alone because buttons and decorative marks use them as fills. ---- */
 .page-hero.bg-default { background: var(--bg); }
 .section.bg-blue, .page-hero.bg-blue { background: var(--band); }
 .section.bg-dark, .page-hero.bg-dark { background: var(--dark-1); }
-.section.bg-blue, .section.bg-dark, .page-hero.bg-blue, .page-hero.bg-dark { color: #fff; border-color: transparent; }
-:is(.bg-blue, .bg-dark) .section-head h2, :is(.bg-blue, .bg-dark) h1 { color: #fff; }
-:is(.bg-blue, .bg-dark) :is(.lede, .lede p, .prose p, .prose li) { color: rgba(255, 255, 255, 0.9); }
-:is(.bg-blue, .bg-dark) .lede a, :is(.bg-blue, .bg-dark) .prose a { color: #fff; text-decoration: underline; }
-:is(.bg-blue, .bg-dark) > .container > .eyebrow, :is(.bg-blue, .bg-dark) .section-head .eyebrow, :is(.bg-blue, .bg-dark) .page-hero .eyebrow { color: rgba(255, 255, 255, 0.8); }
-:is(.bg-blue, .bg-dark) .breadcrumbs ol, :is(.bg-blue, .bg-dark) .breadcrumbs a { color: rgba(255, 255, 255, 0.8); }
-:is(.bg-blue, .bg-dark) .breadcrumbs li + li::before { color: rgba(255, 255, 255, 0.5); }
-.section.bg-blue .btn-primary { background: #fff; color: #1447b8; }
-.section.bg-blue .btn-primary:hover { background: #eef3ff; color: #1447b8; }
-.section.bg-blue .btn-secondary { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.5); }
-.section.bg-blue .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: #fff; }
+:is(.section, .page-hero):is(.bg-blue, .bg-dark) {
+  color: #fff; border-color: transparent;
+  --ink: #ffffff; --ink-dim: rgba(255, 255, 255, 0.88); --ink-faint: rgba(255, 255, 255, 0.82);
+  --accent-ink: #ffffff; --ok: #86efac;
+  --shadow-sm: none; --shadow-md: none; --shadow-lg: none;
+}
+:is(.section, .page-hero).bg-blue {
+  --surface: rgba(9, 22, 64, 0.30); --surface-raised: rgba(9, 22, 64, 0.38);
+  --bg-soft: rgba(9, 22, 64, 0.30); --bg-tint: rgba(9, 22, 64, 0.24);
+  --accent-soft: rgba(9, 22, 64, 0.32); --ok-soft: rgba(9, 22, 64, 0.35);
+  --border: rgba(255, 255, 255, 0.28); --border-strong: rgba(255, 255, 255, 0.5);
+}
+:is(.section, .page-hero).bg-dark {
+  --surface: rgba(255, 255, 255, 0.06); --surface-raised: rgba(255, 255, 255, 0.09);
+  --bg-soft: rgba(255, 255, 255, 0.06); --bg-tint: rgba(255, 255, 255, 0.08);
+  --accent-soft: rgba(255, 255, 255, 0.14); --ok-soft: rgba(134, 239, 172, 0.18);
+  --border: rgba(255, 255, 255, 0.16); --border-strong: rgba(255, 255, 255, 0.32);
+}
+:is(.bg-blue, .bg-dark) :is(.lede, .lede p, .prose p, .prose li) { color: rgba(255, 255, 255, 0.92); }
+:is(.bg-blue, .bg-dark) :is(.lede, .prose) a { color: #fff; text-decoration: underline; }
+:is(.bg-blue, .bg-dark) .breadcrumbs li + li::before { color: rgba(255, 255, 255, 0.55); }
+/* Logos and brand marks are artwork drawn for a light tile, so they keep a white tile on any band. */
+:is(.bg-blue, .bg-dark) :is(.brand-hero-logo, .brand-thumb) { background: #fff; border-color: rgba(255, 255, 255, 0.6); }
+:is(.bg-blue, .bg-dark) .step-no { color: #fff; }
+/* Buttons: blue-on-blue is invisible, and the primary hover uses --accent-ink (now white), so both are set explicitly. */
+:is(.section, .page-hero):is(.bg-blue, .bg-dark) .btn-secondary { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.5); }
+:is(.section, .page-hero):is(.bg-blue, .bg-dark) .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: #fff; }
+:is(.section, .page-hero):is(.bg-blue, .bg-dark) .btn-primary:hover { background: #eef3ff; color: #1447b8; }
+:is(.section, .page-hero).bg-blue .btn-primary { background: #fff; color: #1447b8; }
+:is(.section, .page-hero).bg-blue .chip.is-active { background: #fff; border-color: #fff; color: #1447b8; }
 .section.bg-blue.stats-section .stat dd, .section.bg-dark.stats-section .stat dd { color: #fff; }
-.section.bg-blue.stats-section .stat dt, .section.bg-dark.stats-section .stat dt { color: rgba(255, 255, 255, 0.85); }
+.section.bg-blue.stats-section .stat dt, .section.bg-dark.stats-section .stat dt { color: rgba(255, 255, 255, 0.88); }

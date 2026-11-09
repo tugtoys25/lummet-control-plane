@@ -98,6 +98,8 @@ import { billing } from "./billing.js";
 import { cryptoBilling } from "./billing-nowpayments-service.js";
 import * as billingGateways from "./billing-gateways.js";
 import * as platformSettings from "./platform-settings.js";
+import { handlePublicBrandingRoute } from "./portal-branding.js";
+import { handlePortalBrandingRoute } from "./portal-branding-routes.js";
 import { handlePlatformDomainsRoute } from "./platform-domains-routes.js";
 import * as platformDomainsModule from "./platform-domains.js";
 import { createSiteDomainMoveService, redirectResponseFor } from "./site-domain-moves.js";
@@ -166,6 +168,7 @@ import {
   renderSaasOverview, renderRevenueAnalyticsPage, renderOrganizationsPage, renderOrganizationDetailPage, renderSubscriptionsPage,
   renderPlansPage, renderJobsPage, renderJobDetailPage, renderEmailPage, renderPlatformSettingsPage, renderNotificationsPage, renderTenantTemplatePage, renderCouponsPage, renderOpsAlertsPage, renderServerErrorsPage, renderCpBackupsPage, renderKeyRotationPage, renderReconciliationPage, renderDomainsAdminPage, renderDeploymentsAdminPage, renderWebhooksAdminPage, renderApiKeysAdminPage, renderBackupsAdminPage
 } from "./views/pages/saas-admin.js";
+import { renderMediaLibraryPage } from "./views/pages/portal-branding.js";
 import { backups } from "./backups.js";
 import * as tenantTemplate from "./tenant-template.js";
 import * as staffTokens from "./staff-tokens.js";
@@ -837,6 +840,13 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             "X-Content-Type-Options": "nosniff"
           }
         });
+      }
+
+      // Portal branding, public side: /brand-media/* (the control plane's own media library), /favicon.ico and /site.webmanifest.
+      // No session needed (a browser asks for these on its own). Returns null for any other path, and for /favicon.ico when no icon is set.
+      {
+        const brandingResponse = await handlePublicBrandingRoute(request, env, url);
+        if (brandingResponse) return brandingResponse;
       }
 
       // ---------------------------------------------
@@ -4640,6 +4650,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           }
           const staffBody = async () => (await request.json().catch(() => ({})));
 
+          // Portal branding and the control plane's media library (migration 0096). Super-admin only (gate above), every write audited.
+          const portalBrandingResponse = await handlePortalBrandingRoute({ env, request, url, method, path, admin, requestId, ipHash, json, logAudit });
+          if (portalBrandingResponse) return portalBrandingResponse;
+
           // Plan catalog management (staff console, Plans & pricing): full CRUD, bulk actions, labels, SEO, promotions, price versions.
           // Handled in its own module; /api/platform/saas/plans/:id below is unchanged and keeps refusing price edits.
           const planCatalogResponse = await handlePlanCatalogRoute({ env, request, url, method, path, admin, requestId, ipHash, json, logAudit, matchPath });
@@ -5551,6 +5565,7 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas/jobs") return html(await renderJobsPage(env, admin, { status: url.searchParams.get("status") || "", type: url.searchParams.get("type") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/email") return html(await renderEmailPage(env, admin));
         if (path === "/platform/saas/settings") return html(await renderPlatformSettingsPage(env, admin));
+        if (path === "/platform/saas/media") return html(await renderMediaLibraryPage(env, admin, { folder: url.searchParams.get("folder") || "", q: url.searchParams.get("q") || "", page: url.searchParams.get("page") || 1 }));
         if (path === "/platform/saas/notifications") return html(await renderNotificationsPage(env, admin, { organization: url.searchParams.get("organization") || "", kind: url.searchParams.get("kind") || "", state: url.searchParams.get("state") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/releases") return html(await renderTenantTemplatePage(env, admin));
         if (path === "/platform/saas/site-presets") return html(await renderSitePresetsPage(env, admin, { status: url.searchParams.get("status") || "" }));

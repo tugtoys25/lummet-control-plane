@@ -222,7 +222,8 @@ const NAV = [
       { label: "Credentials", href: "/platform/credentials", key: "platform-credentials" },
       { label: "Audit Logs", href: "/platform/audit-logs", key: "platform-audit-logs" },
       { label: "Capabilities", href: "/platform/capabilities", key: "platform-capabilities" },
-      { label: "Platform settings", href: "/platform/saas/settings", key: "saas-settings" }
+      { label: "Platform settings", href: "/platform/saas/settings", key: "saas-settings" },
+      { label: "Media library", href: "/platform/saas/media", key: "saas-media" }
     ]
   },
   {
@@ -379,7 +380,8 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
-  <title>${escapeHtml(title)} · Lummet</title>
+  <title>${escapeHtml(title)} · <!--lummet:portal-name--></title>
+  <!--lummet:head-icons-->
   <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
   <link rel="preload" href="/static/fonts/instrument-400-v1.woff" as="font" type="font/woff" crossorigin />
   <link rel="stylesheet" href="${SHELL_CSS_URL}" />
@@ -390,7 +392,7 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
   <div class="app">
     <aside class="sidebar" id="sidebar" aria-label="Main navigation">
       <div class="sidebar-head">
-        <a class="brand" href="/dashboard" aria-label="Dashboard home"><!--lummet:site-brand--></a>
+        <a class="brand" href="/dashboard" aria-label="Dashboard home"><!--lummet:portal-brand--></a>
         <button type="button" class="icon-btn nav-close" id="nav-close" aria-label="Close menu">${ICONS.close}</button>
       </div>
       <div class="nav-filter-wrap">
@@ -405,7 +407,7 @@ export async function renderShell({ title, activeKey, admin, bodyHtml, env }) {
     <div class="main">
       <header class="topbar">
         <button type="button" class="icon-btn" id="nav-toggle" aria-controls="sidebar" aria-expanded="true" aria-label="Toggle menu">${ICONS.menu}</button>
-        <div class="page-crumb"><!--lummet:site-name--> <span aria-hidden="true">/</span> <strong>${escapeHtml(title)}</strong></div>
+        <div class="page-crumb"><!--lummet:portal-name--> <span aria-hidden="true">/</span> <strong>${escapeHtml(title)}</strong></div>
         <div class="topbar-right">
           <a class="btn btn-secondary btn-small view-site" href="/" target="_blank" rel="noopener">View site</a>
           <button type="button" class="icon-btn theme-toggle" id="theme-toggle" aria-label="Switch color theme"><span class="icon sun">${ICONS.sun}</span><span class="icon moon">${ICONS.moon}</span></button>

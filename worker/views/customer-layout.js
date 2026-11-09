@@ -206,6 +206,7 @@ export function renderCustomerShell({ title, activeKey, customer, organizations 
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <title>${escapeHtml(title)} · Lummet</title>
+  <!--lummet:head-icons-->
   <script nonce="${nonceToken()}">${BOOT_SCRIPT}</script>
   <link rel="preload" href="/static/fonts/instrument-400-v1.woff" as="font" type="font/woff" crossorigin />
   <link rel="stylesheet" href="${PORTAL_CSS_URL}" />

@@ -20,6 +20,7 @@ import * as revenueAnalytics from "../../revenue-analytics.js";
 import * as platformSettings from "../../platform-settings.js";
 import * as billingGateways from "../../billing-gateways.js";
 import { renderPlanCatalogPage } from "./plan-catalog-admin.js";
+import { renderBrandingSection } from "./portal-branding.js";
 
 const money = (c) => (c == null ? "custom" : `$${(c / 100).toFixed(2)}`);
 // Round 6.1B: revenue is shown with its own currency code and is never summed across currencies. Unknown is "n/a", never zero.
@@ -372,6 +373,7 @@ function clearSetting(key) { var r = prompt('Reason for going back to the wrangl
 </script>`;
   return shell(env, admin, "Platform settings", "saas-settings", `
     <p style="color:var(--text-dim)">The value in force is the first that exists: <strong>console</strong> (set here), then <strong>wrangler</strong> (<code>wrangler.jsonc</code>), then the built-in <strong>default</strong>. Changes reach every edge location within about 15 seconds, with no deploy. Secrets, bindings and the lockout-prone settings (Cloudflare Access, passkey origin, portal URL, staff 2FA, password hashing) are not listed: they stay in <code>wrangler.jsonc</code> and Worker secrets.</p>
+    ${await renderBrandingSection(env)}
     ${sections}
     <h2>Recent changes</h2>${recent}${script}`);
 }

@@ -51,7 +51,7 @@ export function textResponse(body, contentType, { status = 200, cacheControl = P
   });
 }
 
-export async function renderPage(ctx, { template, data = {}, head = "", status = 200, bodyClass = "", cacheControl = null }) {
+export async function renderPage(ctx, { template, data = {}, head = "", status = 200, bodyClass = "", cacheControl = null, form = false }) {
   const { env, siteCtx, url } = ctx;
   const view = { ...data, site: siteCtx.site, icons: siteCtx.icons, ui: siteCtx.ui };
   const content = await renderTemplate(env, `pages/${template}`, view);
@@ -80,7 +80,9 @@ export async function renderPage(ctx, { template, data = {}, head = "", status =
   }
   const formPath = url.pathname.replace(/\/+$/, "") || "/";
   // The form pages: /contact, /demo, /contact-sales and the custom forms at /forms/:key (they all show the Turnstile widget when it is on).
-  const isPublicForm = ["/contact", "/demo", "/contact-sales"].includes(formPath) || /^\/forms\/[^/]+$/.test(formPath);
+  // `form` is set by the form renderer itself, so every page that shows the widget (including a for-sale domain served at the domain's own
+  // address) gets the CSP it needs; the paths stay as a second net.
+  const isPublicForm = form || ["/contact", "/demo", "/contact-sales"].includes(formPath) || /^\/(forms|aftermarket\/(domains|domain-acquisition))\/[^/]+$|^\/aftermarket\/(domain-acquisition|sell-your-domain)$/.test(formPath);
   const turnstileEnabled = isPublicForm && String(env.PUBLIC_FORMS_TURNSTILE_REQUIRED || "off").toLowerCase() === "on" && Boolean(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY);
   if (!turnstileEnabled) return response;
   const headers = new Headers(response.headers);

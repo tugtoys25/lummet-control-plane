@@ -372,3 +372,22 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
   .section.sec-cols-3 .grid-3 { grid-template-columns: repeat(3, 1fr); }
   .section.sec-cols-4 .grid-3 { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* Domain aftermarket: for-sale summary above the enquiry form, list table, seller verification */
+.listing-summary { margin-bottom: var(--space-6); padding-bottom: var(--space-5); border-bottom: 1px solid var(--border); }
+.listing-headline { font-weight: 700; font-size: var(--fs-lg); margin: 0 0 var(--space-2); }
+.listing-description { margin: 0 0 var(--space-3); color: var(--ink-soft, inherit); }
+.listing-price { font-size: var(--fs-lg); margin: 0 0 var(--space-3); }
+.listing-label { font-size: var(--fs-sm); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 8px; }
+.listing-all { margin: var(--space-3) 0 0; font-size: var(--fs-sm); }
+.aftermarket-table { width: 100%; border-collapse: collapse; }
+.aftermarket-table th, .aftermarket-table td { padding: 14px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+.aftermarket-table tbody th { font-weight: 700; overflow-wrap: anywhere; }
+.aftermarket-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.aftermarket-sell { margin-top: var(--space-6); }
+.verify-layout { display: grid; gap: var(--space-5); max-width: 760px; }
+.verify-record { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: var(--space-4) 0; }
+.verify-record dt { font-weight: 700; }
+.verify-record dd { margin: 0; overflow-wrap: anywhere; }
+.verify-values { padding-left: 1.2rem; margin: var(--space-3) 0 var(--space-4); }
+.table-wrap { overflow-x: auto; }

@@ -17,6 +17,15 @@
         <div class="prose">{{{form.success_html}}}</div>
       </div>
       {{else}}{{#if has_fields}}
+      {{#if listing}}
+      <div class="listing-summary">
+        {{#if listing.headline}}<p class="listing-headline">{{listing.headline}}</p>{{/if}}
+        {{#if listing.description}}<p class="listing-description">{{listing.description}}</p>{{/if}}
+        <p class="listing-price"><span class="listing-label">{{ui.aftermarket_price_label}}</span> <strong>{{listing.price}}</strong></p>
+        {{#if listing.has_buy}}<p><a class="btn btn-primary" href="{{listing.buy_url}}" target="_blank" rel="noopener nofollow sponsored">{{ui.aftermarket_buy_now}}</a></p><p class="help">{{ui.aftermarket_buy_note}}</p>{{/if}}
+        <p class="listing-all"><a href="{{listing.list_href}}">{{ui.aftermarket_all_domains}}</a></p>
+      </div>
+      {{/if}}
       {{#if banner}}<div class="form-alert" role="alert">{{banner}}</div>{{/if}}
       {{#if turnstile.misconfigured}}
       <div class="form-alert" role="alert">{{ui.form_turnstile_unavailable}}</div>

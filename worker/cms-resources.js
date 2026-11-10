@@ -324,6 +324,33 @@ export const CMS_RESOURCES = {
     ]
   },
 
+  aftermarket_domains: {
+    label: "Domains for sale",
+    table: "lummet_aftermarket_domains",
+    listColumns: [
+      { key: "domain", label: "Domain" },
+      { key: "status", label: "Status" },
+      { key: "asking_price", label: "Price" },
+      { key: "source", label: "Added by" },
+      { key: "verified_method", label: "Verified by" }
+    ],
+    orderBy: "id DESC",
+    fields: [
+      { name: "domain", label: "Domain", type: "text", required: true, hint: "Bare name in lower case, e.g. example.com (no https://, no www)" },
+      { name: "status", label: "Status", type: "select", options: ["draft", "pending", "listed", "unlisted", "sold"], hint: "Only listed domains are public. Pending = a seller has not verified yet." },
+      { name: "asking_price", label: "Asking price", type: "text", hint: "Free text, e.g. 2500 USD. Empty shows Make an offer" },
+      { name: "buy_url", label: "Marketplace link (Buy now)", type: "text", hint: "https:// page of this domain at Afternic, Dan, Sedo... Empty hides the Buy now button" },
+      { name: "headline", label: "Headline", type: "text" },
+      { name: "description", label: "Description", type: "textarea" },
+      { name: "hosted", label: "Show the for-sale page at the domain itself (1 = yes)", type: "number", default: 0, hint: "Only once the domain's DNS points at this site" },
+      { name: "sort_order", label: "Sort order", type: "number", default: 0 },
+      { name: "source", label: "Added by", type: "text", readOnly: true },
+      { name: "owner_email", label: "Seller email (private)", type: "text", readOnly: true },
+      { name: "verified_method", label: "Verified by", type: "text", readOnly: true },
+      { name: "verified_at", label: "Verified at (UTC)", type: "text", readOnly: true }
+    ]
+  },
+
   inquiries: {
     label: "Inquiries",
     table: "lummet_inquiries",
@@ -331,6 +358,7 @@ export const CMS_RESOURCES = {
     listColumns: [
       { key: "created_at", label: "Received (UTC)" },
       { key: "form_key", label: "Form" },
+      { key: "subject_ref", label: "Domain" },
       { key: "name", label: "Name" },
       { key: "email", label: "Email" },
       { key: "summary", label: "Summary" },
@@ -340,6 +368,8 @@ export const CMS_RESOURCES = {
     fields: [
       { name: "created_at", label: "Received (UTC)", type: "text", readOnly: true },
       { name: "form_key", label: "Form", type: "text", readOnly: true },
+      { name: "subject_ref", label: "Domain asked about", type: "text", readOnly: true },
+      { name: "source", label: "Came from (redirect, host, landing, form)", type: "text", readOnly: true },
       { name: "name", label: "Name", type: "text", readOnly: true },
       { name: "email", label: "Email", type: "text", readOnly: true },
       { name: "details", label: "Submission", type: "textarea", readOnly: true },

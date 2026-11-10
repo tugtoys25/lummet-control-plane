@@ -21,9 +21,11 @@ import * as data from "./data.js";
 import { hashIPForRateLimit } from "../auth.js";
 import { sanitizeHtml } from "./sanitize.js";
 import { renderPage, textResponse } from "./render.js";
+import { escapeHtml } from "./template.js";
 import { buildHead, breadcrumbLd, organizationLd, absoluteUrl } from "./seo.js";
 import { stripTags, truncate, safeUrl, fill } from "./format.js";
 import { demoPlans } from "./demo-plans.js";
+import { BUY_FORM_KEY, SELL_FORM_KEY, OTHER_OPTION, normalizeDomain, withDomainOptions, subjectFromRequest } from "./aftermarket-domains.js";
 
 export const HONEYPOT_FIELD = "hp_website";
 const DEFAULT_RATE_LIMIT_PER_HOUR = 5;
@@ -75,7 +77,7 @@ function cleanValue(raw, multiline) {
 }
 
 /** Turn the DB field rows into view models (with the visitor's values and errors merged in). */
-function fieldViews(fields, values = {}, errors = {}, formKey) {
+function fieldViews(fields, values = {}, errors = {}, formKey, ui = {}) {
   return fields.map((f) => {
     const type = f.type === "textarea" || f.type === "select" ? f.type : INPUT_TYPES[f.type] ? f.type : "text";
     const options = type === "select" ? parseOptions(f.options) : [];
@@ -97,7 +99,7 @@ function fieldViews(fields, values = {}, errors = {}, formKey) {
       is_select: type === "select",
       input_type: INPUT_TYPES[type] || "text",
       autocomplete: AUTOCOMPLETE[f.field_key] || "off",
-      options: options.map((o) => ({ value: o, label: o, selected: o === value }))
+      options: options.map((o) => ({ value: o, label: o === OTHER_OPTION && f.field_key === "domain" ? ui.aftermarket_other_option || o : o, selected: o === value }))
     };
   });
 }
@@ -134,7 +136,7 @@ export function validateSubmission(fields, formData, ui) {
 }
 
 /** What gets stored: queryable columns plus a readable record that survives later field edits. */
-export function buildInquiryRecord(formKey, fields, values) {
+export function buildInquiryRecord(formKey, fields, values, extra = {}) {
   const emailField = fields.find((f) => f.type === "email");
   const nameField = fields.find((f) => f.field_key === "name");
   const summaryField = fields.find((f) => f.field_key === "message") || fields.find((f) => f.type === "textarea");
@@ -143,13 +145,27 @@ export function buildInquiryRecord(formKey, fields, values) {
     .map((f) => ({ key: f.field_key, label: f.label, value: values[f.field_key] }));
   const details = rows.map((r) => (r.value.includes("\n") ? `${r.label}:\n${r.value}` : `${r.label}: ${r.value}`)).join("\n\n");
   const summarySource = (summaryField && values[summaryField.field_key]) || rows.find((r) => r.key !== "name" && r.key !== "email")?.value || "";
+  // Domain enquiries: the domain the visitor chose (or typed under Other) is stored on its own, so the inbox can show and count
+  // "who wants which domain", and the page they came from (redirect | host | landing | list) is kept next to it.
+  let subjectRef = null;
+  if (formKey === BUY_FORM_KEY) {
+    const chosen = values.domain === OTHER_OPTION ? values.domain_other : values.domain || values.domain_other;
+    subjectRef = normalizeDomain(chosen) || normalizeDomain(extra.subject) || null;
+  } else if (formKey === SELL_FORM_KEY) {
+    subjectRef = normalizeDomain(values.domain) || null;
+  } else if (extra.subject) {
+    subjectRef = normalizeDomain(extra.subject) || null;
+  }
+  const summaryText = truncate(summarySource.replace(/\s+/g, " "), 140) || null;
   return {
     form_key: formKey,
     name: nameField ? values[nameField.field_key] || null : null,
     email: emailField ? values[emailField.field_key] || null : null,
-    summary: truncate(summarySource.replace(/\s+/g, " "), 140) || null,
-    details,
-    payload: JSON.stringify({ fields: rows })
+    summary: subjectRef ? truncate(`${subjectRef}${summaryText ? ` - ${summaryText}` : ""}`, 140) : summaryText,
+    details: extra.source ? `${details}\n\nSource: ${extra.source}` : details,
+    payload: JSON.stringify({ fields: rows, subject: subjectRef, source: extra.source || null }),
+    subject_ref: subjectRef,
+    source: extra.source || null
   };
 }
 
@@ -157,7 +173,7 @@ function sqliteTimestamp(ms) {
   return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
 }
 
-function sameOrigin(request, url) {
+export function sameOrigin(request, url) {
   const origin = request.headers.get("origin");
   if (origin && origin !== "null") return origin === url.origin;
   if (origin === "null") return false;
@@ -166,11 +182,11 @@ function sameOrigin(request, url) {
   return true;
 }
 
-async function notify(ctx, record, id) {
+export async function notify(ctx, record, id) {
   const hook = ctx.env.INQUIRY_WEBHOOK_URL;
   if (!hook || !/^https:\/\//i.test(hook)) return;
   const who = [record.name, record.email].filter(Boolean).join(" ");
-  const text = `New ${record.form_key} inquiry #${id}${who ? ` from ${who}` : ""}${record.summary ? `: ${record.summary}` : ""}`;
+  const text = `New ${record.form_key} inquiry #${id}${record.subject_ref ? ` about ${record.subject_ref}` : ""}${who ? ` from ${who}` : ""}${record.summary ? `: ${record.summary}` : ""}`;
   const send = fetch(hook, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -182,8 +198,19 @@ async function notify(ctx, record, id) {
 
 // ---------------------------------------------------------------- GET
 
-async function renderForm(ctx, { key, path: pathOverride, form, fields, values = {}, errors = {}, sent = false, status = 200, banner = "" }) {
+async function renderForm(ctx, { key, path: pathOverride, form: formRow, fields, values = {}, errors = {}, sent = false, status = 200, banner = "", subject = null, source = null, hooks = null }) {
   const { site, ui } = ctx.siteCtx;
+  // A domain for sale (redirect, its own host, or its landing page): the header says so and the select starts on that domain.
+  let form = formRow;
+  let listing = null;
+  if (subject) {
+    const title = fill(ui.aftermarket_for_sale_title, { domain: subject.domain });
+    form = { ...formRow, title, seo_title: title, intro: `<p>${escapeHtml(fill(ui.aftermarket_for_sale_intro, { domain: subject.domain }))}</p>` };
+    const price = String(subject.row?.asking_price || "").trim();
+    const buyUrl = /^https:\/\//i.test(subject.row?.buy_url || "") ? subject.row.buy_url : "";
+    listing = { domain: subject.domain, headline: String(subject.row?.headline || "").trim(), description: String(subject.row?.description || "").trim(), price: price || ui.aftermarket_price_on_request, buy_url: buyUrl, has_buy: Boolean(buyUrl), list_href: "/aftermarket/list-of-domains" };
+    if (!("domain" in values) && !sent) values = { ...values, domain: subject.domain };
+  }
   const path = pathOverride || formPath(key);
   const introHtml = sanitizeHtml(form.intro || "");
   const hasErrors = Object.keys(errors).length > 0;
@@ -200,7 +227,7 @@ async function renderForm(ctx, { key, path: pathOverride, form, fields, values =
     description,
     path,
     image: safeUrl(form.og_image),
-    noindex: sent || status !== 200 || (Boolean(pathOverride) && String(ctx.env.PUBLIC_TRUST_PAGES || "off").trim().toLowerCase() !== "on"),
+    noindex: sent || status !== 200 || (subject ? subject.source === "redirect" : Boolean(pathOverride) && String(ctx.env.PUBLIC_TRUST_PAGES || "off").trim().toLowerCase() !== "on"),
     jsonLd: [
       organizationLd(site),
       { "@type": "ContactPage", name: form.title, url: absoluteUrl(site, path), description },
@@ -217,7 +244,7 @@ async function renderForm(ctx, { key, path: pathOverride, form, fields, values =
       demo_plans,
       form: {
         key,
-        action: path,
+        action: subject && subject.source === "redirect" ? `${path}?domain=${encodeURIComponent(subject.domain)}` : path,
         eyebrow: form.eyebrow || "",
         title: form.title,
         intro_html: introHtml,
@@ -228,7 +255,8 @@ async function renderForm(ctx, { key, path: pathOverride, form, fields, values =
         side_html: sideBody,
         has_side: Boolean(form.side_title || sideBody || site.has_contact)
       },
-      fields: fieldViews(fields, values, errors, key),
+      listing,
+      fields: fieldViews(fields, values, errors, key, ui),
       has_fields: fields.length > 0,
       sent,
       banner,
@@ -244,6 +272,7 @@ async function renderForm(ctx, { key, path: pathOverride, form, fields, values =
     },
     head,
     status,
+    form: true,
     bodyClass: "page-form"
   });
   if (sent || status !== 200) {
@@ -254,23 +283,34 @@ async function renderForm(ctx, { key, path: pathOverride, form, fields, values =
   return response;
 }
 
-export async function formPage(ctx, { key, path, fallbackKey = null }) {
-  const { form, fields } = await resolveForm(ctx.env, key, fallbackKey);
+export async function formPage(ctx, { key, path, fallbackKey = null, subject }) {
+  const resolved = await resolveForm(ctx.env, key, fallbackKey);
+  const { form } = resolved;
   if (!form) return null;
-  return renderForm(ctx, { key, path, form, fields, sent: ctx.url.searchParams.get("sent") === "1" && fields.length > 0 });
+  if (subject === undefined) subject = key === BUY_FORM_KEY ? await subjectFromRequest(ctx) : null;
+  const fields = await withDomainOptions(ctx.env, key, resolved.fields, subject);
+  return renderForm(ctx, { key, path, form, fields, subject, sent: ctx.url.searchParams.get("sent") === "1" && fields.length > 0 });
 }
 
 // --------------------------------------------------------------- POST
 
-export async function submitForm(ctx, { key, path, fallbackKey = null }) {
+/**
+ * hooks (used by the seller form): validate(ctx, values) -> { field: message } to refuse a submission before anything is stored;
+ * after(ctx, { values, id, record }) -> Response to send instead of the usual "sent" redirect.
+ */
+export async function submitForm(ctx, { key, path, fallbackKey = null, subject, hooks = null }) {
   const { env, request, url } = ctx;
   const { ui, settings } = ctx.siteCtx;
-  const { form, fields } = await resolveForm(env, key, fallbackKey);
+  const resolved = await resolveForm(env, key, fallbackKey);
+  const { form } = resolved;
   if (!form) return null;
+  if (subject === undefined) subject = key === BUY_FORM_KEY ? await subjectFromRequest(ctx) : null;
+  const fields = await withDomainOptions(env, key, resolved.fields, subject);
   if (!fields.length) return null;
+  const source = subject?.source || (key === BUY_FORM_KEY ? "form" : null);
 
   const fail = (status, message, extra = {}) =>
-    renderForm(ctx, { key, path, form, fields, status, banner: message, ...extra });
+    renderForm(ctx, { key, path, form, fields, status, banner: message, subject, source, ...extra });
 
   if (!sameOrigin(request, url)) return fail(403, ui.err_generic || "");
 
@@ -320,8 +360,17 @@ export async function submitForm(ctx, { key, path, fallbackKey = null }) {
     } finally { clearTimeout(timeout); }
   }
 
-  const { values, errors, ok } = validateSubmission(fields, formData, ui);
-  if (!ok) return fail(422, ui.form_errors_summary || "", { values, errors });
+  const { values, errors } = validateSubmission(fields, formData, ui);
+  if (key === BUY_FORM_KEY && fields.some((f) => f.field_key === "domain_other")) {
+    if (values.domain === OTHER_OPTION) {
+      if (!normalizeDomain(values.domain_other)) errors.domain_other = ui.aftermarket_err_other || ui.err_required || "";
+    } else {
+      values.domain_other = "";
+      delete errors.domain_other;
+    }
+  }
+  if (hooks?.validate && Object.keys(errors).length === 0) Object.assign(errors, (await hooks.validate(ctx, values)) || {});
+  if (Object.keys(errors).length) return fail(422, ui.form_errors_summary || "", { values, errors });
 
   const limit = Number(settings.inquiry_rate_limit_per_hour) > 0 ? Number(settings.inquiry_rate_limit_per_hour) : DEFAULT_RATE_LIMIT_PER_HOUR;
   const ipHash = (await hashIPForRateLimit(request)) || "";
@@ -332,7 +381,7 @@ export async function submitForm(ctx, { key, path, fallbackKey = null }) {
     if (recent >= limit) return fail(429, ui.err_rate || "", { values });
   }
 
-  const record = buildInquiryRecord(key, fields, values);
+  const record = buildInquiryRecord(key, fields, values, { subject: subject?.domain, source });
   let id;
   try {
     id = await data.insertInquiry(env, { ...record, ip_hash: ipHash });
@@ -341,5 +390,9 @@ export async function submitForm(ctx, { key, path, fallbackKey = null }) {
     return fail(500, ui.err_generic || "", { values });
   }
   await notify(ctx, record, id);
+  if (hooks?.after) {
+    const custom = await hooks.after(ctx, { values, id, record });
+    if (custom) return custom;
+  }
   return redirectToSent();
 }

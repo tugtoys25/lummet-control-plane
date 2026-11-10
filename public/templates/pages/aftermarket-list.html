@@ -1,0 +1,33 @@
+<section class="page-hero bg-{{site.page_header_bg}}">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <h1>{{title}}</h1>
+    <p class="lede">{{intro}}</p>
+  </div>
+</section>
+<section class="section section-tight">
+  <div class="container">
+    {{#if has_items}}
+    <div class="table-wrap">
+      <table class="aftermarket-table">
+        <thead><tr><th scope="col">{{ui.aftermarket_list_domain}}</th><th scope="col">{{ui.aftermarket_list_price}}</th><th scope="col">{{ui.aftermarket_list_actions}}</th></tr></thead>
+        <tbody>
+          {{#each items}}
+          <tr>
+            <th scope="row"><a href="{{href}}">{{domain}}</a></th>
+            <td>{{price}}</td>
+            <td class="aftermarket-actions">
+              {{#if has_buy}}<a class="btn btn-primary" href="{{buy_url}}" target="_blank" rel="noopener nofollow sponsored">{{ui.aftermarket_buy_now}}</a>{{/if}}
+              <a class="btn btn-secondary" href="{{href}}">{{ui.aftermarket_view}}</a>
+            </td>
+          </tr>
+          {{/each}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty-state"><p>{{ui.aftermarket_list_empty}}</p></div>
+    {{/if}}
+    <p class="aftermarket-sell"><a class="btn btn-secondary" href="{{sell_href}}">{{ui.aftermarket_sell_cta}}</a></p>
+  </div>
+</section>

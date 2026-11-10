@@ -196,12 +196,56 @@ export async function countRecentInquiriesByIp(env, ipHash, sinceIso) {
 export async function insertInquiry(env, row) {
   const res = await db(env)
     .prepare(
-      `INSERT INTO lummet_inquiries (form_key, name, email, summary, details, payload, status, ip_hash)
-       VALUES (?, ?, ?, ?, ?, ?, 'new', ?) RETURNING id`
+      `INSERT INTO lummet_inquiries (form_key, name, email, summary, details, payload, status, ip_hash, subject_ref, source)
+       VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?) RETURNING id`
     )
-    .bind(row.form_key, row.name, row.email, row.summary, row.details, row.payload, row.ip_hash || "")
+    .bind(row.form_key, row.name, row.email, row.summary, row.details, row.payload, row.ip_hash || "", row.subject_ref || null, row.source || null)
     .first();
   return res?.id ?? null;
+}
+
+// ---- Domain aftermarket -------------------------------
+
+export function getAftermarketDomain(env, domain) {
+  return first(env, `SELECT * FROM lummet_aftermarket_domains WHERE domain = ?`, String(domain || ""));
+}
+
+export function getListedAftermarketDomain(env, domain) {
+  return first(env, `SELECT * FROM lummet_aftermarket_domains WHERE domain = ? AND status = 'listed'`, String(domain || ""));
+}
+
+export function getHostedAftermarketDomain(env, domain) {
+  return first(env, `SELECT * FROM lummet_aftermarket_domains WHERE domain = ? AND status = 'listed' AND hosted = 1`, String(domain || ""));
+}
+
+export function listAftermarketDomains(env, limit = 200) {
+  return all(env, `SELECT * FROM lummet_aftermarket_domains WHERE status = 'listed' ORDER BY sort_order, domain LIMIT ?`, limit);
+}
+
+/** Seller claim: a new row, or a fresh token on an unverified/removed seller row. Never touches an admin row or a listed one. */
+export async function upsertAftermarketClaim(env, { domain, email, price, description, token }) {
+  const existing = await db(env).prepare(`SELECT id, status, source FROM lummet_aftermarket_domains WHERE domain = ?`).bind(domain).first();
+  if (!existing) {
+    await db(env)
+      .prepare(`INSERT INTO lummet_aftermarket_domains (domain, status, description, asking_price, source, owner_email, verify_token) VALUES (?, 'pending', ?, ?, 'seller', ?, ?)`)
+      .bind(domain, description || null, price || null, email || null, token).run();
+    return true;
+  }
+  if (existing.source !== "seller" || !["pending", "unlisted"].includes(existing.status)) return false;
+  await db(env)
+    .prepare(`UPDATE lummet_aftermarket_domains SET status = 'pending', description = ?, asking_price = ?, owner_email = ?, verify_token = ?, hosted = 0, verified_method = NULL, verified_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(description || null, price || null, email || null, token, existing.id).run();
+  return true;
+}
+
+export async function touchAftermarketCheck(env, id) {
+  await db(env).prepare(`UPDATE lummet_aftermarket_domains SET last_check_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(id).run();
+}
+
+export async function markAftermarketVerified(env, id, method) {
+  await db(env)
+    .prepare(`UPDATE lummet_aftermarket_domains SET status = 'listed', verified_method = ?, hosted = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`)
+    .bind(method, method === "ns" ? 1 : 0, id).run();
 }
 
 // ---- Brands ------------------------------------------

@@ -43,6 +43,9 @@ export async function sitemapXml(ctx) {
     urls.push({ loc: `${base}${formPath(f.form_key)}`, lastmod: day(f.updated_at) });
   }
   for (const a of authors) urls.push({ loc: `${base}/authors/${a.slug}`, lastmod: day(a.updated_at) });
+  const forSale = await data.listAftermarketDomains(env, 500);
+  if (forSale.length) urls.push({ loc: `${base}/aftermarket/list-of-domains` });
+  for (const d of forSale) urls.push({ loc: `${base}/aftermarket/domains/${d.domain}`, lastmod: day(d.updated_at) });
 
   // Trust and legal routes (H.5, I-14). Listed only when they are live and indexable: PUBLIC_TRUST_PAGES=on, and for legal pages only
   // those with a recorded counsel approval and approved text (PUBLIC_LEGAL_PAGES=on). Shadow and draft pages are noindex and stay out.

@@ -1,0 +1,47 @@
+<section class="page-hero bg-{{site.page_header_bg}}">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <h1>{{title}}</h1>
+    {{#unless listed}}<p class="lede">{{intro}}</p>{{/unless}}
+  </div>
+</section>
+<section class="section section-tight">
+  <div class="container verify-layout">
+    {{#if listed}}
+    <div class="form-card form-success" role="status">
+      <h2>{{listed_notice}}</h2>
+      <p><a class="btn btn-primary" href="{{listing_href}}">{{ui.aftermarket_view_listing}}</a></p>
+    </div>
+    {{else}}
+    {{#if message}}<div class="form-alert" role="alert">{{message}}</div>{{/if}}
+    <div class="form-card verify-card">
+      <h2>{{ns_title}}</h2>
+      {{#if has_ns}}
+      <p>{{ns_body}}</p>
+      <ul class="verify-values">{{#each name_servers}}<li><code>{{value}}</code></li>{{/each}}</ul>
+      <form method="post" action="{{action}}">
+        <input type="hidden" name="domain" value="{{domain}}">
+        <input type="hidden" name="method" value="ns">
+        <button class="btn btn-primary" type="submit">{{ui.aftermarket_ns_button}}</button>
+      </form>
+      {{else}}
+      <p>{{ui.aftermarket_ns_unavailable}}</p>
+      {{/if}}
+    </div>
+    <div class="form-card verify-card">
+      <h2>{{ui.aftermarket_txt_title}}</h2>
+      <p>{{txt_body}}</p>
+      <dl class="verify-record">
+        <dt>{{ui.aftermarket_record_type}}</dt><dd><code>{{txt_type}}</code></dd>
+        <dt>{{ui.aftermarket_record_name}}</dt><dd><code>{{txt_name}}</code></dd>
+        <dt>{{ui.aftermarket_record_value}}</dt><dd><code>{{txt_value}}</code></dd>
+      </dl>
+      <form method="post" action="{{action}}">
+        <input type="hidden" name="domain" value="{{domain}}">
+        <input type="hidden" name="method" value="txt">
+        <button class="btn btn-primary" type="submit">{{ui.aftermarket_txt_button}}</button>
+      </form>
+    </div>
+    {{/if}}
+  </div>
+</section>

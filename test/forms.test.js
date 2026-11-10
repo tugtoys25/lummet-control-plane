@@ -31,8 +31,8 @@ test('0008 is re-runnable and seeds two forms, their fields and the interface te
   const env = createPublicEnv();
   applyMigrations(env.db);
   const n = async (t) => (await env.db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).first()).n;
-  assert.equal(await n('lummet_forms'), 2);
-  assert.equal(await n('lummet_form_fields'), 11);
+  assert.equal(await n('lummet_forms'), 4); // contact, demo + domain-acquisition, sell-domain (0100)
+  assert.equal(await n('lummet_form_fields'), 22);
   assert.ok((await n('lummet_ui_strings')) >= 75);
 });
 

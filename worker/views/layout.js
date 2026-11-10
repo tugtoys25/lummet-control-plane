@@ -173,6 +173,7 @@ const NAV = [
     items: [
       { label: "Forms", href: "/cms/forms", key: "cms-forms", area: "cms", resource: "forms" },
       { label: "Form fields", href: "/cms/form_fields", key: "cms-form-fields", area: "cms", resource: "form_fields" },
+      { label: "Domains for sale", href: "/cms/aftermarket_domains", key: "cms-aftermarket-domains", area: "cms", resource: "aftermarket_domains" },
       { label: "Inquiries", href: "/cms/inquiries", key: "cms-inquiries", area: "cms", resource: "inquiries" }
     ]
   },

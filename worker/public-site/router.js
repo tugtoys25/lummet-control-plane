@@ -22,6 +22,7 @@
 import { loadSite } from "./context.js";
 import * as pages from "./pages.js";
 import * as forms from "./forms.js";
+import * as aftermarket from "./aftermarket.js";
 import { sitemapXml, robotsTxt } from "./sitemap.js";
 import { textResponse, PAGE_CACHE_CONTROL } from "./render.js";
 
@@ -64,6 +65,12 @@ const ROUTES = [
   ["/authors/:slug", pages.authorPage],
   ["/contact", (ctx) => forms.formPage(ctx, { key: "contact" })],
   ["/demo", (ctx) => forms.formPage(ctx, { key: "demo" })],
+  ["/aftermarket", () => new Response(null, { status: 301, headers: { location: "/aftermarket/list-of-domains" } })],
+  ["/aftermarket/list-of-domains", aftermarket.listPage],
+  ["/aftermarket/domains/:domain", aftermarket.landingPage],
+  ["/aftermarket/domain-acquisition", (ctx) => forms.formPage(ctx, { key: "domain-acquisition", path: "/aftermarket/domain-acquisition" })],
+  ["/aftermarket/sell-your-domain", aftermarket.sellPage],
+  ["/aftermarket/sell-your-domain/verify", aftermarket.verifyPage],
   ["/forms/:key", forms.formPage]
 ];
 
@@ -72,6 +79,10 @@ const FORM_POST_ROUTES = [
   ["/contact", (ctx) => forms.submitForm(ctx, { key: "contact" })],
   ["/contact-sales", (ctx) => (pages.trustMode(ctx.env) === "off" ? null : forms.submitForm(ctx, { key: forms.CONTACT_SALES_KEY, fallbackKey: "contact", path: "/contact-sales" }))],
   ["/demo", (ctx) => forms.submitForm(ctx, { key: "demo" })],
+  ["/aftermarket/domains/:domain", aftermarket.landingSubmit],
+  ["/aftermarket/domain-acquisition", (ctx) => forms.submitForm(ctx, { key: "domain-acquisition", path: "/aftermarket/domain-acquisition" })],
+  ["/aftermarket/sell-your-domain", aftermarket.sellSubmit],
+  ["/aftermarket/sell-your-domain/verify", aftermarket.verifySubmit],
   ["/forms/:key", forms.submitForm]
 ];
 
@@ -137,7 +148,7 @@ async function serveStatic(request, env) {
 function cacheKeyFor(url) {
   // Only the query parameters that change the rendered page are part of the key.
   const key = new URL(url.origin + url.pathname);
-  for (const name of ["page", "type"]) {
+  for (const name of ["page", "type", "domain"]) {
     if (url.searchParams.has(name)) key.searchParams.set(name, url.searchParams.get(name));
   }
   return new Request(key.toString(), { method: "GET" });
@@ -160,7 +171,7 @@ async function resolve(ctx) {
   }
   if (path === "/robots.txt") return robotsTxt(ctx);
   if (path === "/sitemap.xml") return sitemapXml(ctx);
-  if (path === "/") return pages.homePage(ctx);
+  if (path === "/") return (await aftermarket.hostedLanding(ctx)) || pages.homePage(ctx);
   // With the rollout shadow/on, the explicit trust routes take precedence over legacy CMS aliases such as /security.
   // With it off, nothing here changes: the alias and 404 behaviour of 2.6.0.3 is kept.
   if (pages.trustMode(env) !== "off") {
@@ -308,7 +319,7 @@ export async function handlePublicRoute({ request, env, ctx: execCtx }) {
 
   // A page showing "sent" state, or anything carrying form state, is never shared.
   // Legal pages and the OpenAPI document depend on rollout flags and recorded approvals, so they are never shared-cached.
-  const uncachedPath = path === "/legal" || path.startsWith("/legal/") || path === "/openapi.json";
+  const uncachedPath = path === "/legal" || path.startsWith("/legal/") || path === "/openapi.json" || path.startsWith("/aftermarket/sell-your-domain");
   const cache = typeof caches !== "undefined" && !url.searchParams.has("sent") && !uncachedPath ? caches.default : null;
   const key = cacheKeyFor(url);
   const shareable = !url.searchParams.has("sent") && !uncachedPath;

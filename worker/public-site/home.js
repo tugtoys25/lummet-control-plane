@@ -14,6 +14,7 @@ import { heroGraphSvg } from "./hero-graph.js";
 import { isLiveHref } from "./links.js";
 import { plansTeaser } from "./plans-teaser.js";
 import { sectionBg } from "./backgrounds.js";
+import { sectionStyleClasses } from "./section-style.js";
 
 const KINDS = new Set([
   "text", "features", "steps", "checklist", "panel", "brands", "stats",
@@ -36,6 +37,7 @@ function sectionShell(row, extra = {}) {
     kind: row.kind,
     [`is_${row.kind}`]: true,
     bg: row.__bg || sectionBg(row.background, null),
+    style_classes: sectionStyleClasses(row),
     title: row.title,
     eyebrow: row.subtitle || "",
     body_html: sanitizeHtml(row.body || ""),

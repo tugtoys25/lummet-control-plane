@@ -344,3 +344,31 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
 :is(.section, .page-hero).bg-blue .chip.is-active { background: #fff; border-color: #fff; color: #1447b8; }
 .section.bg-blue.stats-section .stat dd, .section.bg-dark.stats-section .stat dd { color: #fff; }
 .section.bg-blue.stats-section .stat dt, .section.bg-dark.stats-section .stat dt { color: rgba(255, 255, 255, 0.88); }
+
+/* ---- Section style options (Lummet Site > Homepage sections). Classes come from worker/public-site/section-style.js; "default" adds none.
+   Serif and mono are system fonts: nothing to download and no CSP change. A web font means self-hosting the file in tokens.css and adding
+   one value to section-style.js. Colours are never set here, so every option works on every band and the band audit still covers it. ---- */
+.sec-hfont-serif { --font-display: var(--font-serif); }
+.sec-hfont-mono { --font-display: var(--font-mono); }
+.sec-hfont-mono :is(h1, h2, h3, h4) { letter-spacing: 0; }
+.sec-bfont-serif { --font-sans: var(--font-serif); font-family: var(--font-sans); }
+.sec-bfont-mono { --font-sans: var(--font-mono); font-family: var(--font-sans); }
+.section.sec-align-center .section-head { margin-inline: auto; text-align: center; }
+.section.sec-align-center :is(.section-head .lede, .narrow) { margin-inline: auto; }
+.section.sec-align-center :is(.section-foot, .narrow) { text-align: center; }
+.section.sec-width-narrow > .container { max-width: calc(var(--narrow) + 4rem); }
+.section.sec-width-wide > .container { max-width: 1440px; }
+.section.sec-space-compact { padding-block: clamp(2rem, 5vw, 3.5rem); }
+.section.sec-space-spacious { padding-block: clamp(5.5rem, 12vw, 10rem); }
+.section.sec-cols-1 :is(.grid-3, .checklist, .panel-grid) { grid-template-columns: 1fr; }
+@media (min-width: 640px) { .section.sec-cols-2 .grid-3, .section.sec-cols-3 .grid-3, .section.sec-cols-4 .grid-3 { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 720px) {
+  .section.sec-cols-2 :is(.checklist, .panel-grid) { grid-template-columns: repeat(2, 1fr); }
+  .section.sec-cols-3 :is(.checklist, .panel-grid) { grid-template-columns: repeat(3, 1fr); }
+  .section.sec-cols-4 :is(.checklist, .panel-grid) { grid-template-columns: repeat(4, 1fr); }
+}
+@media (min-width: 980px) {
+  .section.sec-cols-2 .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .section.sec-cols-3 .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .section.sec-cols-4 .grid-3 { grid-template-columns: repeat(4, 1fr); }
+}

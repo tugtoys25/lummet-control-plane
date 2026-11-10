@@ -63,18 +63,21 @@ export async function listPage(ctx) {
   });
 }
 
+/** "host" when the visitor is on the domain's own address, "landing" on the Lummet site's page for it. */
+const sourceFor = (ctx, row) => (normalizeDomain(ctx.url.hostname) === row.domain ? "host" : "landing");
+
 export async function landingPage(ctx, params) {
   const domain = normalizeDomain(params.domain);
   const row = domain ? await data.getListedAftermarketDomain(ctx.env, domain) : null;
   if (!row) return null;
-  return forms.formPage(ctx, { key: BUY_FORM_KEY, path: `/aftermarket/domains/${row.domain}`, subject: { row, domain: row.domain, source: "landing" } });
+  return forms.formPage(ctx, { key: BUY_FORM_KEY, path: `/aftermarket/domains/${row.domain}`, subject: { row, domain: row.domain, source: sourceFor(ctx, row) } });
 }
 
 export async function landingSubmit(ctx, params) {
   const domain = normalizeDomain(params.domain);
   const row = domain ? await data.getListedAftermarketDomain(ctx.env, domain) : null;
   if (!row) return null;
-  return forms.submitForm(ctx, { key: BUY_FORM_KEY, path: `/aftermarket/domains/${row.domain}`, subject: { row, domain: row.domain, source: "landing" } });
+  return forms.submitForm(ctx, { key: BUY_FORM_KEY, path: `/aftermarket/domains/${row.domain}`, subject: { row, domain: row.domain, source: sourceFor(ctx, row) } });
 }
 
 /** "/" requested on a hosted for-sale domain's own address: show that domain's for-sale page. Null on every other host. */

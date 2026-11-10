@@ -49,6 +49,8 @@
           {{#if error}}<p class="field-error" id="{{id}}-err">{{error}}</p>{{/if}}
         </div>
         {{/each}}
+        <input type="hidden" name="_attr" value="">
+        <script src="/static/js/attribution.js" defer></script>
         <div class="hp" aria-hidden="true"><input type="text" name="{{honeypot}}" tabindex="-1" autocomplete="off" value=""></div>
         {{#if turnstile.enabled}}
         <div class="field"><div class="cf-turnstile" data-sitekey="{{turnstile.siteKey}}" data-theme="auto"></div><p class="help">{{ui.form_turnstile_help}}</p></div>

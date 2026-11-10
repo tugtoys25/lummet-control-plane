@@ -196,6 +196,7 @@ import { renderLoginPage } from "./views/pages/login.js";
 import { renderDashboardHome } from "./views/pages/dashboard.js";
 import { handlePublicRoute } from "./public-site/router.js";
 import * as aftermarketZones from "./aftermarket-zones.js";
+import { hostedGate, absolutizeLinks } from "./aftermarket-host.js";
 import {
   renderTenantsList,
   renderAddTenantForm,
@@ -517,6 +518,7 @@ export default {
     const env = d1.env;
     let response = await handleRequest(request, env, ctx, requestId, holder);
     response = await applySiteChrome(response, env, request);   // swaps <!--lummet:...--> markers (shared header/footer/cookie banner)
+    if (holder.hostedBase) response = await absolutizeLinks(response, holder.hostedBase);   // Lummet links on a for-sale domain lead to Lummet
     response = applyD1Bookmark(response, d1);
     response = withRetryAfter(response, request, env);
     const seen = await observe(env, ctx, { requestId, method: request.method.toUpperCase(), pathname: new URL(request.url).pathname, status: response.status, startedAt, error: holder.error });
@@ -559,6 +561,10 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
     // repointed here) and is redirected to the new host. Exact-hostname lookup; never for the portal host or workers.dev.
     // Only evaluated when the portal host is known (PORTAL_BASE_URL) and this request is for some other host, so ordinary
     // portal, visitor and workers.dev traffic never pays for the lookup.
+    // A domain verified by nameservers and shown at its own address (aftermarket-host.js): only its for-sale page is served there.
+    const hosted = await hostedGate(request, env).catch(() => null);
+    if (hosted?.response) return hosted.response;
+    if (hosted?.base) holder.hostedBase = hosted.base;
     const portalHostname = portalHostnameOf(env);
     if (portalHostname && url.hostname !== portalHostname && !url.hostname.endsWith(".workers.dev")) {
       const moved = await redirectResponseFor(env, request).catch(() => null);

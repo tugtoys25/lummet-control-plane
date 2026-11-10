@@ -16,14 +16,23 @@
     {{#if message}}<div class="form-alert" role="alert">{{message}}</div>{{/if}}
     <div class="form-card verify-card">
       <h2>{{ns_title}}</h2>
-      {{#if has_ns}}
+      {{#if ns_available}}
       <p>{{ns_body}}</p>
+      {{#if has_zone}}
+      <p>{{ui.aftermarket_ns_set_these}}</p>
       <ul class="verify-values">{{#each name_servers}}<li><code>{{value}}</code></li>{{/each}}</ul>
       <form method="post" action="{{action}}">
         <input type="hidden" name="domain" value="{{domain}}">
         <input type="hidden" name="method" value="ns">
         <button class="btn btn-primary" type="submit">{{ui.aftermarket_ns_button}}</button>
       </form>
+      {{else}}
+      <form method="post" action="{{action}}">
+        <input type="hidden" name="domain" value="{{domain}}">
+        <input type="hidden" name="method" value="ns_start">
+        <button class="btn btn-primary" type="submit">{{ui.aftermarket_ns_start_button}}</button>
+      </form>
+      {{/if}}
       {{else}}
       <p>{{ui.aftermarket_ns_unavailable}}</p>
       {{/if}}

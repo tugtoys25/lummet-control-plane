@@ -195,6 +195,7 @@ import { renderVerifyEmailPage, renderResetPasswordPage, renderForgotPasswordPag
 import { renderLoginPage } from "./views/pages/login.js";
 import { renderDashboardHome } from "./views/pages/dashboard.js";
 import { handlePublicRoute } from "./public-site/router.js";
+import * as aftermarketZones from "./aftermarket-zones.js";
 import {
   renderTenantsList,
   renderAddTenantForm,
@@ -2914,6 +2915,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         ctx.waitUntil(webhooksModule.sweepDeliveries(env).catch(() => {}));
         // Custom domains waiting for nameserver delegation, certificates or routing (docs/CUSTOM_DOMAINS.md).
         ctx.waitUntil(zoneDomains.sweep(env, { redeploy: makeDomainRedeploy(env, ctx) }).catch(() => {}));
+        // Domains for sale: sellers' nameserver claims waiting for delegation, and zones of domains no longer listed.
+        ctx.waitUntil(aftermarketZones.sweep(env).catch(() => {}));
         // A running tenant release rollout takes its next step (docs/TENANT_RELEASES.md).
         ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
         ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));

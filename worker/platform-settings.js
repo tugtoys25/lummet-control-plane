@@ -92,7 +92,6 @@ export const SETTINGS = [
   def("DEMO_PAGE_PLANS", "Public site", "enum", { options: ON_OFF, default: "off", help: "List plans under the /demo form." }),
   def("DEMO_PLANS_PRODUCT", "Public site", "text", { max: 80, pattern: /^[A-Za-z0-9_.:-]+$/, default: "", help: "Optional product id that picks which plan family /demo shows." }),
   def("PUBLIC_FORMS_TURNSTILE_REQUIRED", "Public site", "enum", { options: ON_OFF, default: "off", help: "Require Turnstile on the contact and demo forms, every custom /forms/... form and the /aftermarket/... enquiry and seller forms (needs the site key and secret)." }),
-  def("AFTERMARKET_NAMESERVERS", "Public site", "text", { max: 200, pattern: /^[A-Za-z0-9.,\s-]*$/, default: "", help: "Nameservers a seller sets to prove control of a domain at /aftermarket/sell-your-domain, comma separated (e.g. ada.ns.cloudflare.com,bob.ns.cloudflare.com). Empty = only the TXT record option works." }),
   def("CUSTOMER_TURNSTILE_REQUIRED", "Public site", "enum", { options: ON_OFF, default: "off", help: "Require Turnstile on customer sign-up, sign-in and forgot-password (needs the site key and secret)." }),
   def("CONTACT_EMAIL", "Public site", "email", { default: "", help: "Shown on the homepage 'Get in Touch' section as a mailto link." }),
   def("STATUS_PROVIDER_URL", "Public site", "url", { default: "", help: "Public status page address (https)." }),

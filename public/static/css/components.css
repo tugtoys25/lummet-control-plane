@@ -382,7 +382,10 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
 .listing-all { margin: var(--space-3) 0 0; font-size: var(--fs-sm); }
 .aftermarket-table { width: 100%; border-collapse: collapse; }
 .aftermarket-table th, .aftermarket-table td { padding: 14px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
-.aftermarket-table tbody th { font-weight: 700; overflow-wrap: anywhere; }
+/* A domain name is never broken over two lines: the table scrolls sideways instead (.table-wrap). */
+.aftermarket-table tbody th { font-weight: 700; white-space: nowrap; word-break: keep-all; hyphens: none; }
+.aftermarket-table tbody th a { white-space: nowrap; }
+.page-form .page-hero h1 { overflow-wrap: normal; word-break: keep-all; hyphens: none; }
 .aftermarket-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .aftermarket-sell { margin-top: var(--space-6); }
 .verify-layout { display: grid; gap: var(--space-5); max-width: 760px; }

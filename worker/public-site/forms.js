@@ -136,6 +136,22 @@ export function validateSubmission(fields, formData, ui) {
 }
 
 /** What gets stored: queryable columns plus a readable record that survives later field edits. */
+const ATTRIBUTION_KEYS = ["source", "medium", "campaign", "referrer"];
+
+/** The hidden _attr field comes from the visitor's browser: keep only known keys and plain characters, bounded in size. */
+export function cleanAttribution(raw) {
+  const out = {};
+  for (const part of String(raw || "").slice(0, 400).split(";")) {
+    const i = part.indexOf("=");
+    if (i < 1) continue;
+    const key = part.slice(0, i).trim().toLowerCase();
+    if (!ATTRIBUTION_KEYS.includes(key)) continue;
+    const value = part.slice(i + 1).trim().replace(/[^A-Za-z0-9._~:/ +-]/g, "").slice(0, 80);
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
 export function buildInquiryRecord(formKey, fields, values, extra = {}) {
   const emailField = fields.find((f) => f.type === "email");
   const nameField = fields.find((f) => f.field_key === "name");
@@ -156,14 +172,15 @@ export function buildInquiryRecord(formKey, fields, values, extra = {}) {
   } else if (extra.subject) {
     subjectRef = normalizeDomain(extra.subject) || null;
   }
+  const attribution = extra.attribution && Object.keys(extra.attribution).length ? Object.entries(extra.attribution).map(([k, v]) => `${k}=${v}`).join(", ") : "";
   const summaryText = truncate(summarySource.replace(/\s+/g, " "), 140) || null;
   return {
     form_key: formKey,
     name: nameField ? values[nameField.field_key] || null : null,
     email: emailField ? values[emailField.field_key] || null : null,
     summary: subjectRef ? truncate(`${subjectRef}${summaryText ? ` - ${summaryText}` : ""}`, 140) : summaryText,
-    details: extra.source ? `${details}\n\nSource: ${extra.source}` : details,
-    payload: JSON.stringify({ fields: rows, subject: subjectRef, source: extra.source || null }),
+    details: [details, extra.source ? `Source: ${extra.source}` : "", attribution ? `Came from: ${attribution}` : ""].filter(Boolean).join("\n\n"),
+    payload: JSON.stringify({ fields: rows, subject: subjectRef, source: extra.source || null, attribution: extra.attribution || null }),
     subject_ref: subjectRef,
     source: extra.source || null
   };
@@ -381,7 +398,7 @@ export async function submitForm(ctx, { key, path, fallbackKey = null, subject, 
     if (recent >= limit) return fail(429, ui.err_rate || "", { values });
   }
 
-  const record = buildInquiryRecord(key, fields, values, { subject: subject?.domain, source });
+  const record = buildInquiryRecord(key, fields, values, { subject: subject?.domain, source, attribution: cleanAttribution(formData.get("_attr")) });
   let id;
   try {
     id = await data.insertInquiry(env, { ...record, ip_hash: ipHash });

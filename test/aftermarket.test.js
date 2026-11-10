@@ -216,3 +216,67 @@ test('Turnstile covers the aftermarket forms: widget, CSP and fail-closed POST',
   assert.equal(noToken.status, 503); // fail closed without a token
   assert.equal((await inquiries(env)).length, 0);
 });
+
+// ---- a verified (hosted) domain serves only its for-sale page; Lummet links lead to Lummet ----
+test('a hosted domain shows only the for-sale page; everything else goes to Lummet and nothing else can be reached', async () => {
+  const { default: worker } = await import('../worker/index.js');
+  const { __clearHostedCacheForTests } = await import('../worker/aftermarket-host.js');
+  __clearHostedCacheForTests();
+  const env = createPublicEnv();
+  env.LUMMET_DB = env.db;
+  env.PORTAL_BASE_URL = 'https://lummet.test';
+  await addDomain(env, 'sze.app', { hosted: 1 });
+  await addDomain(env, 'plain.app', { hosted: 0 });
+  const ctx = { waitUntil() {} };
+  const call = (host, path, init = {}) => worker.fetch(new Request(`https://${host}${path}`, { redirect: 'manual', ...init }), env, ctx);
+
+  // the for-sale page, on the apex and on www
+  for (const host of ['sze.app', 'www.sze.app']) {
+    const res = await call(host, '/');
+    assert.equal(res.status, 200, host);
+    const html = await res.text();
+    assert.match(html, /sze\.app is for sale/);
+    // every Lummet link now leaves for Lummet; no site-relative link is left except static files
+    const hrefs = [...html.matchAll(/\shref="([^"]*)"/g)].map((m) => m[1]);
+    const relative = hrefs.filter((h) => h.startsWith('/') && !h.startsWith('//') && !h.startsWith('/static/') && !h.startsWith('/_s/'));
+    assert.deepEqual(relative, [], 'no site-relative links');
+    assert.ok(hrefs.some((h) => h.startsWith('https://lummet.com/')), 'Lummet links are absolute');
+    assert.match(html, /<form[^>]*action="\/aftermarket\/domains\/sze\.app"/, 'the enquiry form stays on the domain');
+  }
+  // its own enquiry post works
+  const posted = await call('sze.app', '/aftermarket/domains/sze.app', { method: 'POST', headers: { origin: 'https://sze.app', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ...valid, f_domain: 'sze.app' }) });
+  assert.equal(posted.status, 303);
+  assert.equal((await inquiries(env))[0].source, 'host');
+  // any other page goes to Lummet; the admin, API, portal and login are not reachable and never render here
+  const about = await call('sze.app', '/about?x=1');
+  assert.equal(about.status, 301);
+  assert.equal(about.headers.get('location'), 'https://lummet.com/about?x=1');
+  assert.equal((await call('sze.app', '/app/login')).headers.get('location'), 'https://lummet.com/app/login');
+  assert.equal((await call('sze.app', '/api/customer/login', { method: 'POST', body: '{}' })).status, 404);
+  assert.equal((await call('sze.app', '/aftermarket/domains/other.app')).status, 301);
+  assert.match(await (await call('sze.app', '/robots.txt')).text(), /Allow: \//);
+  // a domain that is not hosted, and Lummet's own host, behave as before
+  assert.match(await (await call('plain.app', '/')).text(), /<title>[^<]*(?!is for sale)/);
+  assert.doesNotMatch(await (await call('plain.app', '/')).text(), /plain\.app is for sale/);
+  const own = await call('lummet.test', '/');
+  assert.equal(own.status, 200);
+  assert.doesNotMatch(await own.text(), /is for sale/);
+});
+
+test('where an enquiry came from is stored (known keys only), and domain names never wrap on the list', async () => {
+  const env = createPublicEnv();
+  await addDomain(env, 'sze.app');
+  await post(handlePublicRoute, env, '/aftermarket/domain-acquisition?domain=sze.app', { ...valid, f_domain: 'sze.app', _attr: 'source=newsletter;medium=email;referrer=news.example.com;evil=<script>;campaign=x<b>y' });
+  const row = (await inquiries(env))[0];
+  const payload = JSON.parse(row.payload);
+  assert.deepEqual(payload.attribution, { source: 'newsletter', medium: 'email', referrer: 'news.example.com', campaign: 'xby' });
+  assert.match(row.details, /Came from: source=newsletter, medium=email, campaign=xby, referrer=news\.example\.com|Came from: /);
+  assert.doesNotMatch(row.details, /evil|<script>/);
+  // the form carries the hidden field and its script (script reads utm_* and the referrer in the browser: pages are cached)
+  const html = await text(await get(handlePublicRoute, env, '/aftermarket/domain-acquisition'));
+  assert.match(html, /<input type="hidden" name="_attr" value="">/);
+  assert.match(html, /src="\/static\/js\/attribution\.js[^"]*"/);
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../public/static/css/components.css', import.meta.url), 'utf8');
+  assert.match(css, /\.aftermarket-table tbody th \{[^}]*white-space: nowrap/);
+});

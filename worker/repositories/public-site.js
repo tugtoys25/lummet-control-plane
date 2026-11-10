@@ -238,6 +238,38 @@ export async function upsertAftermarketClaim(env, { domain, email, price, descri
   return true;
 }
 
+const ZONE_COLUMNS = new Set(["cf_zone_id", "ns_assigned", "ns_detected_at", "activation_asked_at", "zone_expires_at", "next_check_at", "status", "hosted", "verified_method", "verified_at"]);
+
+/** Zone bookkeeping for a seller's nameserver verification. Only the listed columns can be written. */
+export async function patchAftermarketZone(env, id, patch) {
+  const keys = Object.keys(patch).filter((k) => ZONE_COLUMNS.has(k));
+  if (!keys.length) return;
+  await db(env)
+    .prepare(`UPDATE lummet_aftermarket_domains SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(...keys.map((k) => patch[k] ?? null), id).run();
+}
+
+export async function countOpenAftermarketZones(env) {
+  const row = await db(env).prepare(`SELECT COUNT(*) AS n FROM lummet_aftermarket_domains WHERE cf_zone_id IS NOT NULL AND status = 'pending'`).first();
+  return row?.n || 0;
+}
+
+/** Pending claims with a zone that are due a check (or have expired). */
+export async function listAftermarketZonesDue(env, nowIso, limit = 10) {
+  const res = await db(env)
+    .prepare(`SELECT * FROM lummet_aftermarket_domains WHERE cf_zone_id IS NOT NULL AND status = 'pending' AND (next_check_at IS NULL OR next_check_at <= ?) ORDER BY next_check_at LIMIT ?`)
+    .bind(nowIso, limit).all();
+  return res.results || [];
+}
+
+/** Zones whose domain is no longer pending or listed (unlisted, sold, back to draft): to be deleted at Cloudflare. */
+export async function listAftermarketZonesToRelease(env, limit = 10) {
+  const res = await db(env)
+    .prepare(`SELECT * FROM lummet_aftermarket_domains WHERE cf_zone_id IS NOT NULL AND status IN ('unlisted', 'sold', 'draft') LIMIT ?`)
+    .bind(limit).all();
+  return res.results || [];
+}
+
 export async function touchAftermarketCheck(env, id) {
   await db(env).prepare(`UPDATE lummet_aftermarket_domains SET last_check_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(id).run();
 }

@@ -101,18 +101,103 @@ test('seller flow: claim, TXT verification lists the domain; wrong record does n
   assert.match(await text(await get(handlePublicRoute, env, '/aftermarket/domains/mine.example')), /mine\.example is for sale/);
 });
 
-test('nameserver verification needs the configured nameservers and marks the domain hosted', async () => {
+function fakeCloudflare(state = {}) {
+  const calls = [];
+  const s = { zoneStatus: 'pending', seen: [], ...state };
+  const infra = {
+    createZone: async (_e, { name }) => { calls.push(['createZone', name]); return { zoneId: 'z-' + name, nameServers: ['ada.ns.cf.test', 'bob.ns.cf.test'], cfStatus: 'pending', status: s.createStatus || 'pending' }; },
+    getZone: async () => ({ zoneId: 'z', nameServers: ['ada.ns.cf.test', 'bob.ns.cf.test'], cfStatus: s.zoneStatus, status: s.zoneStatus }),
+    requestActivationCheck: async () => { calls.push(['activationCheck']); return { ok: true }; },
+    deleteZone: async (_e, id) => { calls.push(['deleteZone', id]); return { ok: true }; },
+    triggerDnsScan: async () => { calls.push(['scan']); return { ok: true }; },
+    acceptScannedRecords: async () => { calls.push(['accept']); return { ok: true, accepted: 1 }; },
+    listDnsRecords: async () => [{ id: 'r1', type: 'A', name: 'ns.example', content: '1.2.3.4' }, { id: 'r2', type: 'MX', name: 'ns.example', content: 'mx' }],
+    deleteDnsRecord: async (_e, _z, id) => { calls.push(['deleteRecord', id]); return { ok: true }; },
+    attachWorkerDomain: async (_e, p) => { calls.push(['attach', p.hostname, p.workerName]); return { customDomainId: 'c' }; }
+  };
+  const dns = { lookupNS: async () => ({ ok: true, nameServers: s.seen }) };
+  return { infra, dns, calls, s };
+}
+
+test('nameserver verification: a Cloudflare zone per domain, listed only once Cloudflare reports it active', async () => {
+  const { __setAftermarketProvidersForTests } = await import('../worker/aftermarket-zones.js');
   const env = createPublicEnv();
-  env.AFTERMARKET_NAMESERVERS = 'ada.ns.example.net, bob.ns.example.net';
-  await post(handlePublicRoute, env, '/aftermarket/sell-your-domain', { f_name: 'S', f_email: 's@example.test', f_domain: 'ns.example', f_asking_price: '1' });
-  const realFetch = globalThis.fetch;
+  env.CF_API_TOKEN = 't'; env.CF_ACCOUNT_ID = 'a';
+  const cf = fakeCloudflare();
+  __setAftermarketProvidersForTests(cf);
   try {
-    globalThis.fetch = async () => new Response(JSON.stringify({ Answer: [{ type: 2, data: 'ada.ns.example.net.' }, { type: 2, data: 'bob.ns.example.net.' }] }), { status: 200 });
-    const r = await post(handlePublicRoute, env, '/aftermarket/sell-your-domain/verify', { domain: 'ns.example', method: 'ns' });
+    await post(handlePublicRoute, env, '/aftermarket/sell-your-domain', { f_name: 'S', f_email: 's@example.test', f_domain: 'ns.example', f_asking_price: '1' });
+    const q = () => env.db.prepare(`SELECT * FROM lummet_aftermarket_domains WHERE domain='ns.example'`).first();
+    const cool = () => env.db.prepare(`UPDATE lummet_aftermarket_domains SET last_check_at = NULL`).run();
+    // start: zone created, its own nameservers stored and shown
+    let r = await post(handlePublicRoute, env, '/aftermarket/sell-your-domain/verify', { domain: 'ns.example', method: 'ns_start' });
     assert.equal(r.status, 303);
-  } finally { globalThis.fetch = realFetch; }
-  const row = await env.db.prepare(`SELECT * FROM lummet_aftermarket_domains WHERE domain='ns.example'`).first();
-  assert.deepEqual([row.status, row.verified_method, row.hosted], ['listed', 'ns', 1]);
+    let row = await q();
+    assert.equal(row.cf_zone_id, 'z-ns.example');
+    assert.equal(row.ns_assigned, 'ada.ns.cf.test,bob.ns.cf.test');
+    const page = await text(await get(handlePublicRoute, env, '/aftermarket/sell-your-domain/verify?domain=ns.example'));
+    assert.match(page, /ada\.ns\.cf\.test/);
+    // nameservers not changed yet
+    await cool();
+    r = await post(handlePublicRoute, env, '/aftermarket/sell-your-domain/verify', { domain: 'ns.example', method: 'ns' });
+    assert.match(r.headers.get('location'), /msg=ns$/);
+    assert.equal((await q()).status, 'pending');
+    // registrar shows them, Cloudflare still pending
+    cf.s.seen = ['ADA.ns.cf.test.', 'bob.ns.cf.test'];
+    await cool();
+    r = await post(handlePublicRoute, env, '/aftermarket/sell-your-domain/verify', { domain: 'ns.example', method: 'ns' });
+    assert.match(r.headers.get('location'), /msg=ns_seen/);
+    assert.ok((await q()).ns_detected_at);
+    assert.equal((await q()).status, 'pending');
+    // Cloudflare confirms: records kept, old A removed, apex + www attached to this Worker, then listed and hosted
+    cf.s.zoneStatus = 'active';
+    await cool();
+    r = await post(handlePublicRoute, env, '/aftermarket/sell-your-domain/verify', { domain: 'ns.example', method: 'ns' });
+    assert.equal(r.headers.get('location'), '/aftermarket/sell-your-domain/verify?domain=ns.example');
+    row = await q();
+    assert.deepEqual([row.status, row.verified_method, row.hosted], ['listed', 'ns', 1]);
+    assert.deepEqual(cf.calls.filter((c) => c[0] === 'attach'), [['attach', 'ns.example', 'lummet-control-plane'], ['attach', 'www.ns.example', 'lummet-control-plane']]);
+    assert.ok(cf.calls.some((c) => c[0] === 'deleteRecord' && c[1] === 'r1'));
+    assert.ok(!cf.calls.some((c) => c[0] === 'deleteRecord' && c[1] === 'r2'));
+    assert.ok(cf.calls.some((c) => c[0] === 'accept'));
+  } finally { __setAftermarketProvidersForTests(); }
+});
+
+test('nameserver setup is refused for a domain a customer already connected, and when Cloudflare is not configured', async () => {
+  const { __setAftermarketProvidersForTests, startZone } = await import('../worker/aftermarket-zones.js');
+  const env = createPublicEnv();
+  await post(handlePublicRoute, env, '/aftermarket/sell-your-domain', { f_name: 'S', f_email: 's@example.test', f_domain: 'used.example', f_asking_price: '1' });
+  const row = () => env.db.prepare(`SELECT * FROM lummet_aftermarket_domains WHERE domain='used.example'`).first();
+  assert.deepEqual(await startZone(env, await row()), { ok: false, error: 'ns_off' });   // no CF credentials
+  const cf = fakeCloudflare();
+  __setAftermarketProvidersForTests(cf);
+  try {
+    await env.db.prepare(`PRAGMA foreign_keys = OFF`).run().catch(() => {});
+    await env.db.prepare(`INSERT INTO domain_zones (id, site_id, zone_name, provider_zone_id, name_servers, status, expires_at) VALUES ('z1', 's1', 'used.example', 'pz', '[]', 'pending', '2099-01-01')`).run();
+    assert.deepEqual(await startZone(env, await row()), { ok: false, error: 'ns_taken' });
+    assert.ok(!cf.calls.some((c) => c[0] === 'createZone'), 'no Cloudflare zone is created for it');
+  } finally { __setAftermarketProvidersForTests(); }
+});
+
+test('sweep expires unfinished claims and releases zones of unlisted domains', async () => {
+  const { __setAftermarketProvidersForTests, startZone, sweep } = await import('../worker/aftermarket-zones.js');
+  const env = createPublicEnv();
+  const cf = fakeCloudflare();
+  __setAftermarketProvidersForTests(cf);
+  try {
+    await post(handlePublicRoute, env, '/aftermarket/sell-your-domain', { f_name: 'S', f_email: 's@example.test', f_domain: 'old.example', f_asking_price: '1' });
+    const row = await env.db.prepare(`SELECT * FROM lummet_aftermarket_domains WHERE domain='old.example'`).first();
+    assert.equal((await startZone(env, row)).ok, true);
+    await env.db.prepare(`UPDATE lummet_aftermarket_domains SET zone_expires_at = '2000-01-01T00:00:00.000Z', next_check_at = '2000-01-01T00:00:00.000Z'`).run();
+    await sweep(env);
+    const after = await env.db.prepare(`SELECT * FROM lummet_aftermarket_domains WHERE domain='old.example'`).first();
+    assert.deepEqual([after.status, after.cf_zone_id], ['unlisted', null]);
+    assert.ok(cf.calls.some((c) => c[0] === 'deleteZone'));
+    // an admin unlists a domain that still has a zone: the sweep deletes it
+    await env.db.prepare(`UPDATE lummet_aftermarket_domains SET status = 'unlisted', cf_zone_id = 'zz'`).run();
+    const out = await sweep(env);
+    assert.equal(out.released, 1);
+  } finally { __setAftermarketProvidersForTests(); }
 });
 
 test('Turnstile covers the aftermarket forms: widget, CSP and fail-closed POST', async () => {

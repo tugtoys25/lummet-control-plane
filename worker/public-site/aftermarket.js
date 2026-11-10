@@ -6,7 +6,7 @@
 //   /aftermarket/domain-acquisition       the buy form; shows "<domain> is for sale" when reached by a redirect (?domain=) or
 //                                         on a hosted for-sale domain's own address
 //   /aftermarket/sell-your-domain         seller form (a normal DB form, key sell-domain) -> verification page
-//   /aftermarket/sell-your-domain/verify  prove control by nameservers (AFTERMARKET_NAMESERVERS) or a TXT record
+//   /aftermarket/sell-your-domain/verify  prove control by nameservers (a Cloudflare zone per domain, aftermarket-zones.js) or a TXT record
 //
 // Every enquiry goes through forms.js, so it has the same protection as the other forms (same-origin check, honeypot, per-IP
 // limit, Turnstile when PUBLIC_FORMS_TURNSTILE_REQUIRED=on) and lands in lummet_inquiries with the domain in subject_ref.
@@ -17,7 +17,8 @@ import * as forms from "./forms.js";
 import { renderPage } from "./render.js";
 import { buildHead, breadcrumbLd } from "./seo.js";
 import { fill, truncate, stripTags } from "./format.js";
-import { lookupNS, lookupTXT } from "../dns-doh.js";
+import { lookupTXT } from "../dns-doh.js";
+import * as zones from "../aftermarket-zones.js";
 import { BUY_FORM_KEY, SELL_FORM_KEY, normalizeDomain, isReservedDomain, platformHosts } from "./aftermarket-domains.js";
 
 const VERIFY_PATH = "/aftermarket/sell-your-domain/verify";
@@ -26,10 +27,6 @@ const TOKEN_PREFIX = "lummet-verify=";
 
 function crumbs(ui, extra) {
   return [{ label: ui.crumb_home, href: "/" }, ...extra].map((c, i, a) => ({ ...c, last: i === a.length - 1 }));
-}
-
-function nameServers(env) {
-  return String(env.AFTERMARKET_NAMESERVERS || "").split(/[\s,]+/).map((n) => n.trim().toLowerCase().replace(/\.$/, "")).filter(Boolean);
 }
 
 function newToken() {
@@ -115,7 +112,10 @@ const sellHooks = {
 export const sellPage = (ctx) => forms.formPage(ctx, { key: SELL_FORM_KEY, path: "/aftermarket/sell-your-domain", subject: null });
 export const sellSubmit = (ctx) => forms.submitForm(ctx, { key: SELL_FORM_KEY, path: "/aftermarket/sell-your-domain", subject: null, hooks: sellHooks });
 
-const MESSAGES = { ns: "aftermarket_not_verified_ns", txt: "aftermarket_not_verified_txt", wait: "aftermarket_throttled", ns_off: "aftermarket_ns_unavailable" };
+const MESSAGES = {
+  ns: "aftermarket_not_verified_ns", txt: "aftermarket_not_verified_txt", wait: "aftermarket_throttled", ns_off: "aftermarket_ns_unavailable",
+  ns_seen: "aftermarket_ns_seen", ns_error: "aftermarket_ns_error", ns_busy: "aftermarket_ns_busy", ns_taken: "aftermarket_ns_taken"
+};
 
 export async function verifyPage(ctx) {
   const { env, url, siteCtx } = ctx;
@@ -125,7 +125,7 @@ export async function verifyPage(ctx) {
   if (!row || row.source !== "seller" || !["pending", "listed"].includes(row.status)) return null;
 
   const listed = row.status === "listed";
-  const ns = nameServers(env);
+  const ns = zones.assignedNameServers(row);
   const msgKey = MESSAGES[url.searchParams.get("msg")];
   const title = fill(ui.aftermarket_verify_title, { domain });
   const trail = crumbs(ui, [{ label: ui.aftermarket_sell_crumb, href: "/aftermarket/sell-your-domain" }, { label: title, href: VERIFY_PATH }]);
@@ -142,7 +142,9 @@ export async function verifyPage(ctx) {
       message: msgKey ? fill(ui[msgKey], { domain }) : "",
       ns_title: ui.aftermarket_ns_title,
       ns_body: fill(ui.aftermarket_ns_body, { domain }),
-      has_ns: ns.length > 0,
+      ns_available: zones.nsAvailable(env),
+      has_zone: ns.length > 0,
+      ns_seen: Boolean(row.ns_detected_at),
       name_servers: ns.map((n) => ({ value: n })),
       txt_body: ui.aftermarket_txt_body,
       txt_type: "TXT",
@@ -172,18 +174,25 @@ export async function verifySubmit(ctx) {
   const method = String(formData.get("method") || "");
   const row = domain ? await data.getAftermarketDomain(env, domain) : null;
   if (!row || row.source !== "seller") return null;
-  if (row.status !== "pending" || !["ns", "txt"].includes(method)) return back(domain);
+  if (row.status !== "pending" || !["ns_start", "ns", "txt"].includes(method)) return back(domain);
 
   const last = row.last_check_at ? Date.parse(`${String(row.last_check_at).replace(" ", "T")}Z`) : 0;
   if (last && Date.now() - last < CHECK_COOLDOWN_MS) return back(domain, "wait");
   await data.touchAftermarketCheck(env, row.id);
 
+  if (method === "ns_start") {
+    const started = await zones.startZone(env, row);
+    return back(domain, started.ok ? "" : started.error);
+  }
   let verified = false;
   if (method === "ns") {
-    const expected = nameServers(env);
-    if (!expected.length) return back(domain, "ns_off");
-    const seen = await lookupNS(domain);
-    verified = Boolean(seen && seen.ok && expected.every((n) => (seen.nameServers || []).map((s) => String(s).toLowerCase().replace(/\.$/, "")).includes(n)));
+    if (!row.cf_zone_id) return back(domain);
+    const result = await zones.checkZone(env, row, { manual: true });
+    if (result.state === "listed") {
+      await forms.notify(ctx, { form_key: "aftermarket-listed", name: null, email: row.owner_email, subject_ref: domain, summary: `${domain} verified by ns and listed` }, row.id);
+      return back(domain);
+    }
+    return back(domain, result.state === "seen" ? "ns_seen" : result.state === "error" ? "ns_error" : "ns");
   } else {
     const values = await lookupTXT(`_lummet-verify.${domain}`);
     verified = Boolean(row.verify_token) && values.some((v) => String(v).trim() === row.verify_token);

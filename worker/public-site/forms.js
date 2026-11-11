@@ -169,6 +169,8 @@ export function buildInquiryRecord(formKey, fields, values, extra = {}) {
     subjectRef = normalizeDomain(chosen) || normalizeDomain(extra.subject) || null;
   } else if (formKey === SELL_FORM_KEY) {
     subjectRef = normalizeDomain(values.domain) || null;
+  } else if (extra.subjectRef) {
+    subjectRef = extra.subjectRef;                     // a business listing: "listing:<slug>"
   } else if (extra.subject) {
     subjectRef = normalizeDomain(extra.subject) || null;
   }
@@ -178,7 +180,7 @@ export function buildInquiryRecord(formKey, fields, values, extra = {}) {
     form_key: formKey,
     name: nameField ? values[nameField.field_key] || null : null,
     email: emailField ? values[emailField.field_key] || null : null,
-    summary: subjectRef ? truncate(`${subjectRef}${summaryText ? ` - ${summaryText}` : ""}`, 140) : summaryText,
+    summary: subjectRef ? truncate(`${extra.subjectLabel || subjectRef}${summaryText ? ` - ${summaryText}` : ""}`, 140) : summaryText,
     details: [details, extra.source ? `Source: ${extra.source}` : "", attribution ? `Came from: ${attribution}` : ""].filter(Boolean).join("\n\n"),
     payload: JSON.stringify({ fields: rows, subject: subjectRef, source: extra.source || null, attribution: extra.attribution || null }),
     subject_ref: subjectRef,
@@ -220,12 +222,20 @@ async function renderForm(ctx, { key, path: pathOverride, form: formRow, fields,
   // A domain for sale (redirect, its own host, or its landing page): the header says so and the select starts on that domain.
   let form = formRow;
   let listing = null;
-  if (subject) {
+  if (subject && subject.kind === "listing") {
+    // A business for sale: its own title and facts; the enquiry form below is the same one the domains use.
+    const r = subject.row;
+    form = { ...formRow, title: r.title, seo_title: r.title, intro: `<p>${escapeHtml(r.summary || "")}</p>`, seo_description: truncate(r.summary || "", 170) };
+    const facts = [
+      [ui.listing_fact_category, r.category_name], [ui.listing_fact_location, r.location], [ui.listing_fact_revenue, r.revenue], [ui.listing_fact_profit, r.profit]
+    ].filter(([, v]) => String(v || "").trim()).map(([label, value]) => ({ label, value: String(value).trim() }));
+    listing = { headline: "", description: String(r.description || "").trim(), price: String(r.asking_price || "").trim() || ui.aftermarket_price_on_request, buy_url: "", has_buy: false, facts, has_facts: facts.length > 0, list_href: "/aftermarket/businesses", all_label: ui.listing_all };
+  } else if (subject) {
     const title = fill(ui.aftermarket_for_sale_title, { domain: subject.domain });
     form = { ...formRow, title, seo_title: title, intro: `<p>${escapeHtml(fill(ui.aftermarket_for_sale_intro, { domain: subject.domain }))}</p>` };
     const price = String(subject.row?.asking_price || "").trim();
     const buyUrl = /^https:\/\//i.test(subject.row?.buy_url || "") ? subject.row.buy_url : "";
-    listing = { domain: subject.domain, headline: String(subject.row?.headline || "").trim(), description: String(subject.row?.description || "").trim(), price: price || ui.aftermarket_price_on_request, buy_url: buyUrl, has_buy: Boolean(buyUrl), list_href: "/aftermarket/list-of-domains" };
+    listing = { domain: subject.domain, headline: String(subject.row?.headline || "").trim(), description: String(subject.row?.description || "").trim(), price: price || ui.aftermarket_price_on_request, buy_url: buyUrl, has_buy: Boolean(buyUrl), list_href: "/aftermarket/list-of-domains", all_label: ui.aftermarket_all_domains };
     if (!("domain" in values) && !sent) values = { ...values, domain: subject.domain };
   }
   const path = pathOverride || formPath(key);
@@ -398,7 +408,7 @@ export async function submitForm(ctx, { key, path, fallbackKey = null, subject, 
     if (recent >= limit) return fail(429, ui.err_rate || "", { values });
   }
 
-  const record = buildInquiryRecord(key, fields, values, { subject: subject?.domain, source, attribution: cleanAttribution(formData.get("_attr")) });
+  const record = buildInquiryRecord(key, fields, values, { subject: subject?.domain, subjectRef: subject?.ref, subjectLabel: subject?.kind === "listing" ? subject.row?.title : null, source, attribution: cleanAttribution(formData.get("_attr")) });
   let id;
   try {
     id = await data.insertInquiry(env, { ...record, ip_hash: ipHash });

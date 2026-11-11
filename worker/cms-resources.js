@@ -351,6 +351,53 @@ export const CMS_RESOURCES = {
     ]
   },
 
+  listing_categories: {
+    label: "Listing categories",
+    table: "lummet_listing_categories",
+    listColumns: [
+      { key: "name", label: "Category" },
+      { key: "slug", label: "Slug" },
+      { key: "status", label: "Status" },
+      { key: "sort_order", label: "Order" }
+    ],
+    orderBy: "sort_order, name",
+    fields: [
+      { name: "name", label: "Name", type: "text", required: true },
+      { name: "slug", label: "Slug", type: "text", required: true, hint: "Lower case, letters, numbers and dashes. It is part of the address: /aftermarket/businesses/<slug>" },
+      { name: "description", label: "Description", type: "textarea", hint: "Shown at the top of the category page" },
+      { name: "status", label: "Status", type: "select", options: ["published", "draft"] },
+      { name: "sort_order", label: "Sort order", type: "number", default: 0 }
+    ]
+  },
+
+  listings: {
+    label: "Businesses for sale",
+    table: "lummet_listings",
+    listColumns: [
+      { key: "title", label: "Listing" },
+      { key: "category_slug", label: "Category" },
+      { key: "status", label: "Status" },
+      { key: "asking_price", label: "Price" },
+      { key: "source", label: "Added by" }
+    ],
+    orderBy: "id DESC",
+    fields: [
+      { name: "title", label: "Title", type: "text", required: true },
+      { name: "slug", label: "Slug", type: "text", required: true, hint: "Lower case, letters, numbers and dashes. Address: /aftermarket/listings/<slug>" },
+      { name: "category_slug", label: "Category slug", type: "text", hint: "One of the slugs in Listing categories" },
+      { name: "status", label: "Status", type: "select", options: ["draft", "pending", "listed", "unlisted", "sold"], hint: "Only listed is public. A seller's new or edited listing waits here as pending until you set it to listed." },
+      { name: "summary", label: "Summary", type: "textarea", hint: "One or two sentences, shown in lists and at the top of the page" },
+      { name: "description", label: "Description", type: "textarea" },
+      { name: "location", label: "Location", type: "text" },
+      { name: "asking_price", label: "Asking price", type: "text", hint: "Free text, e.g. 120000 USD. Empty shows Make an offer" },
+      { name: "revenue", label: "Revenue", type: "text", hint: "Free text, e.g. 40000 USD / year" },
+      { name: "profit", label: "Profit", type: "text" },
+      { name: "sort_order", label: "Sort order", type: "number", default: 0 },
+      { name: "source", label: "Added by", type: "text", readOnly: true },
+      { name: "owner_email", label: "Seller email (private)", type: "text", readOnly: true }
+    ]
+  },
+
   inquiries: {
     label: "Inquiries",
     table: "lummet_inquiries",
@@ -358,7 +405,7 @@ export const CMS_RESOURCES = {
     listColumns: [
       { key: "created_at", label: "Received (UTC)" },
       { key: "form_key", label: "Form" },
-      { key: "subject_ref", label: "Domain" },
+      { key: "subject_ref", label: "About" },
       { key: "name", label: "Name" },
       { key: "email", label: "Email" },
       { key: "summary", label: "Summary" },
@@ -368,7 +415,7 @@ export const CMS_RESOURCES = {
     fields: [
       { name: "created_at", label: "Received (UTC)", type: "text", readOnly: true },
       { name: "form_key", label: "Form", type: "text", readOnly: true },
-      { name: "subject_ref", label: "Domain asked about", type: "text", readOnly: true },
+      { name: "subject_ref", label: "Asked about (domain or listing:slug)", type: "text", readOnly: true },
       { name: "source", label: "Came from (redirect, host, landing, form)", type: "text", readOnly: true },
       { name: "name", label: "Name", type: "text", readOnly: true },
       { name: "email", label: "Email", type: "text", readOnly: true },

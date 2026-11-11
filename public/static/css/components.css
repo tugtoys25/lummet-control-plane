@@ -386,6 +386,13 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
 .aftermarket-table tbody th { font-weight: 700; white-space: nowrap; word-break: keep-all; hyphens: none; }
 .aftermarket-table tbody th a { white-space: nowrap; }
 .page-form .page-hero h1 { overflow-wrap: normal; word-break: keep-all; hyphens: none; }
+/* Business listings: titles wrap normally (only domain names must stay on one line), category tabs, fact list */
+.listings-table tbody th { white-space: normal; max-width: 28ch; }
+.listings-table tbody th a { white-space: normal; }
+.listing-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--space-5); }
+.listing-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 var(--space-3); }
+.listing-facts dt { font-weight: 700; }
+.listing-facts dd { margin: 0; }
 .aftermarket-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .aftermarket-sell { margin-top: var(--space-6); }
 .verify-layout { display: grid; gap: var(--space-5); max-width: 760px; }

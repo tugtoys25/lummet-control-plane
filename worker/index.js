@@ -117,6 +117,7 @@ import * as jobsModule from "./jobs.js";
 import * as jobRunner from "./job-runner.js";
 import { domains } from "./domains.js";
 import { zoneDomains } from "./zone-domains.js";
+import * as aftermarketPortal from "./aftermarket-portal.js";
 import { deployments } from "./deployments.js";
 import { tenantPortal } from "./tenant-portal.js";
 import { getUsageSnapshot } from "./usage.js";
@@ -1530,6 +1531,19 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           }
 
           // Backups (master prompt section 23) — admin+, plan-gated, org-scoped
+          if (subPath.startsWith("/aftermarket/")) {
+            const amResponse = await aftermarketPortal.handleApi({
+              env, request, method, path, organizationId, customer, requireOrgRole,
+              audit: (action, result, resourceId) => logAudit(env, {
+                actorType: "customer_user", customerUserId: customer.id, organizationId,
+                endpoint: path, method, resource: "aftermarket_domain", resourceId, action,
+                success: result.ok, statusCode: result.ok ? 200 : result.status || 400,
+                errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
+              })
+            });
+            if (amResponse) return amResponse;
+          }
+
           if (subPath === "/backups" || subPath.startsWith("/backups/")) {
             const guard = await requireOrgRole(organizationId, "admin");
             if (guard) return guard;
@@ -3288,6 +3302,17 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               organizations: myOrgs, activeOrganizationId: activeOrgId,
               bodyHtml: renderUsagePage({ snapshot, monthly, aiCredits, aiLimit, tasks: Object.fromEntries(Object.entries(AI_TASKS).map(([k, v]) => [k, v.credits])), ledger, canManage })
             })
+          );
+        }
+
+        if (path === "/app/aftermarket" || path.startsWith("/app/aftermarket/")) {
+          const am = await aftermarketPortal.renderPage(env, { organizationId: activeOrgId, path, canManage });
+          return html(
+            shell({
+              title: "Aftermarket", activeKey: "aftermarket", customer: portalCustomer,
+              organizations: myOrgs, activeOrganizationId: activeOrgId, bodyHtml: am.html
+            }),
+            am.status
           );
         }
 

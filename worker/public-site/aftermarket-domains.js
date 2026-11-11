@@ -9,6 +9,14 @@ export const BUY_FORM_KEY = "domain-acquisition";
 export const SELL_FORM_KEY = "sell-domain";
 export const OTHER_OPTION = "Other";
 
+const TOKEN_PREFIX = "lummet-verify=";
+
+/** The value a seller puts in the _lummet-verify TXT record. */
+export function newVerifyToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return TOKEN_PREFIX + [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 const HOST_RE = /^(?=.{3,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/;
 
 /** "HTTPS://WWW.Example.com/path" -> "example.com"; "" when it cannot be a domain name. */

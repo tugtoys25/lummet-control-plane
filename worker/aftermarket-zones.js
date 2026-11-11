@@ -29,7 +29,7 @@ import * as cloudflareProvider from "./infra-cloudflare.js";
 import * as zoneRepo from "./repositories/domain-zones.js";
 import * as repo from "./repositories/public-site.js";
 import { reservedHostnames } from "./platform-domains.js";
-import { normalizeDomainInput, delegationMatches } from "./zone-domains.js";
+import { normalizeDomainInput, delegationMatches, validateRecord } from "./zone-domains.js";
 
 const MINUTE = 60 * 1000;
 const DAY = 24 * 60 * MINUTE;
@@ -187,4 +187,56 @@ export async function sweep(env, { now = Date.now(), limit = 10 } = {}) {
     try { await dropZone(env, row); released += 1; } catch (_) { /* try again next tick */ }
   }
   return { checked, released };
+}
+
+// ----------------------------------------------------------------- TXT proof (no Cloudflare needed)
+
+/** Does `_lummet-verify.<domain>` carry this claim's token? Shared by the public verify page and the seller portal. */
+export async function checkTxt(row) {
+  if (!row?.verify_token) return false;
+  const values = await ref.dns.lookupTXT(`_lummet-verify.${row.domain}`);
+  return (values || []).some((v) => String(v).trim() === row.verify_token);
+}
+
+// ----------------------------------------------------------------- DNS records (seller portal, nameserver-verified domains)
+
+const WEB_TYPES = ["A", "AAAA", "CNAME"];
+
+/** DNS can be managed only while the domain's zone is ours and active: verified by nameservers and still listed. */
+export const canManageDns = (row) => Boolean(row && row.cf_zone_id && row.verified_method === "ns" && row.status === "listed");
+
+const managedNames = (row) => new Set([row.domain, `www.${row.domain}`]);
+
+/** { ok, records: [{ id, type, name, content, ttl, proxied, managed }] }. `managed` = served by Lummet (the for-sale page), read-only. */
+export async function listRecords(env, row) {
+  if (!canManageDns(row)) return { ok: false, status: 409, error: "dns_not_available" };
+  try {
+    const records = await ref.infra.listDnsRecords(env, row.cf_zone_id);
+    const managed = managedNames(row);
+    return { ok: true, records: records.map((r) => ({ ...r, managed: managed.has(r.name) && WEB_TYPES.includes(r.type) })) };
+  } catch (_) { return { ok: false, status: 502, error: "provider_error" }; }
+}
+
+export async function addRecord(env, row, input) {
+  if (!canManageDns(row)) return { ok: false, status: 409, error: "dns_not_available" };
+  const v = validateRecord(input, row.domain);
+  if (!v.ok) return { ok: false, status: 422, error: v.error };
+  if (managedNames(row).has(v.record.name) && WEB_TYPES.includes(v.record.type)) return { ok: false, status: 409, error: "hostname_managed_by_lummet" };
+  try {
+    const created = await ref.infra.createDnsRecord(env, row.cf_zone_id, v.record);
+    return { ok: true, record: created };
+  } catch (err) {
+    return /already exists|identical/i.test(String(err?.message)) ? { ok: false, status: 409, error: "record_exists" } : { ok: false, status: 502, error: "provider_error" };
+  }
+}
+
+export async function deleteRecord(env, row, recordId) {
+  if (!canManageDns(row)) return { ok: false, status: 409, error: "dns_not_available" };
+  try {
+    const rec = (await ref.infra.listDnsRecords(env, row.cf_zone_id)).find((r) => r.id === recordId);
+    if (!rec) return { ok: false, status: 404, error: "record_not_found" };
+    if (managedNames(row).has(rec.name) && WEB_TYPES.includes(rec.type)) return { ok: false, status: 409, error: "hostname_managed_by_lummet" };
+    await ref.infra.deleteDnsRecord(env, row.cf_zone_id, recordId);
+    return { ok: true };
+  } catch (_) { return { ok: false, status: 502, error: "provider_error" }; }
 }

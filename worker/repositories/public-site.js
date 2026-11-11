@@ -222,19 +222,25 @@ export function listAftermarketDomains(env, limit = 200) {
   return all(env, `SELECT * FROM lummet_aftermarket_domains WHERE status = 'listed' ORDER BY sort_order, domain LIMIT ?`, limit);
 }
 
-/** Seller claim: a new row, or a fresh token on an unverified/removed seller row. Never touches an admin row or a listed one. */
-export async function upsertAftermarketClaim(env, { domain, email, price, description, token }) {
-  const existing = await db(env).prepare(`SELECT id, status, source FROM lummet_aftermarket_domains WHERE domain = ?`).bind(domain).first();
+/**
+ * Seller claim: a new row, or a fresh token on an unverified/removed seller row. Never touches an admin row or a listed one.
+ * A listing owned by an organization can only be re-claimed by that organization; an anonymous (email) claim can be taken over by
+ * a signed-in seller, never the other way round.
+ */
+export async function upsertAftermarketClaim(env, { domain, email, price, description, token, organizationId = null, userId = null }) {
+  const existing = await db(env).prepare(`SELECT id, status, source, organization_id FROM lummet_aftermarket_domains WHERE domain = ?`).bind(domain).first();
   if (!existing) {
     await db(env)
-      .prepare(`INSERT INTO lummet_aftermarket_domains (domain, status, description, asking_price, source, owner_email, verify_token) VALUES (?, 'pending', ?, ?, 'seller', ?, ?)`)
-      .bind(domain, description || null, price || null, email || null, token).run();
+      .prepare(`INSERT INTO lummet_aftermarket_domains (domain, status, description, asking_price, source, owner_email, verify_token, organization_id, owner_user_id) VALUES (?, 'pending', ?, ?, 'seller', ?, ?, ?, ?)`)
+      .bind(domain, description || null, price || null, email || null, token, organizationId, userId).run();
     return true;
   }
   if (existing.source !== "seller" || !["pending", "unlisted"].includes(existing.status)) return false;
+  if (existing.organization_id && existing.organization_id !== organizationId) return false;
   await db(env)
-    .prepare(`UPDATE lummet_aftermarket_domains SET status = 'pending', description = ?, asking_price = ?, owner_email = ?, verify_token = ?, hosted = 0, verified_method = NULL, verified_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-    .bind(description || null, price || null, email || null, token, existing.id).run();
+    .prepare(`UPDATE lummet_aftermarket_domains SET status = 'pending', description = ?, asking_price = ?, owner_email = ?, verify_token = ?, hosted = 0, verified_method = NULL, verified_at = NULL,
+              organization_id = COALESCE(?, organization_id), owner_user_id = COALESCE(?, owner_user_id), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(description || null, price || null, email || null, token, organizationId, userId, existing.id).run();
   return true;
 }
 
@@ -268,6 +274,43 @@ export async function listAftermarketZonesToRelease(env, limit = 10) {
     .prepare(`SELECT * FROM lummet_aftermarket_domains WHERE cf_zone_id IS NOT NULL AND status IN ('unlisted', 'sold', 'draft') LIMIT ?`)
     .bind(limit).all();
   return res.results || [];
+}
+
+// ---- Seller portal (organization-scoped) ----
+
+/** An organization's domains that have a Cloudflare zone (deleted first when the organization is erased). */
+export async function listAftermarketZonesForOrg(env, organizationId) {
+  const res = await db(env).prepare(`SELECT id, cf_zone_id FROM lummet_aftermarket_domains WHERE organization_id = ? AND cf_zone_id IS NOT NULL`).bind(organizationId).all();
+  return res.results || [];
+}
+
+
+export async function listAftermarketForOrg(env, organizationId) {
+  const res = await db(env)
+    .prepare(`SELECT d.*, (SELECT COUNT(*) FROM lummet_inquiries i WHERE i.subject_ref = d.domain AND i.form_key = 'domain-acquisition') AS enquiry_count,
+                     (SELECT MAX(i.created_at) FROM lummet_inquiries i WHERE i.subject_ref = d.domain AND i.form_key = 'domain-acquisition') AS last_enquiry_at
+              FROM lummet_aftermarket_domains d WHERE d.organization_id = ? ORDER BY d.id DESC`)
+    .bind(organizationId).all();
+  return res.results || [];
+}
+
+export function getAftermarketForOrg(env, organizationId, domain) {
+  return first(env, `SELECT * FROM lummet_aftermarket_domains WHERE domain = ? AND organization_id = ?`, String(domain || ""), organizationId);
+}
+
+/** What a seller may see of an enquiry: when, the offer text and where it came from. Buyer contact details stay with Lummet. */
+export function listEnquiriesForDomain(env, domain, limit = 50) {
+  return all(env, `SELECT id, created_at, summary, source, status FROM lummet_inquiries WHERE subject_ref = ? AND form_key = 'domain-acquisition' ORDER BY id DESC LIMIT ?`, String(domain || ""), limit);
+}
+
+const LISTING_COLUMNS = new Set(["headline", "description", "asking_price", "status"]);
+
+export async function updateAftermarketListing(env, id, patch) {
+  const keys = Object.keys(patch).filter((k) => LISTING_COLUMNS.has(k));
+  if (!keys.length) return;
+  await db(env)
+    .prepare(`UPDATE lummet_aftermarket_domains SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(...keys.map((k) => patch[k] ?? null), id).run();
 }
 
 export async function touchAftermarketCheck(env, id) {

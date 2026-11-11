@@ -19,9 +19,13 @@
       {{else}}{{#if has_fields}}
       {{#if listing}}
       <div class="listing-summary">
+        {{#if listing.has_images}}
+        <figure class="listing-cover"><a href="{{listing.cover.url}}" target="_blank" rel="noopener"><img src="{{listing.cover.url}}" alt="{{listing.cover.alt}}"{{#if listing.cover.width}} width="{{listing.cover.width}}" height="{{listing.cover.height}}"{{/if}} decoding="async"></a></figure>
+        {{#if listing.has_gallery}}<ul class="listing-gallery" aria-label="{{ui.listing_gallery_label}}">{{#each listing.gallery}}<li><a href="{{url}}" target="_blank" rel="noopener"><img src="{{url}}" alt="{{alt}}" loading="lazy" decoding="async"></a></li>{{/each}}</ul>{{/if}}
+        {{/if}}
         {{#if listing.headline}}<p class="listing-headline">{{listing.headline}}</p>{{/if}}
         {{#if listing.description}}<p class="listing-description">{{listing.description}}</p>{{/if}}
-        {{#if listing.has_facts}}<dl class="listing-facts">{{#each listing.facts}}<dt>{{label}}</dt><dd>{{value}}</dd>{{/each}}</dl>{{/if}}
+        {{#if listing.has_facts}}<dl class="listing-facts">{{#each listing.facts}}<dt>{{label}}</dt><dd>{{#if has_href}}<a href="{{href}}" target="_blank" rel="noopener nofollow ugc">{{value}}</a>{{else}}{{value}}{{/if}}</dd>{{/each}}</dl>{{/if}}
         <p class="listing-price"><span class="listing-label">{{ui.aftermarket_price_label}}</span> <strong>{{listing.price}}</strong></p>
         {{#if listing.has_buy}}<p><a class="btn btn-primary" href="{{listing.buy_url}}" target="_blank" rel="noopener nofollow sponsored">{{ui.aftermarket_buy_now}}</a></p><p class="help">{{ui.aftermarket_buy_note}}</p>{{/if}}
         <p class="listing-all"><a href="{{listing.list_href}}">{{listing.all_label}}</a></p>

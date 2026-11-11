@@ -389,6 +389,12 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
 /* Business listings: titles wrap normally (only domain names must stay on one line), category tabs, fact list */
 .listings-table tbody th { white-space: normal; max-width: 28ch; }
 .listings-table tbody th a { white-space: normal; }
+/* Listing images: a cover, a gallery of thumbnails that open the full image, and a small thumbnail in the lists */
+.listing-cover { margin: 0 0 var(--space-3); }
+.listing-cover img { display: block; width: 100%; height: auto; max-height: 420px; object-fit: contain; background: var(--surface-alt, #f4f5f7); border-radius: var(--radius, 8px); }
+.listing-gallery { list-style: none; margin: 0 0 var(--space-4); padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.listing-gallery img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--radius, 8px); }
+.listing-thumb { width: 48px; height: 36px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 10px; }
 .listing-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--space-5); }
 .listing-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 var(--space-3); }
 .listing-facts dt { font-weight: 700; }

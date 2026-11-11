@@ -58,7 +58,7 @@ export async function businessesPage(ctx, params = {}) {
   const intro = category?.description || ui.listings_intro;
   const path = category ? `/aftermarket/businesses/${category.slug}` : "/aftermarket/businesses";
   const items = rows.map((r) => ({
-    title: r.title, href: listingHref(r.slug), category: r.category_name || "", location: r.location || "", revenue: r.revenue || "",
+    title: r.title, cover: r.cover_key ? `/brand-media/${r.cover_key}` : "", href: listingHref(r.slug), category: r.category_name || "", location: r.location || "", revenue: r.revenue || "",
     price: String(r.asking_price || "").trim() || ui.aftermarket_price_on_request
   }));
   const tabs = [{ name: ui.listings_all_categories, href: "/aftermarket/businesses", active: !category }, ...categories.map((c) => ({ name: c.name, href: `/aftermarket/businesses/${encodeURIComponent(c.slug)}`, active: category?.slug === c.slug }))];

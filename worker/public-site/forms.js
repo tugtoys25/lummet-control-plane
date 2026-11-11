@@ -17,6 +17,7 @@
 //   * request, field and total size limits
 // =====================================================
 
+import { enquiryReceived } from "../aftermarket-notify.js";
 import * as data from "./data.js";
 import { hashIPForRateLimit } from "../auth.js";
 import { sanitizeHtml } from "./sanitize.js";
@@ -217,6 +218,30 @@ export async function notify(ctx, record, id) {
 
 // ---------------------------------------------------------------- GET
 
+/** An https address that is safe to put in href, or "". */
+function safeHttps(value) {
+  const v = String(value || "").trim();
+  if (!/^https:\/\/[^\s"'<>\\`]+$/i.test(v)) return "";
+  try { return new URL(v).href; } catch (_) { return ""; }
+}
+
+/** "https://www.example.com/shop" -> "example.com/shop" for the visible link text. */
+function websiteLabel(value) {
+  const href = safeHttps(value);
+  if (!href) return "";
+  const u = new URL(href);
+  return `${u.hostname.replace(/^www\./, "")}${u.pathname === "/" ? "" : u.pathname}`.slice(0, 80);
+}
+
+/** The cover image and gallery of a domain or listing (published images only), shaped for the template. */
+async function imagesFor(ctx, kind, subjectId, fallbackAlt) {
+  if (!subjectId) return { has_images: false };
+  let rows = [];
+  try { rows = await data.listImages(ctx.env, kind, subjectId, { publicOnly: true }); } catch (_) { rows = []; }
+  const list = rows.map((r) => ({ url: `/brand-media/${r.r2_key}`, alt: r.caption || r.alt_text || fallbackAlt || "", width: r.width ?? "", height: r.height ?? "" }));
+  return { has_images: list.length > 0, cover: list[0] || null, gallery: list.slice(1), has_gallery: list.length > 1 };
+}
+
 async function renderForm(ctx, { key, path: pathOverride, form: formRow, fields, values = {}, errors = {}, sent = false, status = 200, banner = "", subject = null, source = null, hooks = null }) {
   const { site, ui } = ctx.siteCtx;
   // A domain for sale (redirect, its own host, or its landing page): the header says so and the select starts on that domain.
@@ -227,15 +252,17 @@ async function renderForm(ctx, { key, path: pathOverride, form: formRow, fields,
     const r = subject.row;
     form = { ...formRow, title: r.title, seo_title: r.title, intro: `<p>${escapeHtml(r.summary || "")}</p>`, seo_description: truncate(r.summary || "", 170) };
     const facts = [
-      [ui.listing_fact_category, r.category_name], [ui.listing_fact_location, r.location], [ui.listing_fact_revenue, r.revenue], [ui.listing_fact_profit, r.profit]
-    ].filter(([, v]) => String(v || "").trim()).map(([label, value]) => ({ label, value: String(value).trim() }));
-    listing = { headline: "", description: String(r.description || "").trim(), price: String(r.asking_price || "").trim() || ui.aftermarket_price_on_request, buy_url: "", has_buy: false, facts, has_facts: facts.length > 0, list_href: "/aftermarket/businesses", all_label: ui.listing_all };
+      [ui.listing_fact_category, r.category_name], [ui.listing_fact_location, r.location], [ui.listing_fact_website, websiteLabel(r.website_url), safeHttps(r.website_url)],
+      [ui.listing_fact_revenue, r.revenue], [ui.listing_fact_profit, r.profit]
+    ].filter(([, v]) => String(v || "").trim()).map(([label, value, href]) => ({ label, value: String(value).trim(), href: href || "", has_href: Boolean(href) }));
+    const gallery = await imagesFor(ctx, "listing", r.id, r.title);
+    listing = { headline: "", description: String(r.description || "").trim(), price: String(r.asking_price || "").trim() || ui.aftermarket_price_on_request, buy_url: "", has_buy: false, facts, has_facts: facts.length > 0, ...gallery, list_href: "/aftermarket/businesses", all_label: ui.listing_all };
   } else if (subject) {
     const title = fill(ui.aftermarket_for_sale_title, { domain: subject.domain });
     form = { ...formRow, title, seo_title: title, intro: `<p>${escapeHtml(fill(ui.aftermarket_for_sale_intro, { domain: subject.domain }))}</p>` };
     const price = String(subject.row?.asking_price || "").trim();
     const buyUrl = /^https:\/\//i.test(subject.row?.buy_url || "") ? subject.row.buy_url : "";
-    listing = { domain: subject.domain, headline: String(subject.row?.headline || "").trim(), description: String(subject.row?.description || "").trim(), price: price || ui.aftermarket_price_on_request, buy_url: buyUrl, has_buy: Boolean(buyUrl), list_href: "/aftermarket/list-of-domains", all_label: ui.aftermarket_all_domains };
+    listing = { domain: subject.domain, headline: String(subject.row?.headline || "").trim(), description: String(subject.row?.description || "").trim(), price: price || ui.aftermarket_price_on_request, buy_url: buyUrl, has_buy: Boolean(buyUrl), ...(await imagesFor(ctx, "domain", subject.row?.id, subject.domain)), list_href: "/aftermarket/list-of-domains", all_label: ui.aftermarket_all_domains };
     if (!("domain" in values) && !sent) values = { ...values, domain: subject.domain };
   }
   const path = pathOverride || formPath(key);
@@ -417,6 +444,7 @@ export async function submitForm(ctx, { key, path, fallbackKey = null, subject, 
     return fail(500, ui.err_generic || "", { values });
   }
   await notify(ctx, record, id);
+  await enquiryReceived(ctx.env, ctx.execCtx, record, id);
   if (hooks?.after) {
     const custom = await hooks.after(ctx, { values, id, record });
     if (custom) return custom;

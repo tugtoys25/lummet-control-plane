@@ -67,7 +67,7 @@ export async function hostedGate(request, env) {
   if (isShellAssetPath(path) && read) return null;
   if (read && path === "/robots.txt") return { response: text("User-agent: *\nAllow: /\n", 200) };
   const own = path.replace(/\/+$/, "") === `/aftermarket/domains/${row.domain}`;
-  if ((read && (path === "/" || own || path.startsWith("/static/"))) || (method === "POST" && own)) {
+  if ((read && (path === "/" || own || path.startsWith("/static/") || path.startsWith("/brand-media/"))) || (method === "POST" && own)) {
     return { base: await lummetBase(env, url) };
   }
   if (read) {
@@ -84,7 +84,7 @@ export async function absolutizeLinks(response, base) {
   const html = await response.text();
   const out = html.replace(/(\shref=")\/(?!\/)([^"]*)"/g, (all, pre, rest) => {
     const path = `/${rest}`;
-    return path.startsWith("/static/") || isShellAssetPath(path) ? all : `${pre}${base}${path}"`;
+    return path.startsWith("/static/") || path.startsWith("/brand-media/") || isShellAssetPath(path) ? all : `${pre}${base}${path}"`;
   });
   const headers = new Headers(response.headers);
   headers.delete("content-length");

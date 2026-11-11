@@ -21,6 +21,7 @@ import { escapeHtml } from "./views/customer-layout.js";
 import { nonceToken } from "./csp.js";
 
 const COOLDOWN_MS = 15 * 1000;
+const MAX_LISTINGS_PER_ORG = 25;
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const clean = (v, max) => String(v ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, max);
 
@@ -91,6 +92,104 @@ export async function verify(env, row, method) {
   return { ok: false, status: 422, error: "unknown_method" };
 }
 
+
+// ----------------------------------------------------------------- business listings
+
+export const LISTING_STATUS_LABEL = { pending: "Waiting for approval", listed: "Listed", unlisted: "Not listed", sold: "Sold", draft: "Draft" };
+
+function slugify(text) {
+  return String(text || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50).replace(/-+$/, "") || "listing";
+}
+
+/** Validate and clean the fields a seller can set. Returns { ok, fields } or { ok:false, status, error }. */
+async function cleanListingFields(env, input, { partial = false } = {}) {
+  const f = {};
+  const take = (key, max) => { if (!partial || key in input) f[key] = clean(input[key], max); };
+  take("title", 120); take("summary", 300); take("description", 3000); take("location", 120);
+  take("asking_price", 60); take("revenue", 60); take("profit", 60);
+  if (!partial || "title" in input) { if (f.title.length < 3) return { ok: false, status: 422, error: "invalid_title" }; }
+  if (!partial || "category_slug" in input) {
+    const cat = await repo.getListingCategory(env, clean(input.category_slug, 80).toLowerCase());
+    if (!cat) return { ok: false, status: 422, error: "invalid_category" };
+    f.category_slug = cat.slug;
+  }
+  return { ok: true, fields: f };
+}
+
+export async function createListing(env, { organizationId, userId, email, input }) {
+  const cleaned = await cleanListingFields(env, input);
+  if (!cleaned.ok) return cleaned;
+  const open = (await repo.listListingsForOrg(env, organizationId)).filter((l) => l.status !== "sold").length;
+  if (open >= MAX_LISTINGS_PER_ORG) return { ok: false, status: 409, error: "too_many_listings" };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const slug = `${slugify(cleaned.fields.title)}-${[...crypto.getRandomValues(new Uint8Array(2))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+    try {
+      const id = await repo.insertListing(env, { ...cleaned.fields, slug, status: "pending", organization_id: organizationId, owner_user_id: userId, owner_email: email });
+      return { ok: true, id, slug };
+    } catch (err) {
+      if (!/unique|constraint/i.test(String(err?.message || ""))) throw err;
+    }
+  }
+  return { ok: false, status: 503, error: "try_again" };
+}
+
+/** A change to what buyers read sends a listed listing back to review, so approved text cannot be swapped afterwards. */
+export async function editListing(env, row, input) {
+  if (row.status === "sold") return { ok: false, status: 409, error: "status_not_allowed" };
+  const cleaned = await cleanListingFields(env, input, { partial: true });
+  if (!cleaned.ok) return cleaned;
+  const patch = { ...cleaned.fields };
+  const changed = Object.keys(patch).some((k) => String(patch[k] ?? "") !== String(row[k] ?? ""));
+  if (changed && row.status === "listed") patch.status = "pending";
+  await repo.updateListing(env, row.id, patch);
+  return { ok: true, status: patch.status || row.status };
+}
+
+export async function setListingStatus(env, row, status) {
+  const allowed = {
+    unlisted: ["listed", "pending"],       // take it off the market
+    pending: ["unlisted"],                 // put it back: an admin approves it again
+    sold: ["listed", "pending", "unlisted"]
+  };
+  if (!(allowed[status] || []).includes(row.status)) return { ok: false, status: 409, error: "status_not_allowed" };
+  await repo.updateListing(env, row.id, { status });
+  return { ok: true, status };
+}
+
+async function handleListingsApi({ env, request, method, rest, organizationId, customer, guard, audit }) {
+  const read = method === "GET";
+  const m = rest.match(/^\/aftermarket\/listings(?:\/(\d+)(?:\/([a-z]+))?)?$/);
+  if (!m) return null;
+  const denied = await guard(read ? "viewer" : "admin");
+  if (denied) return denied;
+  const [, idText, action] = m;
+  const body = read ? {} : await request.json().catch(() => ({}));
+  const done = async (name, result) => {
+    if (!read && audit) await audit(name, result, idText || result.id || null);
+    if (!result.ok) return json({ success: false, error: result.error }, result.status || 400);
+    const { ok, ...rest2 } = result;
+    return json({ success: true, ...rest2 });
+  };
+  if (!idText) {
+    if (read) return json({ success: true, data: (await repo.listListingsForOrg(env, organizationId)).map(publicListing) });
+    if (method === "POST") return done("listing_create", await createListing(env, { organizationId, userId: customer.id, email: customer.email, input: body }));
+    return json({ success: false, error: "method_not_allowed" }, 405);
+  }
+  const row = await repo.getListingForOrg(env, organizationId, idText);
+  if (!row) return json({ success: false, error: "not_found" }, 404);
+  if (!action && read) return json({ success: true, listing: publicListing(row), enquiries: await repo.listEnquiriesForListing(env, row.slug) });
+  if (!action && method === "POST") return done("listing_update", await editListing(env, row, body));
+  if (action === "status" && method === "POST") return done("listing_status", await setListingStatus(env, row, String(body.status || "")));
+  return json({ success: false, error: "not_found" }, 404);
+}
+
+function publicListing(r) {
+  return {
+    id: r.id, slug: r.slug, title: r.title, category_slug: r.category_slug || "", summary: r.summary || "", description: r.description || "", location: r.location || "",
+    asking_price: r.asking_price || "", revenue: r.revenue || "", profit: r.profit || "", status: r.status, enquiry_count: r.enquiry_count ?? undefined
+  };
+}
+
 // ----------------------------------------------------------------- API (mounted under /api/organizations/:orgId/aftermarket)
 
 /**
@@ -107,6 +206,13 @@ export async function verify(env, row, method) {
  */
 export async function handleApi({ env, request, method, path, organizationId, customer, requireOrgRole, audit }) {
   const subPath = String(path || "").replace(/^\/api\/organizations\/[^/]+/, "");
+  if (subPath === "/aftermarket/categories" && method === "GET") {
+    const denied = await requireOrgRole(organizationId, "viewer");
+    return denied || json({ success: true, data: (await repo.listListingCategories(env)).map((c) => ({ slug: c.slug, name: c.name })) });
+  }
+  if (subPath.startsWith("/aftermarket/listings")) {
+    return handleListingsApi({ env, request, method, rest: subPath, organizationId, customer, guard: (min) => requireOrgRole(organizationId, min), audit });
+  }
   const m = subPath.match(/^\/aftermarket\/domains(?:\/([^/]+)(?:\/([a-z]+)(?:\/([^/]+))?)?)?$/);
   if (!m) return null;
   const [, rawDomain, action, subId] = m;
@@ -181,6 +287,10 @@ const ERRORS = {
   invalid_record_priority: "Enter a priority between 0 and 65535.",
   cname_at_root_not_allowed: "A CNAME cannot be set on the main domain itself.",
   unsupported_record_type: "That record type is not supported here.",
+  invalid_title: "Enter a title of at least 3 characters.",
+  invalid_category: "Choose a category.",
+  too_many_listings: "You have reached the maximum number of open listings. Mark one as sold or remove it from sale first.",
+  try_again: "Something went wrong. Please try again.",
   provider_error: "The DNS provider did not accept that just now. Please try again in a minute."
 };
 
@@ -240,6 +350,55 @@ function detailHtml(r, enquiries, canManage) {
     <div class="card"><h2>Enquiries</h2><p class="muted">Lummet handles buyer contact; you see when offers arrive.</p>${enquiryRows}</div>${dns}`;
 }
 
+
+function categoryOptions(categories, selected) {
+  return categories.map((c) => `<option value="${esc(c.slug)}"${c.slug === selected ? " selected" : ""}>${esc(c.name)}</option>`).join("");
+}
+
+function listingFormFields(l, categories) {
+  return `<label for="bz-title">Title</label><input type="text" id="bz-title" value="${esc(l.title || "")}" maxlength="120" required>
+    <label for="bz-category">Category</label><select id="bz-category" required>${categoryOptions(categories, l.category_slug)}</select>
+    <label for="bz-summary">Summary (one or two sentences, shown in lists)</label><textarea id="bz-summary" rows="2" maxlength="300">${esc(l.summary || "")}</textarea>
+    <label for="bz-location">Location</label><input type="text" id="bz-location" value="${esc(l.location || "")}" maxlength="120">
+    <label for="bz-price">Asking price (USD)</label><input type="text" id="bz-price" value="${esc(l.asking_price || "")}" maxlength="60" placeholder="120000, or Make an offer">
+    <label for="bz-revenue">Revenue</label><input type="text" id="bz-revenue" value="${esc(l.revenue || "")}" maxlength="60" placeholder="40000 USD / year">
+    <label for="bz-profit">Profit</label><input type="text" id="bz-profit" value="${esc(l.profit || "")}" maxlength="60">
+    <label for="bz-desc">Description</label><textarea id="bz-desc" rows="6" maxlength="3000">${esc(l.description || "")}</textarea>`;
+}
+
+function listingBadge(status) {
+  return `<span class="badge badge-${esc(status)}">${esc(LISTING_STATUS_LABEL[status] || status)}</span>`;
+}
+
+function businessesHtml(rows, categories, canManage) {
+  const table = rows.length
+    ? `<table class="table"><thead><tr><th>Listing</th><th>Status</th><th>Price</th><th>Enquiries</th><th></th></tr></thead><tbody>${rows.map((r) => `
+        <tr><td>${esc(r.title)}</td><td>${listingBadge(r.status)}</td><td>${esc(r.asking_price || "Make an offer")}</td><td>${Number(r.enquiry_count) || 0}</td>
+        <td><a class="btn" href="/app/aftermarket/business/${Number(r.id)}">Manage</a></td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty"><p>You have not listed a business yet.</p></div>`;
+  const form = canManage
+    ? `<div class="card"><h2>List a business</h2><p class="muted">New listings are reviewed before they appear on the marketplace.</p>
+        <form id="bz-add">${listingFormFields({}, categories)}<button class="btn" type="submit">Submit for review</button></form><div id="bz-result"></div></div>`
+    : "";
+  return `<h2>Businesses for sale</h2>${table}${form}`;
+}
+
+function businessDetailHtml(l, categories, enquiries, canManage) {
+  const notice = l.status === "pending" ? `<p class="muted">Waiting for approval. It goes public once Lummet approves it.</p>`
+    : l.status === "listed" ? `<p><a href="/aftermarket/listings/${encodeURIComponent(l.slug)}" target="_blank" rel="noopener">View your public page</a></p><p class="muted">Changing the text or numbers sends the listing back for approval.</p>` : "";
+  const editable = canManage && l.status !== "sold";
+  const actions = editable ? `
+      ${["listed", "pending"].includes(l.status) ? `<button class="btn btn-danger" type="button" data-bz-status="unlisted">Remove from sale</button>` : ""}
+      ${l.status === "unlisted" ? `<button class="btn" type="button" data-bz-status="pending">Submit for sale again</button>` : ""}
+      <button class="btn" type="button" data-bz-status="sold">Mark as sold</button>` : "";
+  const edit = editable ? `<div class="card"><h2>Listing</h2><form id="bz-edit">${listingFormFields(l, categories)}<button class="btn" type="submit">Save</button>${actions}</form><div id="bz-result"></div></div>` : `<div class="card"><h2>${esc(l.title)}</h2><p>${esc(l.summary)}</p></div>`;
+  const rows = enquiries.length
+    ? `<table class="table"><thead><tr><th>Received (UTC)</th><th>Offer</th><th>From</th></tr></thead><tbody>${enquiries.map((e) => `<tr><td>${esc(e.created_at)}</td><td>${esc(e.summary || "")}</td><td>${esc(e.source || "")}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty"><p>No enquiries yet.</p></div>`;
+  return `<p><a href="/app/aftermarket">&larr; Aftermarket</a></p><h1>${esc(l.title)}</h1><p>${listingBadge(l.status)}</p>${notice}${edit}
+    <div class="card"><h2>Enquiries</h2><p class="muted">Lummet handles buyer contact; you see when enquiries arrive.</p>${rows}</div>`;
+}
+
 const SCRIPT = `
   var AM = window.__AM || {};
   function amMsg(c){ return AM.errors[c] || c || 'unknown error'; }
@@ -283,6 +442,18 @@ const SCRIPT = `
           td.appendChild(x); }
         tr.appendChild(td); t.appendChild(tr); });
       box.appendChild(t); }); }
+  function bzBody(){ return { title: document.getElementById('bz-title').value, category_slug: document.getElementById('bz-category').value, summary: document.getElementById('bz-summary').value,
+    location: document.getElementById('bz-location').value, asking_price: document.getElementById('bz-price').value, revenue: document.getElementById('bz-revenue').value,
+    profit: document.getElementById('bz-profit').value, description: document.getElementById('bz-desc').value }; }
+  var bzAdd = document.getElementById('bz-add');
+  if (bzAdd) bzAdd.addEventListener('submit', function(e){ e.preventDefault();
+    amApi('POST', '/listings', bzBody()).then(function(d){ if (d.success) location.href = '/app/aftermarket/business/' + encodeURIComponent(d.id); else amBox('bz-result', amMsg(d.error), true); }); });
+  var bzEdit = document.getElementById('bz-edit');
+  if (bzEdit) bzEdit.addEventListener('submit', function(e){ e.preventDefault();
+    amApi('POST', '/listings/' + encodeURIComponent(AM.listingId), bzBody()).then(function(d){ if (d.success) location.reload(); else amBox('bz-result', amMsg(d.error), true); }); });
+  document.querySelectorAll('[data-bz-status]').forEach(function(b){ b.addEventListener('click', function(){
+    var st = b.getAttribute('data-bz-status'); if (st === 'sold' && !confirm('Mark this listing as sold?')) return;
+    amApi('POST', '/listings/' + encodeURIComponent(AM.listingId) + '/status', { status: st }).then(function(d){ if (d.success) location.reload(); else amBox('bz-result', amMsg(d.error), true); }); }); });
   amRecords();
   var radd = document.getElementById('am-record-add');
   if (radd) radd.addEventListener('submit', function(e){ e.preventDefault();
@@ -294,16 +465,24 @@ const SCRIPT = `
 /** Body of /app/aftermarket and /app/aftermarket/<domain>. Returns { status, html }. */
 export async function renderPage(env, { organizationId, path, canManage }) {
   const m = path.match(/^\/app\/aftermarket(?:\/([^/]+))?\/?$/);
+  const biz = path.match(/^\/app\/aftermarket\/business\/(\d+)\/?$/);
   let domain = null;
+  let listingId = null;
   let content;
-  if (m && m[1]) {
+  if (biz) {
+    const row = await repo.getListingForOrg(env, organizationId, biz[1]);
+    if (!row) return { status: 404, html: `<h1>Not found</h1><p><a href="/app/aftermarket">Back to Aftermarket</a></p>` };
+    listingId = row.id;
+    content = businessDetailHtml(row, await repo.listListingCategories(env), await repo.listEnquiriesForListing(env, row.slug), canManage);
+  } else if (m && m[1]) {
     domain = normalizeDomain(decodeURIComponent(m[1]));
     const row = domain ? await repo.getAftermarketForOrg(env, organizationId, domain) : null;
     if (!row) return { status: 404, html: `<h1>Not found</h1><p><a href="/app/aftermarket">Back to Aftermarket</a></p>` };
     content = detailHtml({ ...publicRow(row), cf_zone_id: row.cf_zone_id, ns_detected_at: row.ns_detected_at, verify_token: row.verify_token, ns_assigned: row.ns_assigned }, await repo.listEnquiriesForDomain(env, domain), canManage);
   } else {
-    content = listHtml(await repo.listAftermarketForOrg(env, organizationId), canManage);
+    content = listHtml(await repo.listAftermarketForOrg(env, organizationId), canManage)
+      + businessesHtml(await repo.listListingsForOrg(env, organizationId), await repo.listListingCategories(env), canManage);
   }
-  const boot = JSON.stringify({ errors: ERRORS, domain, org: organizationId, canManage: Boolean(canManage) }).replace(/</g, "\\u003c");
+  const boot = JSON.stringify({ errors: ERRORS, domain, listingId, org: organizationId, canManage: Boolean(canManage) }).replace(/</g, "\\u003c");
   return { status: 200, html: `${content}<script nonce="${nonceToken()}">window.__AM = ${boot};${SCRIPT}</script>` };
 }

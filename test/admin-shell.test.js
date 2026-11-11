@@ -90,6 +90,8 @@ const PREVIOUS_HREFS = [
   "/cms/publications",
   "/cms/advertisements",
   "/cms/aftermarket_domains",
+  "/cms/listings",
+  "/cms/listing_categories",
   "/cms/homepage_sections",
   "/cms/features",
   "/cms/faqs",

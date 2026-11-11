@@ -62,7 +62,7 @@ test('list page and landing page show only listed domains; the domain host serve
   assert.match(await text(own), /sze\.app is for sale/);
   const home = await text(await get(handlePublicRoute, env, '/'));
   assert.doesNotMatch(home, /is for sale/);
-  assert.equal((await get(handlePublicRoute, env, '/aftermarket')).status, 301);
+  assert.equal((await get(handlePublicRoute, env, '/aftermarket')).status, 200);   // the marketplace hub
 });
 
 test('seller flow: claim, TXT verification lists the domain; wrong record does not; admin rows cannot be claimed', async () => {

@@ -1,0 +1,36 @@
+<section class="page-hero bg-{{site.page_header_bg}}">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <h1>{{title}}</h1>
+    <p class="lede">{{intro}}</p>
+  </div>
+</section>
+<section class="section section-tight">
+  <div class="container">
+    <nav class="listing-tabs" aria-label="{{ui.listings_col_category}}">
+      {{#each tabs}}<a class="btn {{#if active}}btn-primary{{else}}btn-secondary{{/if}}" href="{{href}}"{{#if active}} aria-current="page"{{/if}}>{{name}}</a>{{/each}}
+    </nav>
+    {{#if has_items}}
+    <div class="table-wrap">
+      <table class="aftermarket-table listings-table">
+        <thead><tr><th scope="col">{{ui.listings_col_listing}}</th><th scope="col">{{ui.listings_col_category}}</th><th scope="col">{{ui.listings_col_location}}</th><th scope="col">{{ui.listings_col_revenue}}</th><th scope="col">{{ui.listings_col_price}}</th><th scope="col">{{ui.listings_col_actions}}</th></tr></thead>
+        <tbody>
+          {{#each items}}
+          <tr>
+            <th scope="row"><a href="{{href}}">{{title}}</a></th>
+            <td>{{category}}</td>
+            <td>{{location}}</td>
+            <td>{{revenue}}</td>
+            <td>{{price}}</td>
+            <td class="aftermarket-actions"><a class="btn btn-secondary" href="{{href}}">{{ui.listings_view}}</a></td>
+          </tr>
+          {{/each}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty-state"><p>{{ui.listings_empty}}</p></div>
+    {{/if}}
+    <p class="aftermarket-sell"><a class="btn btn-secondary" href="{{sell_href}}">{{ui.listings_sell_cta}}</a></p>
+  </div>
+</section>

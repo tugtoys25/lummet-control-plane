@@ -23,6 +23,7 @@ import { loadSite } from "./context.js";
 import * as pages from "./pages.js";
 import * as forms from "./forms.js";
 import * as aftermarket from "./aftermarket.js";
+import * as listings from "./aftermarket-listings.js";
 import { sitemapXml, robotsTxt } from "./sitemap.js";
 import { textResponse, PAGE_CACHE_CONTROL } from "./render.js";
 
@@ -65,7 +66,10 @@ const ROUTES = [
   ["/authors/:slug", pages.authorPage],
   ["/contact", (ctx) => forms.formPage(ctx, { key: "contact" })],
   ["/demo", (ctx) => forms.formPage(ctx, { key: "demo" })],
-  ["/aftermarket", () => new Response(null, { status: 301, headers: { location: "/aftermarket/list-of-domains" } })],
+  ["/aftermarket", listings.hubPage],
+  ["/aftermarket/businesses", listings.businessesPage],
+  ["/aftermarket/businesses/:category", listings.businessesPage],
+  ["/aftermarket/listings/:slug", listings.listingPage],
   ["/aftermarket/list-of-domains", aftermarket.listPage],
   ["/aftermarket/domains/:domain", aftermarket.landingPage],
   ["/aftermarket/domain-acquisition", (ctx) => forms.formPage(ctx, { key: "domain-acquisition", path: "/aftermarket/domain-acquisition" })],
@@ -80,6 +84,7 @@ const FORM_POST_ROUTES = [
   ["/contact-sales", (ctx) => (pages.trustMode(ctx.env) === "off" ? null : forms.submitForm(ctx, { key: forms.CONTACT_SALES_KEY, fallbackKey: "contact", path: "/contact-sales" }))],
   ["/demo", (ctx) => forms.submitForm(ctx, { key: "demo" })],
   ["/aftermarket/domains/:domain", aftermarket.landingSubmit],
+  ["/aftermarket/listings/:slug", listings.listingSubmit],
   ["/aftermarket/domain-acquisition", (ctx) => forms.submitForm(ctx, { key: "domain-acquisition", path: "/aftermarket/domain-acquisition" })],
   ["/aftermarket/sell-your-domain", aftermarket.sellSubmit],
   ["/aftermarket/sell-your-domain/verify", aftermarket.verifySubmit],

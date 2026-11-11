@@ -1,0 +1,21 @@
+<section class="page-hero bg-{{site.page_header_bg}}">
+  <div class="container">
+    {{> components/breadcrumbs}}
+    <h1>{{title}}</h1>
+    <p class="lede">{{intro}}</p>
+  </div>
+</section>
+<section class="section section-tight">
+  <div class="container">
+    <div class="grid grid-3">
+      {{#each sections}}
+      <article class="card">
+        <h2><a href="{{href}}">{{name}}</a></h2>
+        {{#if blurb}}<p>{{blurb}}</p>{{/if}}
+        {{#if has_count}}<p class="help">{{count}}</p>{{/if}}
+      </article>
+      {{/each}}
+    </div>
+    <p class="aftermarket-sell"><a class="btn btn-secondary" href="{{sell_href}}">{{ui.listings_sell_cta}}</a></p>
+  </div>
+</section>

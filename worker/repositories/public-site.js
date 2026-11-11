@@ -323,6 +323,77 @@ export async function markAftermarketVerified(env, id, method) {
     .bind(method, method === "ns" ? 1 : 0, id).run();
 }
 
+// ---- Listings (businesses for sale, by category) ----
+
+export function listListingCategories(env) {
+  return all(env, `SELECT * FROM lummet_listing_categories WHERE status = 'published' ORDER BY sort_order, name`);
+}
+
+export function getListingCategory(env, slug) {
+  return first(env, `SELECT * FROM lummet_listing_categories WHERE slug = ? AND status = 'published'`, String(slug || ""));
+}
+
+/** Listed (public) listings, newest first inside the admin's sort order; optional category filter. */
+export function listPublicListings(env, { category = null, limit = 200 } = {}) {
+  return all(
+    env,
+    `SELECT l.*, c.name AS category_name FROM lummet_listings l LEFT JOIN lummet_listing_categories c ON c.slug = l.category_slug
+     WHERE l.status = 'listed' AND (? IS NULL OR l.category_slug = ?) ORDER BY l.sort_order, l.id DESC LIMIT ?`,
+    category, category, limit
+  );
+}
+
+export function getListedListing(env, slug) {
+  return first(
+    env,
+    `SELECT l.*, c.name AS category_name FROM lummet_listings l LEFT JOIN lummet_listing_categories c ON c.slug = l.category_slug
+     WHERE l.slug = ? AND l.status = 'listed'`,
+    String(slug || "")
+  );
+}
+
+export function countListedByCategory(env) {
+  return all(env, `SELECT category_slug, COUNT(*) AS n FROM lummet_listings WHERE status = 'listed' GROUP BY category_slug`);
+}
+
+export async function insertListing(env, row) {
+  const res = await db(env)
+    .prepare(
+      `INSERT INTO lummet_listings (slug, kind, category_slug, title, summary, description, location, asking_price, revenue, profit, status, source, organization_id, owner_user_id, owner_email)
+       VALUES (?, 'business', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seller', ?, ?, ?) RETURNING id`
+    )
+    .bind(row.slug, row.category_slug, row.title, row.summary, row.description, row.location, row.asking_price, row.revenue, row.profit, row.status || "pending", row.organization_id, row.owner_user_id, row.owner_email)
+    .first();
+  return res?.id ?? null;
+}
+
+export async function listListingsForOrg(env, organizationId) {
+  const res = await db(env)
+    .prepare(`SELECT l.*, (SELECT COUNT(*) FROM lummet_inquiries i WHERE i.subject_ref = 'listing:' || l.slug AND i.form_key = 'listing-enquiry') AS enquiry_count
+              FROM lummet_listings l WHERE l.organization_id = ? ORDER BY l.id DESC`)
+    .bind(organizationId).all();
+  return res.results || [];
+}
+
+export function getListingForOrg(env, organizationId, id) {
+  return first(env, `SELECT * FROM lummet_listings WHERE id = ? AND organization_id = ?`, Number(id) || 0, organizationId);
+}
+
+const LISTING_EDIT_COLUMNS = new Set(["category_slug", "title", "summary", "description", "location", "asking_price", "revenue", "profit", "status"]);
+
+export async function updateListing(env, id, patch) {
+  const keys = Object.keys(patch).filter((k) => LISTING_EDIT_COLUMNS.has(k));
+  if (!keys.length) return;
+  await db(env)
+    .prepare(`UPDATE lummet_listings SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(...keys.map((k) => patch[k] ?? null), id).run();
+}
+
+/** What a seller may see of an enquiry about a listing (no buyer contact details). */
+export function listEnquiriesForListing(env, slug, limit = 50) {
+  return all(env, `SELECT id, created_at, summary, source, status FROM lummet_inquiries WHERE subject_ref = ? AND form_key = 'listing-enquiry' ORDER BY id DESC LIMIT ?`, `listing:${slug}`, limit);
+}
+
 // ---- Brands ------------------------------------------
 
 export function listBrands(env, limit = 100) {

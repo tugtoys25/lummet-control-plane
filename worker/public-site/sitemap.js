@@ -46,6 +46,13 @@ export async function sitemapXml(ctx) {
   const forSale = await data.listAftermarketDomains(env, 500);
   if (forSale.length) urls.push({ loc: `${base}/aftermarket/list-of-domains` });
   for (const d of forSale) urls.push({ loc: `${base}/aftermarket/domains/${d.domain}`, lastmod: day(d.updated_at) });
+  const bizListings = await data.listPublicListings(env, { limit: 500 });
+  if (forSale.length || bizListings.length) urls.push({ loc: `${base}/aftermarket` });
+  if (bizListings.length) {
+    urls.push({ loc: `${base}/aftermarket/businesses` });
+    for (const slug of new Set(bizListings.map((l) => l.category_slug).filter(Boolean))) urls.push({ loc: `${base}/aftermarket/businesses/${slug}` });
+  }
+  for (const l of bizListings) urls.push({ loc: `${base}/aftermarket/listings/${l.slug}`, lastmod: day(l.updated_at) });
 
   // Trust and legal routes (H.5, I-14). Listed only when they are live and indexable: PUBLIC_TRUST_PAGES=on, and for legal pages only
   // those with a recorded counsel approval and approved text (PUBLIC_LEGAL_PAGES=on). Shadow and draft pages are noindex and stay out.

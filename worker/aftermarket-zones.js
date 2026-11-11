@@ -109,6 +109,16 @@ async function dropZone(env, row, { status = null } = {}) {
   await repo.patchAftermarketZone(env, row.id, { cf_zone_id: null, ns_assigned: null, ns_detected_at: null, zone_expires_at: null, next_check_at: null, activation_asked_at: null, ...(status ? { status } : {}) });
 }
 
+/** Delete a domain's Cloudflare zone for good (the seller deleted the domain). A zone that is already gone counts as released. */
+export async function releaseZone(env, row) {
+  if (!row.cf_zone_id) return { ok: true };
+  try { await ref.infra.deleteZone(env, row.cf_zone_id); }
+  catch (err) {
+    if (!/not found|does not exist|404|1001|7003/i.test(String(err?.message || err))) return { ok: false, error: "provider_error" };
+  }
+  return { ok: true };
+}
+
 async function activate(env, row) {
   const zoneId = row.cf_zone_id;
   // Keep the domain's other records (mail, TXT...): Cloudflare scanned them when the zone was created.

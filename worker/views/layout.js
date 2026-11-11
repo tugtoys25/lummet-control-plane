@@ -175,6 +175,7 @@ const NAV = [
       { label: "Form fields", href: "/cms/form_fields", key: "cms-form-fields", area: "cms", resource: "form_fields" },
       { label: "Domains for sale", href: "/cms/aftermarket_domains", key: "cms-aftermarket-domains", area: "cms", resource: "aftermarket_domains" },
       { label: "Businesses for sale", href: "/cms/listings", key: "cms-listings", area: "cms", resource: "listings" },
+      { label: "Listing images", href: "/cms/listing_images", key: "cms-listing-images", area: "cms", resource: "listing_images" },
       { label: "Listing categories", href: "/cms/listing_categories", key: "cms-listing-categories", area: "cms", resource: "listing_categories" },
       { label: "Inquiries", href: "/cms/inquiries", key: "cms-inquiries", area: "cms", resource: "inquiries" }
     ]

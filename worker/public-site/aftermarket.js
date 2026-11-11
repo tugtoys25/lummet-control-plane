@@ -41,6 +41,7 @@ export async function listPage(ctx) {
       price: String(r.asking_price || "").trim() || ui.aftermarket_price_on_request,
       href: `/aftermarket/domains/${encodeURIComponent(r.domain)}`,
       buy_url: buy,
+      cover: r.cover_key ? `/brand-media/${r.cover_key}` : "",
       has_buy: Boolean(buy)
     };
   });

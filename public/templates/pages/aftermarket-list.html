@@ -14,7 +14,7 @@
         <tbody>
           {{#each items}}
           <tr>
-            <th scope="row"><a href="{{href}}">{{domain}}</a></th>
+            <th scope="row">{{#if cover}}<img class="listing-thumb" src="{{cover}}" alt="" loading="lazy" decoding="async">{{/if}}<a href="{{href}}">{{domain}}</a></th>
             <td>{{price}}</td>
             <td class="aftermarket-actions">
               {{#if has_buy}}<a class="btn btn-primary" href="{{buy_url}}" target="_blank" rel="noopener nofollow sponsored">{{ui.aftermarket_buy_now}}</a>{{/if}}

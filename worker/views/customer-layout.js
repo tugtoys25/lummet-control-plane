@@ -61,9 +61,17 @@ const NAV = [
     icon: "tenants",
     items: [
       { label: "Domains", href: "/app/domains", key: "domains" },
-      { label: "Aftermarket", href: "/app/aftermarket", key: "aftermarket" },
       { label: "Deployments", href: "/app/deployments", key: "deployments" },
       { label: "Backups", href: "/app/backups", key: "backups" }
+    ]
+  },
+  {
+    id: "aftermarket",
+    section: "Aftermarket",
+    icon: "globe",
+    items: [
+      { label: "Domains for sale", href: "/app/aftermarket", key: "aftermarket" },
+      { label: "Businesses for sale", href: "/app/aftermarket/businesses", key: "aftermarket-businesses" }
     ]
   },
   {

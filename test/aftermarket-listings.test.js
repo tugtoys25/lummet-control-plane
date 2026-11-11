@@ -127,7 +127,7 @@ test('seller sees enquiries about the listing without buyer contact details', as
 test('portal pages render the business sections and escape seller text', async () => {
   const env = createPublicEnv();
   const { id } = (await api(env, 'orgA', 'POST', '/aftermarket/listings', { title: 'Shop <img src=x>', category_slug: 'websites', summary: '<script>x</script>' })).json;
-  const list = await renderPage(env, { organizationId: 'orgA', path: '/app/aftermarket', canManage: true });
+  const list = await renderPage(env, { organizationId: 'orgA', path: '/app/aftermarket/businesses', canManage: true });
   assert.match(list.html, /id="bz-add"/);
   assert.doesNotMatch(list.html, /<img src=x>/);
   const detail = await renderPage(env, { organizationId: 'orgA', path: `/app/aftermarket/business/${id}`, canManage: true });

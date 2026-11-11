@@ -411,6 +411,10 @@ export const STYLES = `
   label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
 
   .empty { color: var(--text-dim); font-size: 14px; padding: 24px 0; text-align: center; }
+  .am-images { list-style: none; margin: 0 0 16px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .am-images li { border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .am-images img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; background: var(--surface-2, #f1f3f6); display: block; }
+  .am-images .actions { display: flex; flex-wrap: wrap; gap: 6px; }
   .flash { padding: 12px 16px; border-radius: var(--radius); margin-bottom: 20px; font-size: 14px; }
   .flash-error { background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); color: var(--danger-text); }
   .flash-success { background: color-mix(in srgb, var(--ok) 10%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); color: var(--ok); }

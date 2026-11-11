@@ -197,6 +197,7 @@ import { renderLoginPage } from "./views/pages/login.js";
 import { renderDashboardHome } from "./views/pages/dashboard.js";
 import { handlePublicRoute } from "./public-site/router.js";
 import * as aftermarketZones from "./aftermarket-zones.js";
+import * as aftermarketNotify from "./aftermarket-notify.js";
 import { hostedGate, absolutizeLinks } from "./aftermarket-host.js";
 import {
   renderTenantsList,
@@ -2937,6 +2938,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         ctx.waitUntil(zoneDomains.sweep(env, { redeploy: makeDomainRedeploy(env, ctx) }).catch(() => {}));
         // Domains for sale: sellers' nameserver claims waiting for delegation, and zones of domains no longer listed.
         ctx.waitUntil(aftermarketZones.sweep(env).catch(() => {}));
+        // Marketplace emails to sellers about changes they did not make (verified, expired, approved, declined).
+        ctx.waitUntil(aftermarketNotify.sweep(env).catch(() => {}));
         // A running tenant release rollout takes its next step (docs/TENANT_RELEASES.md).
         ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
         ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
@@ -3309,7 +3312,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           const am = await aftermarketPortal.renderPage(env, { organizationId: activeOrgId, path, canManage });
           return html(
             shell({
-              title: "Aftermarket", activeKey: "aftermarket", customer: portalCustomer,
+              title: "Aftermarket", activeKey: am.activeKey || "aftermarket", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId, bodyHtml: am.html
             }),
             am.status

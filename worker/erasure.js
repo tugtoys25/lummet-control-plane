@@ -14,6 +14,7 @@
 // Nothing here is legal advice; see retention-policy.js.
 // =====================================================
 import * as publicSiteRepo from "./repositories/public-site.js";
+import * as aftermarketImages from "./aftermarket-images.js";
 import { createZoneDomainService } from "./zone-domains.js";
 import * as dohResolver from "./dns-doh.js";
 import * as policy from "./retention-policy.js";
@@ -135,6 +136,8 @@ async function deleteExternalResources(env, org, infra) {
     }
   }
   // Domains the organization listed for sale: delete the Cloudflare zone made for nameserver verification (the row itself goes with ORG_DELETE).
+  // Their listing images: remove the files from the media library before the rows go with ORG_DELETE.
+  await attempt(`aftermarket_images:${org.id}`, () => aftermarketImages.purgeOrganization(env, org.id));
   for (const d of await publicSiteRepo.listAftermarketZonesForOrg(env, org.id)) {
     if (await attempt(`aftermarket_zone:${d.id}`, () => infra.deleteZone(env, d.cf_zone_id))) await publicSiteRepo.patchAftermarketZone(env, d.id, { cf_zone_id: null });
   }

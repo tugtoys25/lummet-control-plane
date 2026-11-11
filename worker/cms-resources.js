@@ -389,12 +389,35 @@ export const CMS_RESOURCES = {
       { name: "summary", label: "Summary", type: "textarea", hint: "One or two sentences, shown in lists and at the top of the page" },
       { name: "description", label: "Description", type: "textarea" },
       { name: "location", label: "Location", type: "text" },
+      { name: "website_url", label: "Website", type: "text", hint: "https address of the business website. Shown under the location and clickable." },
       { name: "asking_price", label: "Asking price", type: "text", hint: "Free text, e.g. 120000 USD. Empty shows Make an offer" },
       { name: "revenue", label: "Revenue", type: "text", hint: "Free text, e.g. 40000 USD / year" },
       { name: "profit", label: "Profit", type: "text" },
+      { name: "review_note", label: "Note to the seller", type: "textarea", hint: "If you decline a seller's listing (set it to unlisted or draft), write why here. It is emailed to the seller and shown in their dashboard." },
       { name: "sort_order", label: "Sort order", type: "number", default: 0 },
       { name: "source", label: "Added by", type: "text", readOnly: true },
       { name: "owner_email", label: "Seller email (private)", type: "text", readOnly: true }
+    ]
+  },
+
+  listing_images: {
+    label: "Listing images",
+    table: "lummet_listing_images",
+    supportsCreate: false,
+    listColumns: [
+      { key: "created_at", label: "Added (UTC)" },
+      { key: "subject_kind", label: "Kind" },
+      { key: "subject_id", label: "Item id" },
+      { key: "caption", label: "Caption" },
+      { key: "status", label: "Status" }
+    ],
+    orderBy: "id DESC",
+    fields: [
+      { name: "subject_kind", label: "Kind (domain or listing)", type: "text", readOnly: true },
+      { name: "subject_id", label: "Item id", type: "text", readOnly: true },
+      { name: "media_id", label: "File in the media library", type: "text", readOnly: true },
+      { name: "caption", label: "Caption", type: "text" },
+      { name: "status", label: "Status", type: "select", options: ["published", "hidden"], hint: "Hidden removes the image from the public page without deleting it." }
     ]
   },
 

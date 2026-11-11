@@ -53,6 +53,7 @@ export const ORG_DELETE = [
   ["billing_payment_methods", "organization_id = ?"],    // card metadata/fingerprint is not needed after account erasure
   ["addon_change_intents", "organization_id = ?"],        // add-on change requests (ids and quantities only); provider state stays in Stripe
   ["lummet_aftermarket_domains", "organization_id = ?"],   // domains the organization listed for sale (its Cloudflare zone is deleted first, see erasure.js); admin-listed rows have no organization
+  ["lummet_listing_images", "organization_id = ?"],         // rows only; the files are removed from the media library first (erasure.js)
   ["lummet_listings", "organization_id = ?"],               // business listings the organization created for sale; admin-listed rows have no organization
   ["billing_save_offers", "organization_id = ?"]           // cancellation save-flow offers shown to the customer; no financial effect on their own
 ];

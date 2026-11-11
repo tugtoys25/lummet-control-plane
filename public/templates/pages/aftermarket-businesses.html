@@ -17,7 +17,7 @@
         <tbody>
           {{#each items}}
           <tr>
-            <th scope="row"><a href="{{href}}">{{title}}</a></th>
+            <th scope="row">{{#if cover}}<img class="listing-thumb" src="{{cover}}" alt="" loading="lazy" decoding="async">{{/if}}<a href="{{href}}">{{title}}</a></th>
             <td>{{category}}</td>
             <td>{{location}}</td>
             <td>{{revenue}}</td>

@@ -218,8 +218,12 @@ export function getHostedAftermarketDomain(env, domain) {
   return first(env, `SELECT * FROM lummet_aftermarket_domains WHERE domain = ? AND status = 'listed' AND hosted = 1`, String(domain || ""));
 }
 
+/** The first published image of a domain or listing (its cover), as a correlated sub-select for list queries. */
+const COVER_SQL = (kind, idColumn) =>
+  `(SELECT m.r2_key FROM lummet_listing_images i JOIN platform_media m ON m.id = i.media_id WHERE i.subject_kind = '${kind}' AND i.subject_id = ${idColumn} AND i.status = 'published' ORDER BY i.sort_order, i.id LIMIT 1)`;
+
 export function listAftermarketDomains(env, limit = 200) {
-  return all(env, `SELECT * FROM lummet_aftermarket_domains WHERE status = 'listed' ORDER BY sort_order, domain LIMIT ?`, limit);
+  return all(env, `SELECT d.*, ${COVER_SQL("domain", "d.id")} AS cover_key FROM lummet_aftermarket_domains d WHERE d.status = 'listed' ORDER BY d.sort_order, d.domain LIMIT ?`, limit);
 }
 
 /**
@@ -303,7 +307,7 @@ export function listEnquiriesForDomain(env, domain, limit = 50) {
   return all(env, `SELECT id, created_at, summary, source, status FROM lummet_inquiries WHERE subject_ref = ? AND form_key = 'domain-acquisition' ORDER BY id DESC LIMIT ?`, String(domain || ""), limit);
 }
 
-const LISTING_COLUMNS = new Set(["headline", "description", "asking_price", "status"]);
+const LISTING_COLUMNS = new Set(["headline", "description", "asking_price", "status", "notified_status"]);
 
 export async function updateAftermarketListing(env, id, patch) {
   const keys = Object.keys(patch).filter((k) => LISTING_COLUMNS.has(k));
@@ -337,7 +341,7 @@ export function getListingCategory(env, slug) {
 export function listPublicListings(env, { category = null, limit = 200 } = {}) {
   return all(
     env,
-    `SELECT l.*, c.name AS category_name FROM lummet_listings l LEFT JOIN lummet_listing_categories c ON c.slug = l.category_slug
+    `SELECT l.*, c.name AS category_name, ${COVER_SQL("listing", "l.id")} AS cover_key FROM lummet_listings l LEFT JOIN lummet_listing_categories c ON c.slug = l.category_slug
      WHERE l.status = 'listed' AND (? IS NULL OR l.category_slug = ?) ORDER BY l.sort_order, l.id DESC LIMIT ?`,
     category, category, limit
   );
@@ -359,10 +363,10 @@ export function countListedByCategory(env) {
 export async function insertListing(env, row) {
   const res = await db(env)
     .prepare(
-      `INSERT INTO lummet_listings (slug, kind, category_slug, title, summary, description, location, asking_price, revenue, profit, status, source, organization_id, owner_user_id, owner_email)
-       VALUES (?, 'business', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seller', ?, ?, ?) RETURNING id`
+      `INSERT INTO lummet_listings (slug, kind, category_slug, title, summary, description, location, website_url, asking_price, revenue, profit, status, notified_status, source, organization_id, owner_user_id, owner_email)
+       VALUES (?, 'business', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seller', ?, ?, ?) RETURNING id`
     )
-    .bind(row.slug, row.category_slug, row.title, row.summary, row.description, row.location, row.asking_price, row.revenue, row.profit, row.status || "pending", row.organization_id, row.owner_user_id, row.owner_email)
+    .bind(row.slug, row.category_slug, row.title, row.summary, row.description, row.location, row.website_url || null, row.asking_price, row.revenue, row.profit, row.status || "pending", row.status || "pending", row.organization_id, row.owner_user_id, row.owner_email)
     .first();
   return res?.id ?? null;
 }
@@ -379,7 +383,7 @@ export function getListingForOrg(env, organizationId, id) {
   return first(env, `SELECT * FROM lummet_listings WHERE id = ? AND organization_id = ?`, Number(id) || 0, organizationId);
 }
 
-const LISTING_EDIT_COLUMNS = new Set(["category_slug", "title", "summary", "description", "location", "asking_price", "revenue", "profit", "status"]);
+const LISTING_EDIT_COLUMNS = new Set(["category_slug", "website_url", "title", "summary", "description", "location", "asking_price", "revenue", "profit", "status", "notified_status"]);
 
 export async function updateListing(env, id, patch) {
   const keys = Object.keys(patch).filter((k) => LISTING_EDIT_COLUMNS.has(k));
@@ -392,6 +396,81 @@ export async function updateListing(env, id, patch) {
 /** What a seller may see of an enquiry about a listing (no buyer contact details). */
 export function listEnquiriesForListing(env, slug, limit = 50) {
   return all(env, `SELECT id, created_at, summary, source, status FROM lummet_inquiries WHERE subject_ref = ? AND form_key = 'listing-enquiry' ORDER BY id DESC LIMIT ?`, `listing:${slug}`, limit);
+}
+
+// ---- Aftermarket notifications ----
+
+export function getListingBySlug(env, slug) {
+  return first(env, `SELECT * FROM lummet_listings WHERE slug = ?`, String(slug || ""));
+}
+
+/** Seller rows whose status changed without the owner being told (see migration 0104). */
+export function listDomainsToNotify(env, limit = 20) {
+  return all(env, `SELECT * FROM lummet_aftermarket_domains WHERE source = 'seller' AND COALESCE(notified_status, '') != status ORDER BY id LIMIT ?`, limit);
+}
+
+export function listListingsToNotify(env, limit = 20) {
+  return all(env, `SELECT * FROM lummet_listings WHERE source = 'seller' AND COALESCE(notified_status, '') != status ORDER BY id LIMIT ?`, limit);
+}
+
+export async function markDomainNotified(env, id, status) {
+  await db(env).prepare(`UPDATE lummet_aftermarket_domains SET notified_status = ? WHERE id = ?`).bind(status, id).run();
+}
+
+export async function markListingNotified(env, id, status) {
+  await db(env).prepare(`UPDATE lummet_listings SET notified_status = ? WHERE id = ?`).bind(status, id).run();
+}
+
+// ---- Images (domains and listings) and deletion ----
+
+const IMAGE_SELECT = `SELECT i.*, m.r2_key, m.alt_text, m.width, m.height, m.filename, m.size
+  FROM lummet_listing_images i JOIN platform_media m ON m.id = i.media_id`;
+
+export function listImages(env, kind, subjectId, { publicOnly = false } = {}) {
+  return all(env, `${IMAGE_SELECT} WHERE i.subject_kind = ? AND i.subject_id = ? ${publicOnly ? "AND i.status = 'published'" : ""} ORDER BY i.sort_order, i.id`, kind, subjectId);
+}
+
+export function getImage(env, kind, subjectId, imageId) {
+  return first(env, `${IMAGE_SELECT} WHERE i.subject_kind = ? AND i.subject_id = ? AND i.id = ?`, kind, subjectId, Number(imageId) || 0);
+}
+
+export async function countImages(env, kind, subjectId) {
+  return (await first(env, `SELECT COUNT(*) AS n FROM lummet_listing_images WHERE subject_kind = ? AND subject_id = ?`, kind, subjectId))?.n || 0;
+}
+
+export async function insertImage(env, { kind, subjectId, mediaId, caption, organizationId }) {
+  const next = (await first(env, `SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM lummet_listing_images WHERE subject_kind = ? AND subject_id = ?`, kind, subjectId))?.n || 1;
+  const res = await db(env)
+    .prepare(`INSERT INTO lummet_listing_images (subject_kind, subject_id, media_id, caption, sort_order, organization_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`)
+    .bind(kind, subjectId, mediaId, caption || null, next, organizationId || null).first();
+  return res?.id ?? null;
+}
+
+export async function deleteImageRow(env, imageId) {
+  await db(env).prepare(`DELETE FROM lummet_listing_images WHERE id = ?`).bind(imageId).run();
+}
+
+/** How many image rows still use this file (a file uploaded identically by two sellers is stored once). */
+export async function countMediaRefs(env, mediaId) {
+  return (await first(env, `SELECT COUNT(*) AS n FROM lummet_listing_images WHERE media_id = ?`, mediaId))?.n || 0;
+}
+
+export async function makeCover(env, kind, subjectId, imageId) {
+  const low = (await first(env, `SELECT COALESCE(MIN(sort_order), 0) - 1 AS n FROM lummet_listing_images WHERE subject_kind = ? AND subject_id = ?`, kind, subjectId))?.n ?? -1;
+  await db(env).prepare(`UPDATE lummet_listing_images SET sort_order = ? WHERE id = ? AND subject_kind = ? AND subject_id = ?`).bind(low, imageId, kind, subjectId).run();
+}
+
+export async function listImagesForOrg(env, organizationId) {
+  const res = await db(env).prepare(`${IMAGE_SELECT} WHERE i.organization_id = ?`).bind(organizationId).all();
+  return res.results || [];
+}
+
+export async function deleteAftermarketDomainRow(env, id) {
+  await db(env).prepare(`DELETE FROM lummet_aftermarket_domains WHERE id = ?`).bind(id).run();
+}
+
+export async function deleteListingRow(env, id) {
+  await db(env).prepare(`DELETE FROM lummet_listings WHERE id = ?`).bind(id).run();
 }
 
 // ---- Brands ------------------------------------------

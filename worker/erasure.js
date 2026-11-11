@@ -13,6 +13,7 @@
 //   - sweepExpiredFinancialRecords: removes retained billing records after the policy period.
 // Nothing here is legal advice; see retention-policy.js.
 // =====================================================
+import * as publicSiteRepo from "./repositories/public-site.js";
 import { createZoneDomainService } from "./zone-domains.js";
 import * as dohResolver from "./dns-doh.js";
 import * as policy from "./retention-policy.js";
@@ -132,6 +133,10 @@ async function deleteExternalResources(env, org, infra) {
         await env.LUMMET_DB.prepare(`UPDATE site_resources SET status = 'deleted' WHERE id = ?`).bind(r.id).run();
       }
     }
+  }
+  // Domains the organization listed for sale: delete the Cloudflare zone made for nameserver verification (the row itself goes with ORG_DELETE).
+  for (const d of await publicSiteRepo.listAftermarketZonesForOrg(env, org.id)) {
+    if (await attempt(`aftermarket_zone:${d.id}`, () => infra.deleteZone(env, d.cf_zone_id))) await publicSiteRepo.patchAftermarketZone(env, d.id, { cf_zone_id: null });
   }
   const backups = (await env.LUMMET_DB.prepare(`SELECT id, storage_key FROM site_backups WHERE organization_id = ? AND storage_key IS NOT NULL`).bind(org.id).all()).results;
   for (const b of backups) {

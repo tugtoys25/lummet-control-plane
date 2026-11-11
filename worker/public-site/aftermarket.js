@@ -19,19 +19,13 @@ import { buildHead, breadcrumbLd } from "./seo.js";
 import { fill, truncate, stripTags } from "./format.js";
 import { lookupTXT } from "../dns-doh.js";
 import * as zones from "../aftermarket-zones.js";
-import { BUY_FORM_KEY, SELL_FORM_KEY, normalizeDomain, isReservedDomain, platformHosts } from "./aftermarket-domains.js";
+import { BUY_FORM_KEY, SELL_FORM_KEY, normalizeDomain, isReservedDomain, platformHosts, newVerifyToken } from "./aftermarket-domains.js";
 
 const VERIFY_PATH = "/aftermarket/sell-your-domain/verify";
 const CHECK_COOLDOWN_MS = 15 * 1000;
-const TOKEN_PREFIX = "lummet-verify=";
 
 function crumbs(ui, extra) {
   return [{ label: ui.crumb_home, href: "/" }, ...extra].map((c, i, a) => ({ ...c, last: i === a.length - 1 }));
-}
-
-function newToken() {
-  const bytes = crypto.getRandomValues(new Uint8Array(20));
-  return TOKEN_PREFIX + [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ------------------------------------------------------------ list + landing
@@ -105,7 +99,7 @@ const sellHooks = {
     const domain = normalizeDomain(values.domain);
     // A new submission replaces the token, so only the DNS record the latest submitter was shown can verify.
     const ok = await data.upsertAftermarketClaim(ctx.env, {
-      domain, email: values.email, price: values.asking_price, description: values.message, token: newToken()
+      domain, email: values.email, price: values.asking_price, description: values.message, token: newVerifyToken()
     });
     if (!ok) return null;
     return new Response(null, { status: 303, headers: { location: `${VERIFY_PATH}?domain=${encodeURIComponent(domain)}`, "cache-control": "no-store" } });

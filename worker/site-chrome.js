@@ -60,7 +60,7 @@ function compactFooter(site, ui) {
     .map((l) => `<a href="${esc(l.href)}">${esc(l.label)}</a>`).join("");
   const contact = site.has_contact ? `<a href="mailto:${esc(site.contact_email)}">${esc(site.contact_email)}</a>` : "";
   return `<style>${COMPACT_CSS}</style><footer class="lummet-app-footer">
-  <span>&copy; ${esc(site.year)} ${esc(site.name)}. ${esc(ui.rights || "")}</span>
+  <span>${esc(site.footer_copyright || `\u00a9 ${site.year} ${site.name}. ${ui.rights || ""}`)}${site.footer_note ? ` <small>${esc(site.footer_note)}</small>` : ""}</span>
   <nav aria-label="${esc(site.name)}">${nav}${contact}${cookieSettingsButton(site.cookie_settings_label)}</nav>
 </footer>`;
 }

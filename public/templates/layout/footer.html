@@ -39,7 +39,7 @@
       {{/each}}
     </div>
     <div class="footer-bottom">
-      <p class="footer-copy">&copy; {{site.year}} {{site.name}}. {{ui.rights}}</p>
+      <p class="footer-copy">{{site.footer_copyright}}</p>
       {{#if site.footer_legal}}
       <nav class="footer-legal" aria-label="{{site.footer_legal_title}}">
         <ul>
@@ -54,5 +54,6 @@
         <a class="footer-top" href="#top">{{site.footer_top_label}} {{{icons.arrow}}}</a>
       </div>
     </div>
+    {{#if site.footer_note}}<p class="footer-note">{{site.footer_note}}</p>{{/if}}
   </div>
 </footer>

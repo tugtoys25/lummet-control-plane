@@ -172,6 +172,8 @@ export const SITE_SETTING_KEYS = [
   "announce_url",
   "contact_email",
   "footer_text",
+  "footer_copyright",
+  "footer_note",
   "brands_title",
   "brands_intro",
   "updates_title",

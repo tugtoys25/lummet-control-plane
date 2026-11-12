@@ -564,10 +564,16 @@ export async function securityPage(ctx) {
     : mode === "on" ? "" : `<p>Security contact: <strong>[OPEN]</strong> owner must provide a monitored security contact.</p>`;
   const openNote = mode === "on" ? "" : `<p><strong>[OPEN]</strong> Disclosure policy, response expectations and scope require owner review. No response-time commitment is made here.</p>`;
   const txt = mode === "on" ? `<p>See also <a href="/.well-known/security.txt">security.txt</a>.</p>` : "";
+  // The published "security" page in Lummet Site -> Pages is the text owners edit; when it exists it replaces the built-in
+  // paragraph, and the configured contact and security.txt link are still added beneath it.
+  const edited = await data.getPage(ctx.env, "security");
+  const body = edited
+    ? sanitizeHtml(edited.content || "")
+    : `<p>We welcome responsible reports of potential security vulnerabilities. Please avoid accessing, modifying, or deleting data that does not belong to you, and do not disrupt service while investigating.</p>`;
   return trustPage(ctx, {
-    title: "Security", path: "/security",
-    description: "Security reporting contact and general vulnerability disclosure information.",
-    content: `<p>We welcome responsible reports of potential security vulnerabilities. Please avoid accessing, modifying, or deleting data that does not belong to you, and do not disrupt service while investigating.</p>${contactHtml}${openNote}${txt}`
+    title: (edited && edited.title) || "Security", path: "/security",
+    description: (edited && (edited.seo_description || edited.excerpt)) || "Security reporting contact and general vulnerability disclosure information.",
+    content: `${body}${edited && !safeContact ? "" : contactHtml}${edited ? "" : openNote}${txt}`
   });
 }
 

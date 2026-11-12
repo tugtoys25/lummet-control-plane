@@ -77,3 +77,10 @@ export async function purge(env, kind, subjectId) {
 export async function purgeOrganization(env, organizationId) {
   for (const row of await repo.listImagesForOrg(env, organizationId)) await remove(env, row);
 }
+
+/** Staff side: the item an image would belong to (a domain row or a listing row), or null. */
+export async function subjectForStaff(env, kind, id) {
+  if (kind === "domain") { const r = await repo.getAftermarketDomainById(env, id); return r ? { row: r, label: r.domain } : null; }
+  if (kind === "listing") { const r = await repo.getListingById(env, id); return r ? { row: r, label: r.title } : null; }
+  return null;
+}

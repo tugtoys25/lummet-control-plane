@@ -63,6 +63,8 @@ export const BOOT_SCRIPT = `
 
 export const CLIENT_SCRIPT = `
 (function () {
+  // A form with data-confirm asks before it is sent (no inline handlers: the page CSP forbids them).
+  document.addEventListener('submit', function (e) { var m = e.target && e.target.getAttribute && e.target.getAttribute('data-confirm'); if (m && !window.confirm(m)) e.preventDefault(); });
   var root = document.documentElement;
   var mobileQuery = window.matchMedia("(max-width: 900px)");
   var toggle = document.getElementById("nav-toggle");

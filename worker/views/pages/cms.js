@@ -20,6 +20,38 @@ import {
 } from "../../cms.js";
 import { getCmsResourceConfig } from "../../cms-resources.js";
 import { nonceToken } from "../../csp.js";
+import * as publicSiteRepo from "../../repositories/public-site.js";
+import * as marketImages from "../../aftermarket-images.js";
+
+// The two lists whose items can carry images (uploaded here by staff, or by the seller in the portal).
+const IMAGE_KINDS = { listings: "listing", aftermarket_domains: "domain" };
+
+/** Images card for a listing or domain: thumbnails with Make cover / Delete, and an upload form. Plain forms, no script. */
+async function imagesPanel(env, resourceKey, id) {
+  const kind = IMAGE_KINDS[resourceKey];
+  if (!kind || !id) return "";
+  const rows = await publicSiteRepo.listImages(env, kind, Number(id));
+  const max = marketImages.MAX_IMAGES[kind];
+  const base = `/cms/market-images/${kind}/${Number(id)}`;
+  const items = rows.map((r, n) => {
+    const i = marketImages.toPublic(r);
+    return `<li style="display:flex;flex-direction:column;gap:6px;width:160px;">
+      <a href="${escapeHtml(i.url)}" target="_blank" rel="noopener"><img src="${escapeHtml(i.url)}" alt="${escapeHtml(i.alt)}" style="width:160px;height:120px;object-fit:cover;border-radius:6px;"></a>
+      <span class="muted">${n === 0 ? "Cover · " : ""}${r.status === "hidden" ? "Hidden" : "Published"}</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${n > 0 ? `<form method="POST" action="${base}/${Number(r.id)}/cover"><button class="btn btn-secondary" type="submit">Make cover</button></form>` : ""}
+        <form method="POST" action="${base}/${Number(r.id)}/delete" data-confirm="Delete this image?"><button class="btn btn-danger" type="submit">Delete</button></form>
+      </div></li>`;
+  }).join("");
+  const room = max === 1 || rows.length < max;
+  return `<div class="card" style="margin-top:16px;"><h2>${max === 1 ? "Cover image" : "Images and screenshots"}</h2>
+    ${rows.length ? `<ul style="list-style:none;margin:0 0 16px;padding:0;display:flex;flex-wrap:wrap;gap:12px;">${items}</ul>` : `<p class="muted">No images yet.</p>`}
+    ${room ? `<form method="POST" action="${base}" enctype="multipart/form-data">
+      <div class="form-group"><label for="mi-file">${max === 1 ? "Upload a cover image (replaces the current one)" : `Add an image (${rows.length} of ${max})`}</label><input type="file" id="mi-file" name="file" accept="image/png,image/jpeg,image/webp" required></div>
+      <div class="form-group"><label for="mi-cap">Description of the image (optional)</label><input type="text" id="mi-cap" name="caption" maxlength="120"></div>
+      <button class="btn btn-primary" type="submit">Upload</button> <span class="muted">PNG, JPEG or WebP, up to 5 MB.</span></form>` : `<p class="muted">The maximum of ${max} images is reached.</p>`}
+  </div>`;
+}
 
 function activeKeyFor(resourceKey) {
   return `cms-${resourceKey}`;
@@ -156,7 +188,7 @@ function renderField(field, value, options) {
     <input type="text" name="${field.name}" value="${escapeHtml(val)}" ${field.required ? "required" : ""} />`;
 }
 
-export async function renderCmsForm(env, admin, resourceKey, id, formError) {
+export async function renderCmsForm(env, admin, resourceKey, id, formError, flash = null) {
   const config = getCmsResourceConfig(resourceKey);
   const activeKey = activeKeyFor(resourceKey);
   if (!config) return renderShell({ title: "Not found", activeKey, admin, bodyHtml: `<h1>Not found</h1>`, env });
@@ -181,6 +213,7 @@ export async function renderCmsForm(env, admin, resourceKey, id, formError) {
   const body = `
     <h1>${id ? "Edit" : "New"} ${escapeHtml(config.label.replace(/s$/, ""))}</h1>
     <p class="subtitle">Lummet Site · ${escapeHtml(config.label)}</p>
+    ${flashHtml(flash)}
     ${formError ? `<div class="flash flash-error">${escapeHtml(formError)}</div>` : ""}
     <form method="POST" action="/cms/${resourceKey}/${id ? id + "/edit" : "new"}" class="card">
       ${fieldsHtml}
@@ -188,7 +221,8 @@ export async function renderCmsForm(env, admin, resourceKey, id, formError) {
         <button type="submit" class="btn btn-primary">${id ? "Save changes" : "Create"}</button>
         <a class="btn btn-secondary" href="/cms/${resourceKey}">Cancel</a>
       </div>
-    </form>`;
+    </form>
+    ${id ? await imagesPanel(env, resourceKey, id) : `${IMAGE_KINDS[resourceKey] ? `<p class="muted">Save first, then open the item to add images.</p>` : ""}`}`;
 
   return renderShell({ title: `${id ? "Edit" : "New"} ${config.label}`, activeKey, admin, bodyHtml: body, env });
 }

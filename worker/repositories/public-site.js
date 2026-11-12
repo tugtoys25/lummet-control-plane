@@ -465,6 +465,14 @@ export async function listImagesForOrg(env, organizationId) {
   return res.results || [];
 }
 
+export function getAftermarketDomainById(env, id) {
+  return first(env, `SELECT * FROM lummet_aftermarket_domains WHERE id = ?`, Number(id) || 0);
+}
+
+export function getListingById(env, id) {
+  return first(env, `SELECT * FROM lummet_listings WHERE id = ?`, Number(id) || 0);
+}
+
 export async function deleteAftermarketDomainRow(env, id) {
   await db(env).prepare(`DELETE FROM lummet_aftermarket_domains WHERE id = ?`).bind(id).run();
 }

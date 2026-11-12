@@ -493,3 +493,13 @@ test('the homepage announces its stylesheets and fonts as early hints, matching 
   const notFound = await get(handlePublicRoute, env, '/p/does-not-exist');
   assert.equal(notFound.headers.get('link'), null, 'only successful pages carry hints');
 });
+
+test('/security shows the page edited in the dashboard, with the configured contact kept beneath it', async () => {
+  const env = createPublicEnv();
+  Object.assign(env, { PUBLIC_TRUST_PAGES: 'shadow', SECURITY_CONTACT: 'mailto:security@example.test' });
+  await env.db.prepare(`UPDATE lummet_pages SET content = '<p>Edited in the dashboard.</p>', status = 'published' WHERE slug = 'security'`).run();
+  const html = await (await get(handlePublicRoute, env, '/security')).text();
+  assert.match(html, /Edited in the dashboard\./);
+  assert.match(html, /security@example\.test/);
+  assert.doesNotMatch(html, /\[OPEN\]/);
+});

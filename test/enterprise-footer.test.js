@@ -27,9 +27,21 @@ test('footer: long columns are flagged wide, a back-to-top link targets the page
   const f = footerOf(h);
   assert.match(h, /<body id="top" /);
   assert.match(f, /<a class="footer-top" href="#top">/);
-  assert.match(f, /&copy; \d{4} /);
+  assert.match(f, /(?:&copy;|©) \d{4} /);
   const wide = f.match(/footer-col footer-col--wide/g) || [];
   const cols = f.match(/<nav class="footer-col/g) || [];
   assert.ok(cols.length >= 1);
   assert.ok(wide.length <= cols.length);
+});
+
+test('footer bottom bar: copyright line and company note are editable site settings', async () => {
+  const env = createPublicEnv();
+  const set = (k, v) => env.db.prepare(`INSERT INTO lummet_site_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(k, v).run();
+  let f = footerOf(await html(env, '/brands'));
+  assert.doesNotMatch(f, /footer-note/);
+  await set('footer_copyright', '© {year} {name} — all rights reserved');
+  await set('footer_note', 'Lummet is the operating name of Elijul Groups Ltd (RDB No. 122146426), Gasabo District, Kigali City, Rwanda.');
+  f = footerOf(await html(env, '/brands'));
+  assert.match(f, new RegExp(`© ${new Date().getUTCFullYear()} \\S+ — all rights reserved`));
+  assert.match(f, /<p class="footer-note">Lummet is the operating name of Elijul Groups Ltd \(RDB No\. 122146426\)/);
 });

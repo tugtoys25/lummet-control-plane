@@ -133,6 +133,10 @@ export async function loadSite(env, url) {
   // Closing call to action in the footer (every page). Text comes from lummet_ui_strings, so it is content, not markup;
   // it is omitted until those strings exist. The demo button only appears when the demo form is published.
   const hasDemo = counts.formKeys.has("demo");
+  const copyTemplate = (settings.footer_copyright && settings.footer_copyright.trim()) || "";
+  const footerCopyright = copyTemplate
+    ? copyTemplate.replace(/\{year\}/g, String(new Date().getUTCFullYear())).replace(/\{name\}/g, name)
+    : `\u00a9 ${new Date().getUTCFullYear()} ${name}. ${ui.rights || ""}`.trim();
   const footerCta = ui.footer_cta_title && ui.footer_cta_primary
     ? {
         title: ui.footer_cta_title,
@@ -172,6 +176,8 @@ export async function loadSite(env, url) {
       icon_links_html: iconLinks,
       initials: initials(name),
       accent_css: accentCss(settings),
+      footer_copyright: footerCopyright,
+      footer_note: (settings.footer_note && settings.footer_note.trim()) || "",
       footer_text: (settings.footer_text && settings.footer_text.trim()) || "",
       contact_email: contactEmail,
       has_contact: hasContact,

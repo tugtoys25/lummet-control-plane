@@ -99,6 +99,7 @@ main { flex: 1 0 auto; width: 100%; }
 .footer-col--wide { grid-column: 1 / -1; }
 .footer-bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-5); margin-top: var(--space-7); padding-top: var(--space-5); border-top: 1px solid rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.62); font-size: var(--fs-xs); }
 .footer-copy { margin: 0; }
+.footer-note { flex-basis: 100%; margin: 0; max-width: 72ch; line-height: 1.6; color: rgba(255, 255, 255, 0.55); }
 .footer-legal ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px var(--space-4); }
 .footer-legal a, .footer-top { color: rgba(255, 255, 255, 0.72); }
 .footer-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }

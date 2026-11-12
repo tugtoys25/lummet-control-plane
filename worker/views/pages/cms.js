@@ -274,10 +274,14 @@ const SETTING_LABELS = {
   announce_link_text: "Announcement bar link label",
   announce_url: "Announcement bar link URL",
   contact_email: "Contact email",
-  footer_text: "Footer text"
+  footer_text: "Footer text",
+  footer_copyright: "Footer copyright line",
+  footer_note: "Footer legal / company note"
 };
 
 const SETTING_HINTS = {
+  footer_copyright: "Bottom bar copyright line. Use {year} and {name} as placeholders, e.g. \"© {year} {name}. All rights reserved.\" Blank uses the default.",
+  footer_note: "Optional extra line under the bottom bar, e.g. the registered company name, registration number and address. Plain text; blank hides it.",
   site_name: 'Shown next to the logo, e.g. "Lummet". Leave blank to keep "Lummet".',
   canonical_url: "Full origin used for canonical links, Open Graph URLs and the sitemap, e.g. https://lummet.com. Blank uses the address the visitor arrived on.",
   contact_email: "Shown in the footer and the Get in Touch section. If blank, the CONTACT_EMAIL Worker variable is used; if neither is set, contact blocks are hidden.",
@@ -312,7 +316,7 @@ export async function renderSiteSettingsPage(env, admin, flash) {
   const settings = await getSiteSettings(env);
 
   const fieldsHtml = SITE_SETTING_KEYS.map((key) => {
-    const isLong = ["hero_subtitle", "footer_text", "site_description", "brands_intro", "updates_intro", "insights_intro", "partners_intro"].includes(key);
+    const isLong = ["hero_subtitle", "footer_text", "footer_note", "site_description", "brands_intro", "updates_intro", "insights_intro", "partners_intro"].includes(key);
     const hint = SETTING_HINTS[key];
     return `<div class="form-group">
       <label>${escapeHtml(SETTING_LABELS[key] || key)}${hint ? ` <span style="color:var(--text-dim);font-weight:400;">— ${escapeHtml(hint)}</span>` : ""}</label>
@@ -338,7 +342,7 @@ export async function renderSiteSettingsPage(env, admin, flash) {
       <h3>Homepage copy</h3>
       ${SITE_SETTING_KEYS.filter((k) => !["site_name", "logo_url", "accent_color", "accent_color_secondary", "section_background", "page_header_background"].includes(k))
         .map((key) => {
-          const isLong = ["hero_subtitle", "footer_text", "site_description", "brands_intro", "updates_intro", "insights_intro", "partners_intro"].includes(key);
+          const isLong = ["hero_subtitle", "footer_text", "footer_note", "site_description", "brands_intro", "updates_intro", "insights_intro", "partners_intro"].includes(key);
           return `<div class="form-group">
             <label>${escapeHtml(SETTING_LABELS[key] || key)}</label>
             ${isLong

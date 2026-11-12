@@ -198,6 +198,8 @@ import { renderDashboardHome } from "./views/pages/dashboard.js";
 import { handlePublicRoute } from "./public-site/router.js";
 import * as aftermarketZones from "./aftermarket-zones.js";
 import * as aftermarketNotify from "./aftermarket-notify.js";
+import * as aftermarketImages from "./aftermarket-images.js";
+import * as publicSiteRepo from "./repositories/public-site.js";
 import { hostedGate, absolutizeLinks } from "./aftermarket-host.js";
 import {
   renderTenantsList,
@@ -5486,6 +5488,44 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         return redirect("/cms/settings?flash=Homepage+settings+saved&flash_type=success");
       }
 
+      // Images of a listing or domain, managed by staff (plain multipart/POST forms on the item's edit page).
+      {
+        const imgUpload = matchPath("/cms/market-images/:kind/:id", path);
+        const imgAction = matchPath("/cms/market-images/:kind/:id/:imageId/:action", path);
+        const target = imgAction || imgUpload;
+        if (method === "POST" && target) {
+          const resource = target.kind === "domain" ? "aftermarket_domains" : target.kind === "listing" ? "listings" : null;
+          const back = (msg, type = "success") => redirect(`/cms/${resource}/${target.id}/edit?flash=${encodeURIComponent(msg)}&flash_type=${type}`);
+          if (!resource || !/^\d+$/.test(target.id)) return html("Not found.", 404);
+          const needed = imgAction ? (imgAction.action === "delete" ? "delete" : "update") : "create";
+          const guard = await requirePermission("cms", "listing_images", needed);
+          if (guard) return guard;
+          const subject = await aftermarketImages.subjectForStaff(env, target.kind, target.id);
+          if (!subject) return html("Not found.", 404);
+          let result;
+          let action;
+          if (imgAction) {
+            const image = await publicSiteRepo.getImage(env, target.kind, subject.row.id, imgAction.imageId);
+            if (!image) return back("Image not found", "error");
+            if (imgAction.action === "delete") { await aftermarketImages.remove(env, image); action = "delete"; result = { ok: true }; }
+            else if (imgAction.action === "cover") { await publicSiteRepo.makeCover(env, target.kind, subject.row.id, image.id); action = "cover"; result = { ok: true }; }
+            else return html("Not found.", 404);
+          } else {
+            action = "upload";
+            let form = null;
+            try { form = await request.formData(); } catch (_) { form = null; }
+            result = form
+              ? await aftermarketImages.attach(env, { kind: target.kind, subjectId: subject.row.id, organizationId: subject.row.organization_id || null, file: form.get("file"), caption: form.get("caption"), altFallback: subject.label, actorId: admin.id })
+              : { ok: false, status: 400, error: "no_file" };
+          }
+          await logAudit(env, {
+            adminId: admin.id, tenantId: null, endpoint: path, method, resource: "lummet_listing_images", resourceId: target.id, action,
+            success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash
+          });
+          return result.ok ? back(action === "upload" ? "Image added" : action === "delete" ? "Image deleted" : "Cover changed") : back(`Could not save the image: ${result.error}`, "error");
+        }
+      }
+
       const cmsListParams = matchPath("/cms/:resource", path);
       if (method === "GET" && cmsListParams && getCmsResourceConfig(cmsListParams.resource)) {
         const guard = await requirePermission("cms", cmsListParams.resource, "read");
@@ -5526,7 +5566,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (method === "GET") {
           const guard = await requirePermission("cms", cmsEditParams.resource, "read");
           if (guard) return guard;
-          return html(await renderCmsForm(env, admin, cmsEditParams.resource, cmsEditParams.id, null));
+          return html(await renderCmsForm(env, admin, cmsEditParams.resource, cmsEditParams.id, null, readFlash(url)));
         }
 
         if (method === "POST") {

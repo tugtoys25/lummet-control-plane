@@ -59,11 +59,11 @@ test('staff create a business listing with a website, add images from the edit p
   assert.equal(env.PLATFORM_MEDIA.m.size, 1);
 });
 
-test('staff can give an admin-listed domain a cover image; refused files and signed-out requests change nothing', async () => {
+test('staff can give an admin-listed domain images; refused files and signed-out requests change nothing', async () => {
   const { env, call } = await setup();
   await env.db.prepare(`INSERT INTO lummet_aftermarket_domains (domain, status, source) VALUES ('staff.app','listed','admin')`).run();
   const d = await env.db.prepare(`SELECT id FROM lummet_aftermarket_domains WHERE domain='staff.app'`).first();
-  assert.match(await (await call('GET', `/cms/aftermarket_domains/${d.id}/edit`)).text(), /Cover image/);
+  assert.match(await (await call('GET', `/cms/aftermarket_domains/${d.id}/edit`)).text(), /Images and screenshots/);
   const bad = await call('POST', `/cms/market-images/domain/${d.id}`, { multipart: upload(new TextEncoder().encode('<svg/>'), 'x.png') });
   assert.match(bad.headers.get('location'), /flash_type=error/);
   const anon = await call('POST', `/cms/market-images/domain/${d.id}`, { multipart: upload(png(400, 300), 'ok.png'), sid: null });

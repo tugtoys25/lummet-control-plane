@@ -422,7 +422,7 @@ function detailHtml(r, enquiries, canManage, imgs = []) {
         <input type="text" id="am-rname" placeholder="name (@ or mail)" required><input type="text" id="am-rcontent" placeholder="value" required><input type="number" id="am-rprio" placeholder="priority (MX)" min="0" max="65535"><button class="btn" type="submit">Add record</button></form><div id="am-record-result"></div>` : ""}</div>` : `<div class="card"><h2>DNS</h2><p class="muted">DNS can be managed here once this domain is verified by nameservers.</p></div>`;
   const remove = canManage ? `<div class="card"><h2>Delete domain</h2><p class="muted">Removes ${esc(r.domain)} from the marketplace for good${r.cf_zone_id ? ", releases its nameserver setup" : ""} and deletes its image. Past enquiries stay in Lummet's inbox.</p><button class="btn btn-danger" type="button" id="am-delete">Delete this domain</button></div>` : "";
   return `<p><a href="/app/aftermarket">&larr; Domains for sale</a></p><h1 class="mono">${esc(r.domain)}</h1><p>${badge(r.status)}</p>${page}${verifyCard}${edit}
-    ${imagesHtml(imgs, { max: images.MAX_IMAGES.domain, canManage, multiple: false })}
+    ${imagesHtml(imgs, { max: images.MAX_IMAGES.domain, canManage, multiple: true })}
     <div class="card"><h2>Enquiries</h2><p class="muted">Lummet handles buyer contact; you see when enquiries arrive.</p>${enquiryRows}</div>${dns}${remove}`;
 }
 

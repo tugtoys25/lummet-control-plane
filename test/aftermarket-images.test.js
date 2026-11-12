@@ -93,20 +93,28 @@ test('image files are served and removed with their last use; other organization
   assert.equal(env.PLATFORM_MEDIA.m.size, 0);
 });
 
-test('a domain has one cover image: a new upload replaces it, and it shows on its page and in the list', async () => {
+test('a domain can have a cover image and a gallery, like a business; shown on its page and in the list', async () => {
   const env = mkEnv();
   await api(env, 'orgA', 'POST', '/aftermarket/domains', { domain: 'cover.app' });
   await env.db.prepare(`UPDATE lummet_aftermarket_domains SET status='listed', notified_status='listed' WHERE domain='cover.app'`).run();
-  await api(env, 'orgA', 'POST', '/aftermarket/domains/cover.app/images', upload(png(400, 300), 'a.png', 'Brand mock-up'));
-  await api(env, 'orgA', 'POST', '/aftermarket/domains/cover.app/images', upload(png(420, 300), 'b.png', 'Newer mock-up'));
-  assert.equal(env.PLATFORM_MEDIA.m.size, 1);
-  const detail = (await api(env, 'orgA', 'GET', '/aftermarket/domains/cover.app')).json;
-  assert.equal(detail.images.length, 1);
-  assert.match(await html(env, '/aftermarket/domains/cover.app'), /class="listing-cover"[\s\S]*alt="Newer mock-up"/);
+  const base = '/aftermarket/domains/cover.app/images';
+  const a = await api(env, 'orgA', 'POST', base, upload(png(400, 300), 'a.png', 'Brand mock-up'));
+  const b = await api(env, 'orgA', 'POST', base, upload(png(420, 300), 'b.png', 'Business card'));
+  assert.deepEqual([a.status, b.status], [200, 200]);
+  assert.equal(env.PLATFORM_MEDIA.m.size, 2);
+  assert.equal((await api(env, 'orgA', 'GET', '/aftermarket/domains/cover.app')).json.images.length, 2);
+  let page = await html(env, '/aftermarket/domains/cover.app');
+  assert.match(page, /class="listing-cover"[\s\S]*alt="Brand mock-up"/);
+  assert.match(page, /class="listing-gallery"[\s\S]*alt="Business card"/);
   assert.match(await html(env, '/aftermarket/list-of-domains'), /class="listing-thumb"/);
+  assert.equal((await api(env, 'orgA', 'POST', `${base}/${b.json.id}/cover`)).status, 200);
+  assert.match(await html(env, '/aftermarket/domains/cover.app'), /class="listing-cover"[\s\S]*alt="Business card"/);
+  for (let i = 3; i <= 10; i += 1) assert.equal((await api(env, 'orgA', 'POST', base, upload(png(300 + i, 300), `n${i}.png`))).status, 200);
+  assert.equal((await api(env, 'orgA', 'POST', base, upload(png(999, 300), 'eleven.png'))).json.error, 'too_many_images');
+  assert.equal((await api(env, 'orgB', 'POST', base, upload(png(333, 333), 'x.png'))).status, 404);
   // staff can hide an image without deleting it
   await env.db.prepare(`UPDATE lummet_listing_images SET status='hidden'`).run();
-  assert.doesNotMatch(await html(env, '/aftermarket/domains/cover.app'), /listing-cover/);
+  assert.doesNotMatch(await html(env, '/aftermarket/domains/cover.app'), /listing-cover|listing-gallery/);
 });
 
 test('uploads fail closed without media storage', async () => {

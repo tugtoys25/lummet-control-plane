@@ -1,13 +1,13 @@
 // =====================================================
 // AFTERMARKET — IMAGES FOR DOMAINS AND BUSINESS LISTINGS
 //
-// A domain has one cover image; a business listing has up to ten (logo, screenshots, photos). Files go into the platform media library
+// A domain and a business listing each have up to ten images (the first is the cover; logo, mock-ups, screenshots, photos). Files go into the platform media library
 // (platform-media.js: R2 binding PLATFORM_MEDIA), which already does the hard part: the type is decided from the file's BYTES, never the
 // name or the browser's word; the extension has to agree; objects are served nosniff, immutable, from /brand-media/<key>.
 // On top of that, this module only accepts what a marketplace needs:
 //   - PNG, JPEG or WebP (no GIF, no SVG, no icons, no video, no documents);
 //   - 5 MB at most, between 100 and 10000 pixels on each side;
-//   - a limit on how many images an item can hold.
+//   - a limit on how many images an item can hold (ten).
 // A listing's image rows say which file belongs where; a file shared by two rows (identical upload) is deleted only with its last row.
 // Fails closed (503 media_storage_not_configured) when PLATFORM_MEDIA is not bound.
 // =====================================================
@@ -17,7 +17,7 @@ import { inspectFile, extensionOf } from "./image-inspect.js";
 import * as repo from "./repositories/public-site.js";
 
 export const FOLDER = "market";
-export const MAX_IMAGES = { domain: 1, listing: 10 };
+export const MAX_IMAGES = { domain: 10, listing: 10 };
 export const MAX_BYTES = 5 * 1024 * 1024;
 const MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp"]);

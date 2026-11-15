@@ -42,6 +42,7 @@ const NAV = [
     icon: "insights",
     items: [
       { label: "Analytics", href: "/app/analytics", key: "analytics" },
+      { label: "All sites", href: "/app/all-sites", key: "all-sites" },
       { label: "Reports", href: "/app/reports", key: "reports" },
       { label: "Alerts", href: "/app/alerts", key: "alerts" },
       { label: "Notifications", href: "/app/notifications", key: "notifications" }

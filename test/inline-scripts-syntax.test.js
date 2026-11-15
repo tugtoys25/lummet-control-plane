@@ -35,7 +35,7 @@ test('every inline script on the main staff and customer pages is valid JavaScri
     check(`staff ${p}`, r);
   }
   const customer = (await call('POST', '/api/customer/signup', { body: { email: 'c@example.com', password: 'Correct-Horse-Battery-9', organizationName: 'Org', displayName: 'T' } })).cookie;
-  for (const p of ['/app/overview', '/app/sites', '/app/content', '/app/analytics', '/app/reports', '/app/campaigns', '/app/alerts', '/app/notifications', '/app/domains', '/app/deployments', '/app/team', '/app/billing', '/app/usage', '/app/backups', '/app/automations', '/app/search', '/app/settings', '/app/account']) {
+  for (const p of ['/app/overview', '/app/sites', '/app/content', '/app/analytics', '/app/all-sites', '/app/reports', '/app/campaigns', '/app/alerts', '/app/notifications', '/app/domains', '/app/deployments', '/app/team', '/app/billing', '/app/usage', '/app/backups', '/app/automations', '/app/search', '/app/settings', '/app/account']) {
     const r = await call('GET', p, { cookie: customer });
     assert.equal(r.status, 200, `customer ${p}`);
     check(`customer ${p}`, r);

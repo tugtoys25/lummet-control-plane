@@ -98,6 +98,56 @@ export function renderInsightAnalytics({ sites, entitled, canDisable = false }) 
   </script>`;
 }
 
+export function renderInsightCrossSite({ sites, entitled }) {
+  if (!entitled) return `<h1>All sites</h1>${upgrade("Analytics")}`;
+  if (!sites.some((s) => s.tenant_id)) return `<h1>All sites</h1>${NO_SITE}`;
+  const today = new Date(); const from = new Date(today.getTime() - 29 * 86400000);
+  const ymd = (d) => d.toISOString().slice(0, 10);
+  return `<h1>All sites</h1>
+  <p class="subtitle">Clicks, conversions and earnings of every live site together, and each affiliate program across your sites. Money is never added across currencies. Registrations, first deposits and payouts are on each site's own <em>Earnings &amp; Payouts</em> page.</p>
+  <div class="card"><div class="filters">
+    <label>From <input type="date" id="start" value="${ymd(from)}" /></label>
+    <label>To <input type="date" id="end" value="${ymd(today)}" /></label>
+    <button class="btn btn-primary"${onClick("lummetLoadCrossSite")}>Load</button>
+  </div></div>
+  <div id="out"></div>
+  <script nonce="${nonceToken()}">${SHARED_SCRIPT}
+    function money(by) {
+      var keys = Object.keys(by || {});
+      if (!keys.length) return '—';
+      return keys.map(function (k) { return esc(num(by[k].revenue) + ' ' + k); }).join('<br>');
+    }
+    function commission(by) {
+      var keys = Object.keys(by || {});
+      if (!keys.length) return '—';
+      return keys.map(function (k) { return esc(num(by[k].commission) + ' ' + k); }).join('<br>');
+    }
+    function lummetLoadCrossSite() {
+      var out = document.getElementById('out'); out.innerHTML = '<p class="subtitle">Loading…</p>';
+      api('/analytics/cross-site?start_date=' + enc(val('start')) + '&end_date=' + enc(val('end'))).then(function (d) {
+        if (d.success === false || d.__status >= 400) { out.innerHTML = failure(d); return; }
+        var t = d.totals || {};
+        var html = '<div class="card"><h3>Everything together</h3><p>' + num(t.clicks) + ' clicks · ' + num(t.conversions) + ' conversions' + (t.conversion_rate != null ? ' · ' + esc(String(t.conversion_rate)) + '% conversion rate' : '') + '</p>' +
+          table(Object.keys(t.by_currency || {}).map(function (k) { return { currency: k, revenue: t.by_currency[k].revenue, commission: t.by_currency[k].commission }; }),
+            [['currency', 'Currency'], ['revenue', 'Revenue', function (r) { return num(r.revenue); }], ['commission', 'Commission', function (r) { return num(r.commission); }]]) + '</div>';
+        html += '<div class="card"><h3>By site</h3>' + table(d.sites || [], [
+          ['name', 'Site', function (r) { return esc(r.name) + (r.domain ? '<br><span class="subtitle">' + esc(r.domain) + '</span>' : ''); }],
+          ['clicks', 'Clicks', function (r) { return r.status === 'ok' ? num(r.clicks) : '—'; }],
+          ['conversions', 'Conversions', function (r) { return r.status === 'ok' ? num(r.conversions) : '—'; }],
+          ['conversion_rate', 'Rate', function (r) { return r.conversion_rate != null ? esc(String(r.conversion_rate)) + '%' : '—'; }],
+          ['revenue', 'Revenue', function (r) { return r.status === 'ok' ? money(r.by_currency) : esc(r.message || ''); }],
+          ['commission', 'Commission', function (r) { return r.status === 'ok' ? commission(r.by_currency) : ''; }]]) +
+          (d.skipped ? '<p class="subtitle">' + esc(String(d.skipped)) + ' more site(s) are not shown. Only the first 25 are included.</p>' : '') + '</div>';
+        html += '<div class="card"><h3>By program, across sites</h3>' + table(d.programs || [], [
+          ['name', 'Program'], ['sites', 'Sites', function (r) { return esc((r.sites || []).join(', ')); }],
+          ['clicks', 'Clicks', function (r) { return num(r.clicks); }], ['conversions', 'Conversions', function (r) { return num(r.conversions); }],
+          ['revenue', 'Revenue', function (r) { return money(r.by_currency); }], ['commission', 'Commission', function (r) { return commission(r.by_currency); }]]) + '</div>';
+        out.innerHTML = html;
+      });
+    }
+  </script>`;
+}
+
 export function renderInsightReports({ sites, entitled, canRun }) {
   if (!entitled) return `<h1>Reports</h1>${upgrade("Reports")}`;
   const sel = siteSelect(sites);

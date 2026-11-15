@@ -62,7 +62,8 @@ import * as tenantLinks from "./tenant-links.js";
 import * as automationSweep from "./automation-sweep.js";
 import * as tenantAdmin from "./tenant-admin.js";
 import * as notificationsRepo from "./repositories/notifications.js";
-import { renderInsightAnalytics, renderInsightReports, renderInsightCampaigns, renderInsightAlerts, renderInsightNotifications, renderInsightSearch, renderInsightContent } from "./views/customer-pages/insights.js";
+import { loadCrossSite, defaultRange } from "./cross-site.js";
+import { renderInsightCrossSite, renderInsightAnalytics, renderInsightReports, renderInsightCampaigns, renderInsightAlerts, renderInsightNotifications, renderInsightSearch, renderInsightContent } from "./views/customer-pages/insights.js";
 import { finalizeResponse, handleCspReport, nonceToken } from "./csp.js";
 import { isShellAssetPath, serveShellAsset } from "./perf/shell-bundle.js";
 import { withD1Session, applyD1Bookmark } from "./perf/d1-session.js";
@@ -2389,6 +2390,20 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // site administration).
           // -------------------------------------------
 
+          // All of the organization's sites in one view: clicks, conversions and money per site and per program.
+          // Any member may read it; each site is asked through the same Super API call the single-site Analytics page uses.
+          if (method === "GET" && subPath === "/analytics/cross-site") {
+            const level = await entitlementsService.checkEntitlement(env, organizationId, "analytics.level");
+            if (!level || level === "none") return json({ success: false, error: "not_entitled", message: "Analytics is not included in this organization's plan." }, 403);
+            const q = new URL(request.url).searchParams;
+            const fallback = defaultRange();
+            const startDate = /^\d{4}-\d{2}-\d{2}$/.test(q.get("start_date") || "") ? q.get("start_date") : fallback.startDate;
+            const endDate = /^\d{4}-\d{2}-\d{2}$/.test(q.get("end_date") || "") ? q.get("end_date") : fallback.endDate;
+            if (startDate > endDate) return json({ success: false, error: "invalid_range", message: "The start date is after the end date." }, 422);
+            const orgSites = await sites.listSitesForOrganization(env, organizationId);
+            return json({ success: true, start_date: startDate, end_date: endDate, ...(await loadCrossSite(env, tenantPortal, orgSites, { startDate, endDate })) });
+          }
+
           const siteSubResourceMatch = subPath.match(
             /^\/sites\/([^/]+)\/(analytics\/overview|analytics\/revenue|analytics\/tracking-health|reports|campaigns|alerts)$/
           );
@@ -3237,7 +3252,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         const portalSessionsVisible = portalSessionsMode !== "off" && (myOrgs.find((o) => o.id === activeOrgId) ? roleAtLeast(myOrgs.find((o) => o.id === activeOrgId).my_role, "admin") : false);
         const hiddenNavKeys = [
           ...(hasBackups ? [] : ["backups"]), ...(hasAutomations ? [] : ["automations"]),
-          ...(hasAnalytics ? [] : ["analytics"]), ...(hasReports ? [] : ["reports"]),
+          ...(hasAnalytics ? [] : ["analytics", "all-sites"]), ...(hasReports ? [] : ["reports"]),
           ...(hasAffiliate ? [] : ["campaigns"]), ...(hasAlerts ? [] : ["alerts"]),
           // Sessions page (H.5): shown to owners and admins only, and only while CUSTOMER_SESSION_ADMIN is not off.
           ...(portalSessionsVisible ? [] : ["sessions"])
@@ -3272,6 +3287,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           }));
         };
         if (path === "/app/analytics") return insightPage("Analytics", "analytics", (s) => renderInsightAnalytics({ sites: s, entitled: hasAnalytics, canDisable: hasAffiliate && (myMembership ? roleAtLeast(myMembership.my_role, "editor") : false) }));
+        if (path === "/app/all-sites") return insightPage("All sites", "all-sites", (s) => renderInsightCrossSite({ sites: s, entitled: hasAnalytics }));
         if (path === "/app/reports") return insightPage("Reports", "reports", (s) => renderInsightReports({ sites: s, entitled: hasReports, canRun: myMembership ? roleAtLeast(myMembership.my_role, "analyst") : false }));
         if (path === "/app/campaigns") return insightPage("Campaigns", "campaigns", (s) => renderInsightCampaigns({ sites: s, entitled: hasAffiliate, canCreate: myMembership ? roleAtLeast(myMembership.my_role, "editor") : false }));
         if (path === "/app/alerts") return insightPage("Alerts", "alerts", (s) => renderInsightAlerts({ sites: s, entitled: hasAlerts, canAck: myMembership ? roleAtLeast(myMembership.my_role, "analyst") : false }));

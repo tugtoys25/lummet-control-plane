@@ -7,6 +7,7 @@
 // =====================================================
 import { queueEmail, portalLink } from "./email.js";
 import * as repo from "./repositories/support.js";
+import * as files from "./private-files.js";
 
 export const CATEGORIES = { question: "Question", problem: "Something is not working", billing: "Billing", feature: "Feature request" };
 export const PRIORITIES = { low: "Low", normal: "Normal", high: "High" };
@@ -16,16 +17,28 @@ export const LIMITS = { subject: 140, body: 5000 };
 
 const text = (v, max) => String(v == null ? "" : v).replace(/\r\n/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, max);
 
-export async function createTicket(env, { organizationId, customerUserId, authorLabel, siteId, subject, body, category, priority }) {
+/** Files the author uploaded earlier and now sends with this message (only their own, unattached, for this organization). */
+async function claimFiles(env, fileIds, organizationId, kind, uploadedBy) {
+  const ids = Array.isArray(fileIds) ? fileIds.filter((x) => typeof x === "string").slice(0, files.MAX_FILES_PER_MESSAGE) : [];
+  return ids.length ? (await files.pendingSupportFiles(env, ids, organizationId, kind, uploadedBy)).map((f) => f.id) : [];
+}
+const withAttachments = async (env, ticket) => {
+  const map = await files.attachmentsByMessage(env, ticket.messages.map((m) => m.id));
+  return { ...ticket, messages: ticket.messages.map((m) => ({ ...m, attachments: map[m.id] || [] })) };
+};
+
+export async function createTicket(env, { organizationId, customerUserId, authorLabel, siteId, subject, body, category, priority, fileIds }) {
   const s = text(subject, LIMITS.subject).replace(/\s+/g, " "); const b = text(body, LIMITS.body);
   if (s.length < 3) return { ok: false, status: 422, error: "subject_required" };
-  if (b.length < 5) return { ok: false, status: 422, error: "message_required" };
+  if (b.length < 5 && !(Array.isArray(fileIds) && fileIds.length)) return { ok: false, status: 422, error: "message_required" };
   const cat = CATEGORIES[category] ? category : "question"; const pri = PRIORITIES[priority] ? priority : "normal";
   if ((await repo.openCount(env, organizationId)) >= MAX_OPEN_PER_ORG) return { ok: false, status: 429, error: "too_many_open_tickets" };
   let site = null;
   if (siteId) { site = await repo.siteInOrganization(env, organizationId, siteId); if (!site) return { ok: false, status: 422, error: "invalid_site" }; }
-  const id = crypto.randomUUID();
-  await repo.insertWithMessage(env, { id, organizationId, customerUserId, siteId: site ? site.id : null, subject: s, category: cat, priority: pri, authorLabel: text(authorLabel, 120) || "Customer", body: b });
+  const id = crypto.randomUUID(); const messageId = crypto.randomUUID();
+  const claimed = await claimFiles(env, fileIds, organizationId, "customer", customerUserId);
+  await repo.insertWithMessage(env, { id, messageId, organizationId, customerUserId, siteId: site ? site.id : null, subject: s, category: cat, priority: pri, authorLabel: text(authorLabel, 120) || "Customer", body: b || "(attachment)" });
+  await files.attachToMessage(env, claimed, messageId);
   return { ok: true, id };
 }
 
@@ -33,14 +46,17 @@ export const listTickets = (env, organizationId, { status } = {}) => repo.listFo
 
 export async function getTicket(env, organizationId, id) {
   const t = await repo.getForOrganization(env, organizationId, id);
-  return t ? { ...t, messages: await repo.messages(env, id) } : null;
+  return t ? withAttachments(env, { ...t, messages: await repo.messages(env, id) }) : null;
 }
 
-export async function customerReply(env, organizationId, id, { authorLabel, body }) {
+export async function customerReply(env, organizationId, id, { authorLabel, body, fileIds, customerUserId }) {
   if (!(await repo.getForOrganization(env, organizationId, id))) return { ok: false, status: 404, error: "not_found" };
   const b = text(body, LIMITS.body);
-  if (b.length < 2) return { ok: false, status: 422, error: "message_required" };
-  await repo.addMessage(env, { ticketId: id, authorType: "customer", authorLabel: text(authorLabel, 120) || "Customer", body: b, status: "open" });
+  const claimed = await claimFiles(env, fileIds, organizationId, "customer", customerUserId);
+  if (b.length < 2 && !claimed.length) return { ok: false, status: 422, error: "message_required" };
+  const messageId = crypto.randomUUID();
+  await repo.addMessage(env, { messageId, ticketId: id, authorType: "customer", authorLabel: text(authorLabel, 120) || "Customer", body: b || "(attachment)", status: "open" });
+  await files.attachToMessage(env, claimed, messageId);
   return { ok: true };
 }
 
@@ -60,21 +76,24 @@ export const ticketOrganizationId = (env, id) => repo.organizationIdOf(env, id);
 
 export async function getTicketForStaff(env, id) {
   const t = await repo.getForStaff(env, id);
-  return t ? { ...t, messages: await repo.messages(env, id) } : null;
+  return t ? withAttachments(env, { ...t, messages: await repo.messages(env, id) }) : null;
 }
 
-export async function staffReply(env, id, { staffLabel, body, close = false }) {
+export async function staffReply(env, id, { staffLabel, staffId, body, close = false, fileIds }) {
   const t = await getTicketForStaff(env, id);
   if (!t) return { ok: false, status: 404, error: "not_found" };
   const b = text(body, LIMITS.body);
-  if (b.length < 2) return { ok: false, status: 422, error: "message_required" };
-  await repo.addMessage(env, { ticketId: id, authorType: "staff", authorLabel: text(staffLabel, 120) || "Lummet support", body: b, status: close ? "closed" : "answered" });
+  const claimed = await claimFiles(env, fileIds, t.organization_id, "staff", staffId);
+  if (b.length < 2 && !claimed.length) return { ok: false, status: 422, error: "message_required" };
+  const messageId = crypto.randomUUID();
+  await repo.addMessage(env, { messageId, ticketId: id, authorType: "staff", authorLabel: text(staffLabel, 120) || "Lummet support", body: b || "(attachment)", status: close ? "closed" : "answered" });
+  await files.attachToMessage(env, claimed, messageId);
   // Tell the person who wrote the ticket. Best effort: a missing address or an unconfigured mailer never blocks the reply.
   try {
     if (t.customer_email) {
       await queueEmail(env, {
         to: t.customer_email, template: "notification", organizationId: t.organization_id,
-        vars: { subject: `Reply to your support request: ${t.subject}`.slice(0, 120), message: `${b.slice(0, 600)}${b.length > 600 ? "…" : ""}`, link: portalLink(env, `/app/support/${id}`) },
+        vars: { subject: `Reply to your support request: ${t.subject}`.slice(0, 120), message: `${b.slice(0, 600)}${b.length > 600 ? "…" : ""}${claimed.length ? `\n\n(${claimed.length} file${claimed.length > 1 ? "s" : ""} attached - open the request to download.)` : ""}`, link: portalLink(env, `/app/support/${id}`) },
       });
     }
   } catch { /* ignore */ }

@@ -22,6 +22,7 @@ import * as billingGateways from "../../billing-gateways.js";
 import { renderPlanCatalogPage } from "./plan-catalog-admin.js";
 import { renderBrandingSection } from "./portal-branding.js";
 import * as supportModule from "../../support.js";
+import { renderAttachments } from "../customer-pages/support.js";
 
 const money = (c) => (c == null ? "custom" : `$${(c / 100).toFixed(2)}`);
 // Round 6.1B: revenue is shown with its own currency code and is never summed across currencies. Unknown is "n/a", never zero.
@@ -722,12 +723,13 @@ export async function renderSupportInboxPage(env, admin, { status = "", page: ra
 export async function renderSupportTicketAdminPage(env, admin, id) {
   const t = await supportModule.getTicketForStaff(env, id);
   if (!t) return shell(env, admin, "Support request", "saas-support", `<p>That request was not found.</p><p><a href="/platform/saas/support">Back to the inbox</a></p>`);
-  const thread = t.messages.map((m) => `<div class="card" style="${m.author_type === "staff" ? "border-left:4px solid #6d5dfc" : ""}"><p style="color:var(--text-dim)"><strong>${h(m.author_label)}</strong> · ${m.author_type === "staff" ? "Lummet team" : "Customer"} · ${h(m.created_at || "")}</p><div style="white-space:pre-wrap">${h(m.body)}</div></div>`).join("");
+  const thread = t.messages.map((m) => `<div class="card" style="${m.author_type === "staff" ? "border-left:4px solid #6d5dfc" : ""}"><p style="color:var(--text-dim)"><strong>${h(m.author_label)}</strong> · ${m.author_type === "staff" ? "Lummet team" : "Customer"} · ${h(m.created_at || "")}</p><div style="white-space:pre-wrap">${h(m.body)}</div>${renderAttachments(m.attachments, (fid) => `/api/platform/saas/files/${fid}`)}</div>`).join("");
   return shell(env, admin, t.subject, "saas-support", `<p><a href="/platform/saas/support">&larr; Inbox</a></p>
     <p style="color:var(--text-dim)">${orgLink(t.organization_id, t.organization)} · ${h(t.customer_email || "no email")} · ${h(supportModule.CATEGORIES[t.category] || t.category)} · priority ${h(t.priority)} · ${badge(SUPPORT_STATUS[t.status] || t.status)}</p>
     ${thread}
     <div class="card"><h2>Reply</h2>
       <textarea id="support-reply" rows="6" style="width:100%" maxlength="${supportModule.LIMITS.body}"></textarea><br>
+      <label for="support-files">Attach photos or documents</label> <input type="file" id="support-files" multiple /><br>
       <button class="btn"${onClick("supportReply", [t.id, false])}>Send reply</button>
       <button class="btn"${onClick("supportReply", [t.id, true])}>Send and close</button>
       ${t.status === "closed" ? `<button class="btn"${onClick("act", [`/api/platform/saas/support/${t.id}/status`, { status: "open" }, "Re-open this request?"])}>Re-open</button>` : `<button class="btn"${onClick("act", [`/api/platform/saas/support/${t.id}/status`, { status: "closed" }, "Close without replying?"])}>Close</button>`}
@@ -735,8 +737,16 @@ export async function renderSupportTicketAdminPage(env, admin, id) {
     <script nonce="${nonceToken()}">
       function supportReply(id, close) {
         var body = document.getElementById('support-reply').value;
-        if (!body.trim()) { alert('Write a reply first.'); return; }
-        act('/api/platform/saas/support/' + id + '/reply', { body: body, close: close });
+        var files = Array.prototype.slice.call(document.getElementById('support-files').files || []);
+        if (!body.trim() && !files.length) { alert('Write a reply or attach a file first.'); return; }
+        var ids = [];
+        (function next(i) {
+          if (i >= files.length) { act('/api/platform/saas/support/' + id + '/reply', { body: body, close: close, fileIds: ids }); return; }
+          var fd = new FormData(); fd.append('file', files[i]); fd.append('purpose', 'support'); fd.append('ticketId', id);
+          fetch('/api/platform/saas/files', { method: 'POST', body: fd }).then(function (r) { return r.json(); }).then(function (d) {
+            if (d.success) { ids.push(d.file.id); next(i + 1); } else alert(files[i].name + ': ' + (d.detail || d.error));
+          });
+        })(0);
       }
     </script>`);
 }

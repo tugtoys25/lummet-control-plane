@@ -194,8 +194,17 @@ const NAV = [
       { label: "Domains", href: "/platform/saas/domains", key: "saas-domains" },
       { label: "Deployments", href: "/platform/saas/deployments", key: "saas-deployments" },
       { label: "Webhooks", href: "/platform/saas/webhooks", key: "saas-webhooks" },
-      { label: "Support inbox", href: "/platform/saas/support", key: "saas-support" },
       { label: "Site access", href: "/platform/saas/site-access", key: "saas-site-access" }
+    ]
+  },
+  {
+    id: "saas-care",
+    section: "Customer care",
+    icon: "platform",
+    superAdminOnly: true,
+    items: [
+      { label: "Support inbox", href: "/platform/saas/support", key: "saas-support" },
+      { label: "Announcements", href: "/platform/saas/announcements", key: "saas-announcements" }
     ]
   },
   {

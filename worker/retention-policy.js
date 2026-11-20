@@ -18,6 +18,7 @@ export const FINANCIAL_RETENTION_YEARS = 7;
 /** Rows removed outright when an organization is erased. [table, SQL condition on that table, parameter kind] */
 export const ORG_DELETE = [
   ["automation_alerts", "organization_id = ?"],
+  ["private_files", "organization_id = ?"],
   ["automation_runs", "organization_id = ?"],
   ["automation_rules", "organization_id = ?"],
   ["backup_restores", "organization_id = ?"],
@@ -100,7 +101,9 @@ export const USER_DELETE = [
   ["webauthn_challenges", "user_id = ?"],
   ["customer_totp", "user_id = ?"],
   ["customer_webauthn_credentials", "user_id = ?"],
-  ["organization_users", "user_id = ?"]
+  ["organization_users", "user_id = ?"],
+  ["announcement_recipients", "user_id = ?"],
+  ["announcement_reads", "user_id = ?"]
 ];
 
 /**
@@ -118,5 +121,6 @@ export const OUT_OF_SCOPE = {
   tenant_health: "removed with the tenant registry row", tenant_template_releases: "platform releases", staff_api_tokens: "staff data: CI credentials, stored hashed", tenant_rollouts: "platform releases: which release went to which sites, no personal data", tenant_rollout_items: "erased per site (see SITE_DELETE) and cascades with tenant_rollouts", domain_events: "cascades with domains", domain_zone_events: "cascades with domain_zones",
   site_preset_defaults: "platform settings: which preset new sites start from, per plan or product; staff ids only",
   platform_domains: "platform settings: the domains new sites can run on; staff ids only, no customer data",
+  announcements: "platform messages written by staff to groups of people; the text holds no personal data about one customer; per-person rows (recipients, reads) are removed by eraseUser",
   webhook_deliveries: "cascades with webhooks", support_messages: "cascade with support_tickets (removed by ORG_DELETE); a person's own messages are anonymised by eraseUser", job_steps: "cascades with jobs", tenants: "removed per site, see eraseOrganization"
 };

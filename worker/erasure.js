@@ -13,6 +13,7 @@
 //   - sweepExpiredFinancialRecords: removes retained billing records after the policy period.
 // Nothing here is legal advice; see retention-policy.js.
 // =====================================================
+import * as privateFiles from "./private-files.js";
 import * as publicSiteRepo from "./repositories/public-site.js";
 import * as aftermarketImages from "./aftermarket-images.js";
 import { createZoneDomainService } from "./zone-domains.js";
@@ -144,6 +145,8 @@ async function deleteExternalResources(env, org, infra) {
   for (const d of await publicSiteRepo.listAftermarketZonesForOrg(env, org.id)) {
     if (await attempt(`aftermarket_zone:${d.id}`, () => infra.deleteZone(env, d.cf_zone_id))) await publicSiteRepo.patchAftermarketZone(env, d.id, { cf_zone_id: null });
   }
+  // Private files (support attachments): remove the stored objects before the rows go with ORG_DELETE.
+  await attempt(`private_files:${org.id}`, () => privateFiles.purgeOrganization(env, org.id));
   const backups = (await env.LUMMET_DB.prepare(`SELECT id, storage_key FROM site_backups WHERE organization_id = ? AND storage_key IS NOT NULL`).bind(org.id).all()).results;
   for (const b of backups) {
     if (!env.BACKUPS) { failures.push({ step: `backup_object:${b.id}`, error: "backup_storage_not_configured" }); continue; }

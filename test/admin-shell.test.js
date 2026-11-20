@@ -24,6 +24,7 @@ const PREVIOUS_HREFS = [
   "/platform/saas/deployments",
   "/platform/saas/webhooks",
   "/platform/saas/support",
+  "/platform/saas/announcements",
   "/platform/saas/api-keys",
   "/platform/saas/backups",
   "/platform/saas/alerts",
@@ -149,7 +150,7 @@ describe("navigation data", () => {
   });
 
   test("Tenants, SaaS and Platform stay super-admin only; permission-gated items keep area and resource", () => {
-    assert.deepEqual(NAV.filter((s) => s.superAdminOnly).map((s) => s.id).sort(), ["platform", "saas", "saas-ops", "tenants"]);
+    assert.deepEqual(NAV.filter((s) => s.superAdminOnly).map((s) => s.id).sort(), ["platform", "saas", "saas-care", "saas-ops", "tenants"]);
     const ai = NAV.flatMap((s) => s.items).find((i) => i.key === "ai-chat");
     assert.equal(ai.href, "/ai");
     assert.equal(ai.area, undefined);

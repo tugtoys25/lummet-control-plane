@@ -63,10 +63,11 @@ test('entries for features the plan lacks are hidden, but never the page being v
   assert.ok(hrefs(viewing).includes('/app/backups'));
 });
 
-test('unbuilt pages are shown disabled, not as links', () => {
+test('Integrations and Support are real pages now, and nothing is left under Coming soon', () => {
   const out = renderCustomerShell(base);
-  assert.match(out, /class="nav-disabled"[^>]*>Integrations/);
-  assert.match(out, /class="nav-disabled"[^>]*>Support/);
+  assert.match(out, /<a href="\/app\/integrations"[^>]*>[^<]*Integrations/);
+  assert.match(out, /<a href="\/app\/support"[^>]*>[^<]*Support/);
+  assert.ok(!out.includes('data-group="coming-soon"') && !out.includes('nav-disabled'));
 });
 
 test('notification badge renders on the nav link and caps at 99+', () => {

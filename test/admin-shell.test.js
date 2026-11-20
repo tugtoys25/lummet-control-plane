@@ -23,6 +23,7 @@ const PREVIOUS_HREFS = [
   "/platform/saas/domains",
   "/platform/saas/deployments",
   "/platform/saas/webhooks",
+  "/platform/saas/support",
   "/platform/saas/api-keys",
   "/platform/saas/backups",
   "/platform/saas/alerts",

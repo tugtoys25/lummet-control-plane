@@ -43,6 +43,8 @@ export const ORG_DELETE = [
   ["usage_events", "organization_id = ?"],
   ["usage_counters", "organization_id = ?"],
   ["webhooks", "organization_id = ?"],            // delivery history cascades with it
+  ["integrations", "organization_id = ?"],        // chat connections; the encrypted destination goes with the row
+  ["support_tickets", "organization_id = ?"],     // the whole conversation; messages cascade with the ticket
   ["site_backups", "organization_id = ?"],
   ["jobs", "organization_id = ?"],                // steps, runs, attempts and logs cascade with it
   ["subscription_access_shadow", "organization_id = ?"],   // billing lifecycle shadow-mode log (no personal data)
@@ -116,5 +118,5 @@ export const OUT_OF_SCOPE = {
   tenant_health: "removed with the tenant registry row", tenant_template_releases: "platform releases", staff_api_tokens: "staff data: CI credentials, stored hashed", tenant_rollouts: "platform releases: which release went to which sites, no personal data", tenant_rollout_items: "erased per site (see SITE_DELETE) and cascades with tenant_rollouts", domain_events: "cascades with domains", domain_zone_events: "cascades with domain_zones",
   site_preset_defaults: "platform settings: which preset new sites start from, per plan or product; staff ids only",
   platform_domains: "platform settings: the domains new sites can run on; staff ids only, no customer data",
-  webhook_deliveries: "cascades with webhooks", job_steps: "cascades with jobs", tenants: "removed per site, see eraseOrganization"
+  webhook_deliveries: "cascades with webhooks", support_messages: "cascade with support_tickets (removed by ORG_DELETE); a person's own messages are anonymised by eraseUser", job_steps: "cascades with jobs", tenants: "removed per site, see eraseOrganization"
 };

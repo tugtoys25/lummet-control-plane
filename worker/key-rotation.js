@@ -22,6 +22,7 @@ import { encryptSecret, decryptSecret, activeKeyId, previousKeyId, keyIdOf, aadF
 export const ENCRYPTED_TARGETS = [
   { table: "tenant_api_credentials", pk: "id", bind: "credential_id", enc: "encrypted_secret", iv: "secret_iv" },
   { table: "webhooks", pk: "id", enc: "encrypted_secret", iv: "secret_iv" },
+  { table: "integrations", pk: "id", enc: "encrypted_secret", iv: "secret_iv" },
   { table: "customer_totp", pk: "user_id", enc: "encrypted_secret", iv: "secret_iv" },
   { table: "lummet_admin_totp", pk: "admin_id", enc: "encrypted_secret", iv: "secret_iv" },
   { table: "organization_sso_settings", pk: "organization_id", enc: "encrypted_client_secret", iv: "client_secret_iv" },

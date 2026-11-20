@@ -21,6 +21,7 @@ import * as platformSettings from "../../platform-settings.js";
 import * as billingGateways from "../../billing-gateways.js";
 import { renderPlanCatalogPage } from "./plan-catalog-admin.js";
 import { renderBrandingSection } from "./portal-branding.js";
+import * as supportModule from "../../support.js";
 
 const money = (c) => (c == null ? "custom" : `$${(c / 100).toFixed(2)}`);
 // Round 6.1B: revenue is shown with its own currency code and is never summed across currencies. Unknown is "n/a", never zero.
@@ -703,4 +704,39 @@ export async function renderRevenueAnalyticsPage(env, admin, { trialPage: rawTri
     <h3>Finance unit-cost settings</h3>${financeForm}
     <h2>Recent trial funnel records</h2>${list(trialRows, "trials")}${analyticsPager("trialPage", trialPage, trialRows.length > 20)}
     <h2>Recent activation records</h2>${list(activationRows, "activation")}${analyticsPager("activationPage", activationPage, activationRows.length > 20)}`);
+}
+
+
+// ---- Support inbox: customer tickets ----
+const SUPPORT_STATUS = { open: "Waiting for us", answered: "Answered", closed: "Closed" };
+export async function renderSupportInboxPage(env, admin, { status = "", page: rawPage } = {}) {
+  const page = pageNumber(rawPage);
+  const { rows, hasMore } = paged(await supportModule.listAllTickets(env, { status, ...pageArgs(page) }));
+  return shell(env, admin, "Support inbox", "saas-support", `<p style="color:var(--text-dim)">Customer requests, most urgent first. "Waiting for us" tickets are listed at the top. A reply emails the person who wrote the request.</p>
+    ${statusFilter(status, supportModule.STATUSES)}
+    ${table(["Request", "Organization", "Topic", "Priority", "Status", "Messages", "Updated"], rows.map((t) => [
+      `<a href="/platform/saas/support/${h(t.id)}">${h(t.subject)}</a>`, orgLink(t.organization_id, t.organization), h(supportModule.CATEGORIES[t.category] || t.category),
+      h(supportModule.PRIORITIES[t.priority] || t.priority), badge(SUPPORT_STATUS[t.status] || t.status), h(t.message_count), h(t.updated_at || "")]), "No support requests.")}${pager("/platform/saas/support", { status }, page, hasMore)}`);
+}
+
+export async function renderSupportTicketAdminPage(env, admin, id) {
+  const t = await supportModule.getTicketForStaff(env, id);
+  if (!t) return shell(env, admin, "Support request", "saas-support", `<p>That request was not found.</p><p><a href="/platform/saas/support">Back to the inbox</a></p>`);
+  const thread = t.messages.map((m) => `<div class="card" style="${m.author_type === "staff" ? "border-left:4px solid #6d5dfc" : ""}"><p style="color:var(--text-dim)"><strong>${h(m.author_label)}</strong> · ${m.author_type === "staff" ? "Lummet team" : "Customer"} · ${h(m.created_at || "")}</p><div style="white-space:pre-wrap">${h(m.body)}</div></div>`).join("");
+  return shell(env, admin, t.subject, "saas-support", `<p><a href="/platform/saas/support">&larr; Inbox</a></p>
+    <p style="color:var(--text-dim)">${orgLink(t.organization_id, t.organization)} · ${h(t.customer_email || "no email")} · ${h(supportModule.CATEGORIES[t.category] || t.category)} · priority ${h(t.priority)} · ${badge(SUPPORT_STATUS[t.status] || t.status)}</p>
+    ${thread}
+    <div class="card"><h2>Reply</h2>
+      <textarea id="support-reply" rows="6" style="width:100%" maxlength="${supportModule.LIMITS.body}"></textarea><br>
+      <button class="btn"${onClick("supportReply", [t.id, false])}>Send reply</button>
+      <button class="btn"${onClick("supportReply", [t.id, true])}>Send and close</button>
+      ${t.status === "closed" ? `<button class="btn"${onClick("act", [`/api/platform/saas/support/${t.id}/status`, { status: "open" }, "Re-open this request?"])}>Re-open</button>` : `<button class="btn"${onClick("act", [`/api/platform/saas/support/${t.id}/status`, { status: "closed" }, "Close without replying?"])}>Close</button>`}
+    </div>
+    <script nonce="${nonceToken()}">
+      function supportReply(id, close) {
+        var body = document.getElementById('support-reply').value;
+        if (!body.trim()) { alert('Write a reply first.'); return; }
+        act('/api/platform/saas/support/' + id + '/reply', { body: body, close: close });
+      }
+    </script>`);
 }

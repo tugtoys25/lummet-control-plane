@@ -81,6 +81,7 @@ const NAV = [
     icon: "bolt",
     items: [
       { label: "Automations", href: "/app/automations", key: "automations" },
+      { label: "Integrations", href: "/app/integrations", key: "integrations" },
       { label: "API & webhooks", href: "/app/developer", key: "developer" }
     ]
   },
@@ -90,6 +91,7 @@ const NAV = [
     icon: "team",
     items: [
       { label: "Team", href: "/app/team", key: "team" },
+      { label: "Support", href: "/app/support", key: "support" },
       { label: "Sessions", href: "/app/sessions", key: "sessions" },
       { label: "Billing", href: "/app/billing", key: "billing" },
       { label: "Usage & AI", href: "/app/usage", key: "usage" },
@@ -100,7 +102,8 @@ const NAV = [
   }
 ];
 
-const COMING_SOON = ["Integrations", "Support"];
+// Pages that are planned but not built yet are listed here and shown disabled. Empty now: Integrations and Support are live.
+const COMING_SOON = [];
 
 function badgeText(count) {
   const n = Number(count) || 0;
@@ -146,7 +149,7 @@ function renderNav(activeKey, hiddenNavKeys = [], navBadges = {}) {
       </details>`;
   }).filter(Boolean);
 
-  const soon = `
+  const soon = COMING_SOON.length ? `
       <details class="nav-group" data-group="coming-soon">
         <summary>
           <span class="icon group-icon">${ICONS.layout}</span>
@@ -157,7 +160,7 @@ function renderNav(activeKey, hiddenNavKeys = [], navBadges = {}) {
         <div class="nav-links">
           ${COMING_SOON.map((label) => `<span class="nav-disabled" aria-disabled="true">${escapeHtml(label)}<em>soon</em></span>`).join("")}
         </div>
-      </details>`;
+      </details>` : "";
 
   return groups.join("") + soon;
 }

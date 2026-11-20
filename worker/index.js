@@ -140,11 +140,15 @@ import { handlePlanCatalogRoute } from "./plan-catalog-routes.js";
 import { qrForText } from "./qr.js";
 import { renderDeploymentsPage as renderCustomerDeploymentsPage, renderDeploymentCards, deploymentsAreBusy } from "./views/customer-pages/deployments.js";
 import { renderDeveloperPage } from "./views/customer-pages/developer.js";
+import { renderIntegrationsPage as renderCustomerIntegrationsPage } from "./views/customer-pages/integrations.js";
+import { renderSupportList as renderCustomerSupportList, renderSupportTicket as renderCustomerSupportTicket } from "./views/customer-pages/support.js";
 import { renderBackupsPage } from "./views/customer-pages/backups.js";
 import { renderAutomationsPage } from "./views/customer-pages/automations.js";
 import { renderOrgSettingsPage } from "./views/customer-pages/settings.js";
 import * as apiKeys from "./api-keys.js";
 import * as webhooksModule from "./webhooks.js";
+import * as integrationsModule from "./integrations.js";
+import * as supportModule from "./support.js";
 import { searchOrganization } from "./search.js";
 import { exportOrganizationData } from "./export.js";
 import * as totp from "./totp.js";
@@ -168,7 +172,7 @@ import * as staffSaas from "./staff-saas.js";
 import * as revenueAnalytics from "./revenue-analytics.js";
 import {
   renderSaasOverview, renderRevenueAnalyticsPage, renderOrganizationsPage, renderOrganizationDetailPage, renderSubscriptionsPage,
-  renderPlansPage, renderJobsPage, renderJobDetailPage, renderEmailPage, renderPlatformSettingsPage, renderNotificationsPage, renderTenantTemplatePage, renderCouponsPage, renderOpsAlertsPage, renderServerErrorsPage, renderCpBackupsPage, renderKeyRotationPage, renderReconciliationPage, renderDomainsAdminPage, renderDeploymentsAdminPage, renderWebhooksAdminPage, renderApiKeysAdminPage, renderBackupsAdminPage
+  renderPlansPage, renderJobsPage, renderJobDetailPage, renderEmailPage, renderPlatformSettingsPage, renderNotificationsPage, renderTenantTemplatePage, renderCouponsPage, renderOpsAlertsPage, renderServerErrorsPage, renderCpBackupsPage, renderKeyRotationPage, renderReconciliationPage, renderDomainsAdminPage, renderDeploymentsAdminPage, renderWebhooksAdminPage, renderSupportInboxPage, renderSupportTicketAdminPage, renderApiKeysAdminPage, renderBackupsAdminPage
 } from "./views/pages/saas-admin.js";
 import { renderMediaLibraryPage } from "./views/pages/portal-branding.js";
 import { backups } from "./backups.js";
@@ -2679,6 +2683,66 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return json({ success: true, data: result.data });
           }
 
+          // Integrations (Slack, Discord, Teams, Telegram): admins only. The destination is a secret and is never returned.
+          if (subPath === "/integrations") {
+            const guard = await requireOrgRole(organizationId, "admin");
+            if (guard) return guard;
+            if (method === "GET") return json({ success: true, data: await integrationsModule.listIntegrations(env, organizationId), providers: integrationsModule.PROVIDERS, validEventTypes: integrationsModule.EVENT_TYPES });
+            if (method === "POST") {
+              const body = await request.json().catch(() => ({}));
+              const result = await integrationsModule.createIntegration(env, { organizationId, provider: body.provider, name: body.name, eventTypes: body.eventTypes, target: body.target || {}, actorUserId: customer.id });
+              await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "integration", resourceId: result.ok ? result.id : null, action: "create", success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
+              if (!result.ok) return json({ success: false, error: result.error, invalidTypes: result.invalidTypes }, result.status);
+              return json({ success: true, id: result.id });
+            }
+          }
+          const integrationMatch = subPath.match(/^\/integrations\/([^/]+)(\/test)?$/);
+          if (integrationMatch) {
+            const guard = await requireOrgRole(organizationId, "admin");
+            if (guard) return guard;
+            const [, integrationId, isTest] = integrationMatch;
+            let result = null, action = null;
+            if (isTest && method === "POST") { result = await integrationsModule.sendTest(env, organizationId, integrationId); action = "test"; }
+            else if (!isTest && method === "DELETE") { result = await integrationsModule.deleteIntegration(env, organizationId, integrationId); action = "delete"; }
+            else if (!isTest && method === "PATCH") { const body = await request.json().catch(() => ({})); result = await integrationsModule.updateIntegration(env, organizationId, integrationId, { status: body.status, eventTypes: body.eventTypes, name: body.name }); action = "update"; }
+            if (result) {
+              await logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, resource: "integration", resourceId: integrationId, action, success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash });
+              if (!result.ok) return json({ success: false, error: result.error }, result.status);
+              return json({ success: true });
+            }
+          }
+
+          // Support: every member of the organization can read and write its tickets.
+          if (subPath === "/support/tickets" || subPath.startsWith("/support/tickets/")) {
+            const guard = await requireOrgRole(organizationId, "viewer");
+            if (guard) return guard;
+            const label = customer.name || customer.email || "Customer";
+            if (subPath === "/support/tickets" && method === "GET") return json({ success: true, data: await supportModule.listTickets(env, organizationId, { status: new URL(request.url).searchParams.get("status") || undefined }) });
+            if (subPath === "/support/tickets" && method === "POST") {
+              const body = await request.json().catch(() => ({}));
+              const result = await supportModule.createTicket(env, { organizationId, customerUserId: customer.id, authorLabel: label, siteId: body.siteId || null, subject: body.subject, body: body.body, category: body.category, priority: body.priority });
+              if (!result.ok) return json({ success: false, error: result.error }, result.status);
+              return json({ success: true, id: result.id });
+            }
+            const tm = subPath.match(/^\/support\/tickets\/([^/]+)(?:\/(reply|status))?$/);
+            if (tm) {
+              const [, ticketId, verb] = tm;
+              if (!verb && method === "GET") { const t = await supportModule.getTicket(env, organizationId, ticketId); return t ? json({ success: true, data: t }) : json({ success: false, error: "not_found" }, 404); }
+              if (verb === "reply" && method === "POST") {
+                const body = await request.json().catch(() => ({}));
+                const result = await supportModule.customerReply(env, organizationId, ticketId, { authorLabel: label, body: body.body });
+                if (!result.ok) return json({ success: false, error: result.error }, result.status);
+                return json({ success: true });
+              }
+              if (verb === "status" && method === "POST") {
+                const body = await request.json().catch(() => ({}));
+                const result = await supportModule.customerSetStatus(env, organizationId, ticketId, body.status);
+                if (!result.ok) return json({ success: false, error: result.error }, result.status);
+                return json({ success: true });
+              }
+            }
+          }
+
           // In-app notifications (the automation_alerts inbox): any member reads, analyst+ acknowledges/resolves.
           if (method === "GET" && subPath === "/notifications") {
             const status = new URL(request.url).searchParams.get("status") === "all" ? "all" : "open";
@@ -3229,7 +3293,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         // another organization of the same person, which is checked on its own list.
         // The organization row and the plan's feature flags do not depend on the IP verdict, so they are read at the same time (a denied
         // visitor simply never uses them); that removes two round trips from the start of every portal page.
-        const [portalIpVerdict, activeOrg, [hasBackups, hasAutomations, analyticsLevel, hasReports, hasAffiliate, hasAlerts, openNotifications]] = await Promise.all([
+        const [portalIpVerdict, activeOrg, [hasBackups, hasAutomations, analyticsLevel, hasReports, hasAffiliate, hasAlerts, openNotifications, supportAnswered]] = await Promise.all([
           orgSecurityPolicy.evaluateOrgIpAccess(env, request, activeOrgId),
           organizations.getOrganization(env, activeOrgId),
           Promise.all([
@@ -3239,7 +3303,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             entitlementsService.requireEntitlement(env, activeOrgId, "reports.enabled"),
             entitlementsService.requireEntitlement(env, activeOrgId, "affiliate.enabled"),
             entitlementsService.requireEntitlement(env, activeOrgId, "alerts.enabled"),
-            notificationsRepo.countOpen(env, activeOrgId)
+            notificationsRepo.countOpen(env, activeOrgId),
+            supportModule.openCountForOrg(env, activeOrgId).catch(() => 0)
           ])
         ]);
         if (portalIpVerdict.wouldDeny && !portalIpVerdict.denied) console.log(JSON.stringify({ msg: "org_ip_allowlist_would_deny", organizationId: activeOrgId, mode: portalIpVerdict.mode }));
@@ -3257,7 +3322,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // Sessions page (H.5): shown to owners and admins only, and only while CUSTOMER_SESSION_ADMIN is not off.
           ...(portalSessionsVisible ? [] : ["sessions"])
         ];
-        const shell = (opts) => renderCustomerShell({ hiddenNavKeys, securityLink: customer2faEnrollMode(env) === "on", navBadges: { notifications: openNotifications }, ...opts });
+        const shell = (opts) => renderCustomerShell({ hiddenNavKeys, securityLink: customer2faEnrollMode(env) === "on", navBadges: { notifications: openNotifications, support: supportAnswered }, ...opts });
         const myMembership = myOrgs.find((o) => o.id === activeOrgId);
         const canManage = myMembership ? roleAtLeast(myMembership.my_role, "admin") : false;
 
@@ -3393,6 +3458,20 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               bodyHtml: renderCustomerDeploymentsPage({ sites: sitesList, deploymentsBySite, latestVersion: latestByLine.casino || null, latestByLine, canManage, organizationId: activeOrgId })
             })
           );
+        }
+
+        if (path === "/app/integrations") {
+          const list = canManage ? await integrationsModule.listIntegrations(env, activeOrgId) : [];
+          return html(shell({ title: "Integrations", activeKey: "integrations", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId, bodyHtml: renderCustomerIntegrationsPage({ integrations: list, canManage }) }));
+        }
+
+        if (path === "/app/support" || /^\/app\/support\/[^/]+$/.test(path)) {
+          const ticketId = path === "/app/support" ? null : path.split("/")[3];
+          if (!activeOrgId) return html(shell({ title: "Support", activeKey: "support", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId, bodyHtml: "<h1>Support</h1><div class=\"card\"><p class=\"empty\">Create an organization first.</p></div>" }));
+          const body = ticketId
+            ? renderCustomerSupportTicket({ ticket: await supportModule.getTicket(env, activeOrgId, ticketId) })
+            : renderCustomerSupportList({ tickets: await supportModule.listTickets(env, activeOrgId), sites: await sites.listSitesForOrganization(env, activeOrgId) });
+          return html(shell({ title: "Support", activeKey: "support", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId, bodyHtml: body }));
         }
 
         if (path === "/app/developer") {
@@ -4705,6 +4784,15 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           }
           const staffBody = async () => (await request.json().catch(() => ({})));
 
+          // Support inbox (customer tickets). Super-admin only like every route here; every write is audited.
+          const supportStaff = matchPath("/api/platform/saas/support/:id/:verb", path);
+          if (supportStaff && method === "POST") {
+            const b = await staffBody();
+            const ticketOrgId = await supportModule.ticketOrganizationId(env, supportStaff.id);
+            if (supportStaff.verb === "reply") return staffAudit("support_ticket", supportStaff.id, "staff_reply", await supportModule.staffReply(env, supportStaff.id, { staffLabel: admin.name || admin.email || "Lummet support", body: b.body, close: b.close === true }), ticketOrgId);
+            if (supportStaff.verb === "status") return staffAudit("support_ticket", supportStaff.id, `staff_set_status:${b.status}`, await supportModule.staffSetStatus(env, supportStaff.id, b.status), ticketOrgId);
+          }
+
           // Portal branding and the control plane's media library (migration 0096). Super-admin only (gate above), every write audited.
           const portalBrandingResponse = await handlePortalBrandingRoute({ env, request, url, method, path, admin, requestId, ipHash, json, logAudit });
           if (portalBrandingResponse) return portalBrandingResponse;
@@ -5671,6 +5759,9 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas/errors") return html(await renderServerErrorsPage(env, admin));
         if (path === "/platform/saas/domains") return html(await renderDomainsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/deployments") return html(await renderDeploymentsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
+        if (path === "/platform/saas/support") return html(await renderSupportInboxPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
+        const supportTicketPage = path.match(/^\/platform\/saas\/support\/([^/]+)$/);
+        if (supportTicketPage) return html(await renderSupportTicketAdminPage(env, admin, supportTicketPage[1]));
         if (path === "/platform/saas/webhooks") return html(await renderWebhooksAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/api-keys") return html(await renderApiKeysAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/backups") return html(await renderBackupsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));

@@ -18,6 +18,7 @@ import * as aftermarketImages from "./aftermarket-images.js";
 import { createZoneDomainService } from "./zone-domains.js";
 import * as dohResolver from "./dns-doh.js";
 import * as policy from "./retention-policy.js";
+import * as supportModule from "./support.js";
 import { verifyPassword, hashPassword } from "./auth.js";
 import * as cloudflareProvider from "./infra-cloudflare.js";
 import { routeZoneId } from "./repositories/site-resources.js";
@@ -54,6 +55,8 @@ export async function eraseUser(env, userId) {
   // Public contact/demo submissions are not linked to an account, so they are matched by the address the person used.
   counts.inquiries = await deleteWhere(env, "lummet_inquiries", "lower(email) = lower(?)", user.email);
   await env.LUMMET_DB.prepare(`UPDATE email_outbox SET to_email = '[erased]', subject = '[erased]', body_encrypted = NULL, body_iv = NULL WHERE to_email = ?`).bind(user.email).run();
+  // Support conversations stay with the organization, but the person's name or address is removed from the messages they wrote.
+  await supportModule.anonymiseCustomer(env, userId);
   await scrubAudit(env, "customer_user_id = ?", userId);
 
   // Tombstone: the id stays (so references in invoices, audit rows and "created by" columns remain

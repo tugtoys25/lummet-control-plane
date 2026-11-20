@@ -16,6 +16,7 @@
 
 import { checkOutboundUrlResolved } from "./url-safety.js";
 import { runAutomations } from "./automations.js";
+import { dispatchIntegrations } from "./integrations.js";
 import { encryptSecret, decryptSecret, generateSecret, aadFor } from "./crypto.js";
 import * as deliveries from "./repositories/webhook-deliveries.js";
 
@@ -147,6 +148,8 @@ export async function dispatchEvent(env, organizationId, eventType, data) {
   // Automation rules (worker/automations.js) fire from the same events.
   // Automation actions never call dispatchEvent, so this cannot loop.
   await runAutomations(env, organizationId, eventType, data).catch(() => {});
+  // Chat integrations (Slack, Discord, Teams, Telegram) are told about the same event. They never throw.
+  await dispatchIntegrations(env, organizationId, eventType, data).catch(() => {});
   try {
     const result = await env.LUMMET_DB.prepare(
       `SELECT * FROM webhooks WHERE organization_id = ? AND status = 'active'`

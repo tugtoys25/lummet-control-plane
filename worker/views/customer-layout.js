@@ -91,6 +91,7 @@ const NAV = [
     icon: "team",
     items: [
       { label: "Team", href: "/app/team", key: "team" },
+      { label: "Announcements", href: "/app/announcements", key: "announcements" },
       { label: "Support", href: "/app/support", key: "support" },
       { label: "Sessions", href: "/app/sessions", key: "sessions" },
       { label: "Billing", href: "/app/billing", key: "billing" },

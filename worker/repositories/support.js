@@ -12,10 +12,10 @@ export async function answeredCount(env, organizationId) {
 export async function siteInOrganization(env, organizationId, siteId) {
   return env.LUMMET_DB.prepare(`SELECT id FROM sites WHERE id = ? AND organization_id = ?`).bind(siteId, organizationId).first();
 }
-export async function insertWithMessage(env, { id, organizationId, customerUserId, siteId, subject, category, priority, authorLabel, body }) {
+export async function insertWithMessage(env, { id, messageId, organizationId, customerUserId, siteId, subject, category, priority, authorLabel, body }) {
   await env.LUMMET_DB.batch([
     env.LUMMET_DB.prepare(`INSERT INTO support_tickets (id, organization_id, customer_user_id, site_id, subject, category, priority) VALUES (?, ?, ?, ?, ?, ?, ?)`).bind(id, organizationId, customerUserId || null, siteId || null, subject, category, priority),
-    env.LUMMET_DB.prepare(`INSERT INTO support_messages (id, ticket_id, author_type, author_label, body) VALUES (?, ?, 'customer', ?, ?)`).bind(crypto.randomUUID(), id, authorLabel, body),
+    env.LUMMET_DB.prepare(`INSERT INTO support_messages (id, ticket_id, author_type, author_label, body) VALUES (?, ?, 'customer', ?, ?)`).bind(messageId || crypto.randomUUID(), id, authorLabel, body),
   ]);
 }
 export async function listForOrganization(env, organizationId, status) {
@@ -33,9 +33,9 @@ export async function messages(env, ticketId) {
   return r.results || [];
 }
 /** Adds a message and sets the ticket's status in one step (a customer reply re-opens, a staff reply answers or closes). */
-export async function addMessage(env, { ticketId, authorType, authorLabel, body, status }) {
+export async function addMessage(env, { messageId, ticketId, authorType, authorLabel, body, status }) {
   await env.LUMMET_DB.batch([
-    env.LUMMET_DB.prepare(`INSERT INTO support_messages (id, ticket_id, author_type, author_label, body) VALUES (?, ?, ?, ?, ?)`).bind(crypto.randomUUID(), ticketId, authorType, authorLabel, body),
+    env.LUMMET_DB.prepare(`INSERT INTO support_messages (id, ticket_id, author_type, author_label, body) VALUES (?, ?, ?, ?, ?)`).bind(messageId || crypto.randomUUID(), ticketId, authorType, authorLabel, body),
     env.LUMMET_DB.prepare(`UPDATE support_tickets SET status = ?, closed_at = ${status === "closed" ? "CURRENT_TIMESTAMP" : "NULL"}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(status, ticketId),
   ]);
 }

@@ -149,6 +149,10 @@ import * as apiKeys from "./api-keys.js";
 import * as webhooksModule from "./webhooks.js";
 import * as integrationsModule from "./integrations.js";
 import * as supportModule from "./support.js";
+import * as privateFiles from "./private-files.js";
+import * as announcementsModule from "./announcements.js";
+import { renderCustomerAnnouncementsPage } from "./views/customer-pages/announcements.js";
+import { renderAnnouncementsAdminPage } from "./views/pages/announcements-admin.js";
 import { searchOrganization } from "./search.js";
 import { exportOrganizationData } from "./export.js";
 import * as totp from "./totp.js";
@@ -856,6 +860,16 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             "X-Content-Type-Options": "nosniff"
           }
         });
+      }
+
+      // Announcement files: /f/:id/:signature. The signature is made by this Worker, so only links we issued work; the file is a download
+      // (or an image) with a locked-down content type. Only files that belong to a sent announcement are reachable.
+      {
+        const fm = /^\/f\/([0-9a-f-]{36})\/([0-9a-f]{32})$/.exec(url.pathname);
+        if (fm && (request.method === "GET" || request.method === "HEAD")) {
+          const row = await privateFiles.publicFile(env, fm[1], fm[2]);
+          return row ? privateFiles.fileResponse(env, row) : new Response("Not found", { status: 404 });
+        }
       }
 
       // Portal branding, public side: /brand-media/* (the control plane's own media library), /favicon.ico and /site.webmanifest.
@@ -2712,6 +2726,25 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             }
           }
 
+          // Support files: upload (multipart "file") and download. Only members of the organization can reach them.
+          if (subPath === "/support/files" && method === "POST") {
+            const guard = await requireOrgRole(organizationId, "viewer");
+            if (guard) return guard;
+            let form = null; try { form = await request.formData(); } catch (_) { form = null; }
+            const r = await privateFiles.uploadFile(env, { file: form && form.get("file"), purpose: "support", who: { kind: "customer", id: String(customer.id), organizationId } });
+            return r.ok ? json({ success: true, file: r.file }, 201) : json({ success: false, error: r.error, detail: r.detail }, r.status);
+          }
+          {
+            const fm = subPath.match(/^\/support\/files\/([0-9a-f-]{36})$/);
+            if (fm && method === "GET") {
+              const guard = await requireOrgRole(organizationId, "viewer");
+              if (guard) return guard;
+              const row = await privateFiles.getFile(env, fm[1]);
+              if (!row || row.purpose !== "support" || row.organization_id !== organizationId) return json({ success: false, error: "not_found" }, 404);
+              return privateFiles.fileResponse(env, row);
+            }
+          }
+
           // Support: every member of the organization can read and write its tickets.
           if (subPath === "/support/tickets" || subPath.startsWith("/support/tickets/")) {
             const guard = await requireOrgRole(organizationId, "viewer");
@@ -2720,7 +2753,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             if (subPath === "/support/tickets" && method === "GET") return json({ success: true, data: await supportModule.listTickets(env, organizationId, { status: new URL(request.url).searchParams.get("status") || undefined }) });
             if (subPath === "/support/tickets" && method === "POST") {
               const body = await request.json().catch(() => ({}));
-              const result = await supportModule.createTicket(env, { organizationId, customerUserId: customer.id, authorLabel: label, siteId: body.siteId || null, subject: body.subject, body: body.body, category: body.category, priority: body.priority });
+              const result = await supportModule.createTicket(env, { organizationId, customerUserId: customer.id, authorLabel: label, siteId: body.siteId || null, subject: body.subject, body: body.body, category: body.category, priority: body.priority, fileIds: body.fileIds });
               if (!result.ok) return json({ success: false, error: result.error }, result.status);
               return json({ success: true, id: result.id });
             }
@@ -2730,7 +2763,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               if (!verb && method === "GET") { const t = await supportModule.getTicket(env, organizationId, ticketId); return t ? json({ success: true, data: t }) : json({ success: false, error: "not_found" }, 404); }
               if (verb === "reply" && method === "POST") {
                 const body = await request.json().catch(() => ({}));
-                const result = await supportModule.customerReply(env, organizationId, ticketId, { authorLabel: label, body: body.body });
+                const result = await supportModule.customerReply(env, organizationId, ticketId, { authorLabel: label, body: body.body, fileIds: body.fileIds, customerUserId: customer.id });
                 if (!result.ok) return json({ success: false, error: result.error }, result.status);
                 return json({ success: true });
               }
@@ -3015,6 +3048,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         // The same tick drives the durable-job safety net and webhook retries (docs/DURABLE_JOBS.md).
         const jobSweep = await jobRunner.sweepJobs(env, { launch: (p) => ctx.waitUntil(p.catch(() => {})), wait: false }).catch(() => ({ results: [] }));
         ctx.waitUntil(webhooksModule.sweepDeliveries(env).catch(() => {}));
+        ctx.waitUntil(announcementsModule.processEmails(env).catch(() => {}));
+        ctx.waitUntil(privateFiles.purgeOrphans(env).catch(() => {}));
         // Custom domains waiting for nameserver delegation, certificates or routing (docs/CUSTOM_DOMAINS.md).
         ctx.waitUntil(zoneDomains.sweep(env, { redeploy: makeDomainRedeploy(env, ctx) }).catch(() => {}));
         // Domains for sale: sellers' nameserver claims waiting for delegation, and zones of domains no longer listed.
@@ -3293,7 +3328,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         // another organization of the same person, which is checked on its own list.
         // The organization row and the plan's feature flags do not depend on the IP verdict, so they are read at the same time (a denied
         // visitor simply never uses them); that removes two round trips from the start of every portal page.
-        const [portalIpVerdict, activeOrg, [hasBackups, hasAutomations, analyticsLevel, hasReports, hasAffiliate, hasAlerts, openNotifications, supportAnswered]] = await Promise.all([
+        const [portalIpVerdict, activeOrg, [hasBackups, hasAutomations, analyticsLevel, hasReports, hasAffiliate, hasAlerts, openNotifications, supportAnswered, unreadAnnouncements]] = await Promise.all([
           orgSecurityPolicy.evaluateOrgIpAccess(env, request, activeOrgId),
           organizations.getOrganization(env, activeOrgId),
           Promise.all([
@@ -3304,7 +3339,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             entitlementsService.requireEntitlement(env, activeOrgId, "affiliate.enabled"),
             entitlementsService.requireEntitlement(env, activeOrgId, "alerts.enabled"),
             notificationsRepo.countOpen(env, activeOrgId),
-            supportModule.openCountForOrg(env, activeOrgId).catch(() => 0)
+            supportModule.openCountForOrg(env, activeOrgId).catch(() => 0),
+            announcementsModule.unreadCount(env, portalCustomer.id)
           ])
         ]);
         if (portalIpVerdict.wouldDeny && !portalIpVerdict.denied) console.log(JSON.stringify({ msg: "org_ip_allowlist_would_deny", organizationId: activeOrgId, mode: portalIpVerdict.mode }));
@@ -3322,7 +3358,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // Sessions page (H.5): shown to owners and admins only, and only while CUSTOMER_SESSION_ADMIN is not off.
           ...(portalSessionsVisible ? [] : ["sessions"])
         ];
-        const shell = (opts) => renderCustomerShell({ hiddenNavKeys, securityLink: customer2faEnrollMode(env) === "on", navBadges: { notifications: openNotifications, support: supportAnswered }, ...opts });
+        const shell = (opts) => renderCustomerShell({ hiddenNavKeys, securityLink: customer2faEnrollMode(env) === "on", navBadges: { notifications: openNotifications, support: supportAnswered, announcements: unreadAnnouncements }, ...opts });
         const myMembership = myOrgs.find((o) => o.id === activeOrgId);
         const canManage = myMembership ? roleAtLeast(myMembership.my_role, "admin") : false;
 
@@ -3463,6 +3499,11 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (path === "/app/integrations") {
           const list = canManage ? await integrationsModule.listIntegrations(env, activeOrgId) : [];
           return html(shell({ title: "Integrations", activeKey: "integrations", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId, bodyHtml: renderCustomerIntegrationsPage({ integrations: list, canManage }) }));
+        }
+
+        if (path === "/app/announcements") {
+          const items = await announcementsModule.inbox(env, portalCustomer.id);
+          return html(shell({ title: "Announcements", activeKey: "announcements", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId, bodyHtml: renderCustomerAnnouncementsPage({ items }) }));
         }
 
         if (path === "/app/support" || /^\/app\/support\/[^/]+$/.test(path)) {
@@ -4784,12 +4825,45 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           }
           const staffBody = async () => (await request.json().catch(() => ({})));
 
+          // Files staff attach to support replies or announcements (multipart "file" + "purpose" + optional "ticketId"), and download of support files.
+          if (path === "/api/platform/saas/files" && method === "POST") {
+            let form = null; try { form = await request.formData(); } catch (_) { form = null; }
+            const purpose = form && form.get("purpose") === "announcement" ? "announcement" : "support";
+            let organizationId = null;
+            if (purpose === "support") {
+              organizationId = await supportModule.ticketOrganizationId(env, String((form && form.get("ticketId")) || ""));
+              if (!organizationId) return json({ success: false, error: "ticket_required" }, 422);
+            }
+            const r = await privateFiles.uploadFile(env, { file: form && form.get("file"), purpose, who: { kind: "staff", id: String(admin.id), organizationId } });
+            if (r.ok) r.file.url = await privateFiles.signedPath(env, r.file.id);
+            return r.ok ? json({ success: true, file: r.file }, 201) : json({ success: false, error: r.error, detail: r.detail }, r.status);
+          }
+          {
+            const fm = matchPath("/api/platform/saas/files/:id", path);
+            if (fm && method === "GET") {
+              const row = await privateFiles.getFile(env, fm.id);
+              return row ? privateFiles.fileResponse(env, row) : json({ success: false, error: "not_found" }, 404);
+            }
+          }
+          // Announcements: preview who it reaches, then send. Existing automated emails are not involved.
+          if (path === "/api/platform/saas/announcements/preview" && method === "POST") {
+            const b = await request.json().catch(() => ({}));
+            const r = await announcementsModule.preview(env, { kind: b.kind, ref: b.ref, format: b.format, body: b.body });
+            return r.ok ? json({ success: true, ...r }) : json({ success: false, error: r.error, detail: r.detail }, r.status);
+          }
+          if (path === "/api/platform/saas/announcements" && method === "POST") {
+            const b = await request.json().catch(() => ({}));
+            const r = await announcementsModule.send(env, { staff: { id: String(admin.id) }, subject: b.subject, body: b.body, format: b.format, kind: b.kind, ref: b.ref, channels: b.channels, fileIds: b.fileIds });
+            await logAudit(env, { adminId: admin.id, endpoint: path, method, resource: "announcement", resourceId: r.id || null, action: "send", success: r.ok, statusCode: r.ok ? 200 : r.status || 400, errorMessage: r.ok ? null : r.error, requestId, ipHash, reason: r.ok ? `${b.kind}: ${r.recipients} recipients` : undefined });
+            return r.ok ? json({ success: true, id: r.id, recipients: r.recipients, warnings: r.warnings }) : json({ success: false, error: r.error, detail: r.detail }, r.status);
+          }
+
           // Support inbox (customer tickets). Super-admin only like every route here; every write is audited.
           const supportStaff = matchPath("/api/platform/saas/support/:id/:verb", path);
           if (supportStaff && method === "POST") {
             const b = await staffBody();
             const ticketOrgId = await supportModule.ticketOrganizationId(env, supportStaff.id);
-            if (supportStaff.verb === "reply") return staffAudit("support_ticket", supportStaff.id, "staff_reply", await supportModule.staffReply(env, supportStaff.id, { staffLabel: admin.name || admin.email || "Lummet support", body: b.body, close: b.close === true }), ticketOrgId);
+            if (supportStaff.verb === "reply") return staffAudit("support_ticket", supportStaff.id, "staff_reply", await supportModule.staffReply(env, supportStaff.id, { staffLabel: admin.name || admin.email || "Lummet support", staffId: String(admin.id), body: b.body, close: b.close === true, fileIds: b.fileIds }), ticketOrgId);
             if (supportStaff.verb === "status") return staffAudit("support_ticket", supportStaff.id, `staff_set_status:${b.status}`, await supportModule.staffSetStatus(env, supportStaff.id, b.status), ticketOrgId);
           }
 
@@ -5759,6 +5833,7 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas/errors") return html(await renderServerErrorsPage(env, admin));
         if (path === "/platform/saas/domains") return html(await renderDomainsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/deployments") return html(await renderDeploymentsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
+        if (path === "/platform/saas/announcements") return html(await renderAnnouncementsAdminPage(env, admin));
         if (path === "/platform/saas/support") return html(await renderSupportInboxPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         const supportTicketPage = path.match(/^\/platform\/saas\/support\/([^/]+)$/);
         if (supportTicketPage) return html(await renderSupportTicketAdminPage(env, admin, supportTicketPage[1]));
@@ -5926,6 +6001,8 @@ async function runScheduled(event, env, ctx) {
   ctx.waitUntil(erasure.sweepExpiredFinancialRecords(env).catch(() => {}));
   ctx.waitUntil(jobRunner.sweepJobs(env, { launch: (p) => ctx.waitUntil(p.catch(() => {})), wait: false }).catch(() => {}));
   ctx.waitUntil(webhooksModule.sweepDeliveries(env).catch(() => {}));
+  ctx.waitUntil(announcementsModule.processEmails(env).catch(() => {}));
+  ctx.waitUntil(privateFiles.purgeOrphans(env).catch(() => {}));
   ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
   ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
   // Phase 10 A4: retry first-configuration requests that failed or were never applied (backoff, at most 6 attempts, SETUP_RETRY_SWEEP=off disables).

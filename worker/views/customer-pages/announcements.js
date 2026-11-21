@@ -8,7 +8,7 @@ const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Mat
 export function renderCustomerAnnouncementsPage({ items }) {
   const cards = items.map((a) => `<div class="card"${a.unread ? ' style="border-left:4px solid var(--accent,#6d5dfc)"' : ""}>
     <h2>${escapeHtml(a.subject)}${a.unread ? ' <span class="badge badge-active">New</span>' : ""}</h2>
-    <p class="muted">${escapeHtml(a.createdAt || "")}</p>
+    <p class="muted">${escapeHtml(a.createdAt || "")}${a.edited ? " · edited" : ""}</p>
     <div class="announcement-body">${a.bodyHtml}</div>
     ${a.attachments.length ? `<div style="margin-top:10px">${a.attachments.map((f) => f.isImage
       ? `<a href="${escapeHtml(f.url)}" target="_blank" rel="noopener"><img src="${escapeHtml(f.url)}" alt="${escapeHtml(f.filename)}" style="max-width:320px;max-height:240px;border:1px solid #ccc;border-radius:6px;margin:0 8px 8px 0" /></a>`

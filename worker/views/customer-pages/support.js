@@ -83,7 +83,7 @@ export function renderSupportTicket({ ticket }) {
   if (!ticket) return `<h1>Support</h1><div class="card"><p class="empty">That request was not found.</p></div><p><a href="/app/support">Back to support</a></p>`;
   const msgs = ticket.messages.map((m) => `
     <div class="card" style="${m.author_type === "staff" ? "border-left:4px solid var(--accent,#6d5dfc)" : ""}">
-      <p class="muted"><strong>${escapeHtml(m.author_label)}</strong>${m.author_type === "staff" ? " · Lummet team" : ""} · ${escapeHtml(m.created_at || "")}</p>
+      <p class="muted"><strong>${escapeHtml(m.author_label)}</strong>${m.author_type === "staff" ? " · Lummet team" : ""} · ${escapeHtml(m.created_at || "")}${m.edited_at ? " · edited by support" : ""}</p>
       <div style="white-space:pre-wrap">${escapeHtml(m.body)}</div>${renderAttachments(m.attachments, (fid) => `/api/organizations/${ticket.organization_id}/support/files/${fid}`)}</div>`).join("");
   const closed = ticket.status === "closed";
   return `

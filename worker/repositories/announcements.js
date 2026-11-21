@@ -28,7 +28,7 @@ export async function insertAnnouncement(env, a, recipients) {
 }
 export async function pendingRecipients(env, limit) {
   const r = await env.LUMMET_DB.prepare(
-    `SELECT r.announcement_id, r.user_id, r.email, r.attempts, a.subject, a.body_html, a.created_at FROM announcement_recipients r JOIN announcements a ON a.id = r.announcement_id WHERE r.email_status = 'pending' ORDER BY a.created_at, r.rowid LIMIT ?`
+    `SELECT r.announcement_id, r.user_id, r.email, r.attempts, a.subject, a.body_html, a.created_at FROM announcement_recipients r JOIN announcements a ON a.id = r.announcement_id WHERE r.email_status = 'pending' AND a.hidden_at IS NULL ORDER BY a.created_at, r.rowid LIMIT ?`
   ).bind(limit).all();
   return r.results || [];
 }
@@ -37,7 +37,7 @@ export const markRecipient = (env, announcementId, userId, status, bumpAttempts 
 
 export async function listForStaff(env, limit = 50) {
   const r = await env.LUMMET_DB.prepare(
-    `SELECT a.id, a.subject, a.audience_kind, a.audience_label, a.channels, a.recipient_count, a.email_total, a.created_at,
+    `SELECT a.id, a.subject, a.audience_kind, a.audience_label, a.channels, a.recipient_count, a.email_total, a.created_at, a.hidden_at, a.edited_at,
             (SELECT COUNT(*) FROM announcement_recipients r WHERE r.announcement_id = a.id AND r.email_status = 'queued') AS emails_queued,
             (SELECT COUNT(*) FROM announcement_recipients r WHERE r.announcement_id = a.id AND r.email_status = 'failed') AS emails_failed,
             (SELECT COUNT(*) FROM announcement_reads d WHERE d.announcement_id = a.id) AS reads
@@ -47,7 +47,7 @@ export async function listForStaff(env, limit = 50) {
 }
 
 // What a signed-in person sees on the dashboard: the audience rule evaluated for them, newest first.
-const VISIBLE = `a.channels LIKE '%"dashboard"%' AND (
+const VISIBLE = `a.hidden_at IS NULL AND a.channels LIKE '%"dashboard"%' AND (
     a.audience_kind = 'all'
  OR (a.audience_kind = 'user' AND a.audience_ref = @u)
  OR (a.audience_kind = 'organization' AND a.audience_ref IN (SELECT organization_id FROM organization_users WHERE user_id = @u))
@@ -57,7 +57,7 @@ const VISIBLE_ARGS = (userId) => [userId, userId, userId, userId];
 
 export async function listForUser(env, userId, limit = 50) {
   const r = await env.LUMMET_DB.prepare(
-    `SELECT a.id, a.subject, a.body_html, a.created_at, (SELECT 1 FROM announcement_reads d WHERE d.announcement_id = a.id AND d.user_id = ?) AS is_read FROM announcements a WHERE ${VISIBLE} ORDER BY a.created_at DESC, a.rowid DESC LIMIT ?`
+    `SELECT a.id, a.subject, a.body_html, a.created_at, a.edited_at, (SELECT 1 FROM announcement_reads d WHERE d.announcement_id = a.id AND d.user_id = ?) AS is_read FROM announcements a WHERE ${VISIBLE} ORDER BY a.created_at DESC, a.rowid DESC LIMIT ?`
   ).bind(userId, ...VISIBLE_ARGS(userId), limit).all();
   return r.results || [];
 }
@@ -77,3 +77,13 @@ export async function pickers(env) {
   ]);
   return { organizations: o.results || [], sites: s.results || [] };
 }
+
+export const getAnnouncement = (env, id) => env.LUMMET_DB.prepare(`SELECT id, subject, body_html, format, audience_kind, audience_label, channels, hidden_at, edited_at, created_at FROM announcements WHERE id = ?`).bind(id).first();
+export const updateAnnouncement = (env, id, { subject, bodyHtml, format }) => env.LUMMET_DB.prepare(`UPDATE announcements SET subject = ?, body_html = ?, format = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(subject, bodyHtml, format, id).run();
+export const setHidden = (env, id, hidden) => env.LUMMET_DB.prepare(`UPDATE announcements SET hidden_at = ${hidden ? "CURRENT_TIMESTAMP" : "NULL"} WHERE id = ?`).bind(id).run();
+/** Recipients, reads and the row itself (a foreign key cascade would do the first two; they are removed explicitly so it does not depend on it). */
+export const deleteAnnouncement = (env, id) => env.LUMMET_DB.batch([
+  env.LUMMET_DB.prepare(`DELETE FROM announcement_recipients WHERE announcement_id = ?`).bind(id),
+  env.LUMMET_DB.prepare(`DELETE FROM announcement_reads WHERE announcement_id = ?`).bind(id),
+  env.LUMMET_DB.prepare(`DELETE FROM announcements WHERE id = ?`).bind(id),
+]);

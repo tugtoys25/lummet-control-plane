@@ -56,3 +56,13 @@ export async function countPendingFor(env, kind, uploadedBy) {
   const r = await env.LUMMET_DB.prepare(`SELECT COUNT(*) AS n FROM private_files WHERE uploaded_by_kind = ? AND COALESCE(uploaded_by,'') = ? AND message_id IS NULL AND announcement_id IS NULL`).bind(kind, uploadedBy || "").first();
   return r?.n || 0;
 }
+
+export async function keysForMessages(env, messageIds) {
+  if (!messageIds.length) return [];
+  const r = await env.LUMMET_DB.prepare(`SELECT id, r2_key FROM private_files WHERE message_id IN (${marks(messageIds.length)})`).bind(...messageIds).all();
+  return r.results || [];
+}
+export async function keysForAnnouncement(env, announcementId) {
+  const r = await env.LUMMET_DB.prepare(`SELECT id, r2_key FROM private_files WHERE announcement_id = ?`).bind(announcementId).all();
+  return r.results || [];
+}

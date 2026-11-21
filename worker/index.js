@@ -152,7 +152,7 @@ import * as supportModule from "./support.js";
 import * as privateFiles from "./private-files.js";
 import * as announcementsModule from "./announcements.js";
 import { renderCustomerAnnouncementsPage } from "./views/customer-pages/announcements.js";
-import { renderAnnouncementsAdminPage } from "./views/pages/announcements-admin.js";
+import { renderAnnouncementEditPage, renderAnnouncementsAdminPage } from "./views/pages/announcements-admin.js";
 import { searchOrganization } from "./search.js";
 import { exportOrganizationData } from "./export.js";
 import * as totp from "./totp.js";
@@ -4858,12 +4858,26 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return r.ok ? json({ success: true, id: r.id, recipients: r.recipients, warnings: r.warnings }) : json({ success: false, error: r.error, detail: r.detail }, r.status);
           }
 
+          // Manage a sent announcement: edit, hide/show, delete.
+          const announcementStaff = matchPath("/api/platform/saas/announcements/:id/:verb", path);
+          if (announcementStaff && method === "POST") {
+            const b = await staffBody(); const aid = announcementStaff.id;
+            if (announcementStaff.verb === "update") return staffAudit("announcement", aid, "update", await announcementsModule.update(env, aid, { subject: b.subject, body: b.body, format: b.format }));
+            if (announcementStaff.verb === "hide") return staffAudit("announcement", aid, "hide", await announcementsModule.setHidden(env, aid, true));
+            if (announcementStaff.verb === "show") return staffAudit("announcement", aid, "show", await announcementsModule.setHidden(env, aid, false));
+            if (announcementStaff.verb === "delete") return staffAudit("announcement", aid, "delete", await announcementsModule.remove(env, aid));
+          }
+
           // Support inbox (customer tickets). Super-admin only like every route here; every write is audited.
           const supportStaff = matchPath("/api/platform/saas/support/:id/:verb", path);
           if (supportStaff && method === "POST") {
             const b = await staffBody();
             const ticketOrgId = await supportModule.ticketOrganizationId(env, supportStaff.id);
             if (supportStaff.verb === "reply") return staffAudit("support_ticket", supportStaff.id, "staff_reply", await supportModule.staffReply(env, supportStaff.id, { staffLabel: admin.name || admin.email || "Lummet support", staffId: String(admin.id), body: b.body, close: b.close === true, fileIds: b.fileIds }), ticketOrgId);
+            if (supportStaff.verb === "edit-message") return staffAudit("support_message", String(b.messageId || ""), "edit", await supportModule.staffEditMessage(env, supportStaff.id, String(b.messageId || ""), b.body), ticketOrgId);
+            if (supportStaff.verb === "hide-message") return staffAudit("support_message", String(b.messageId || ""), b.hidden === false ? "show" : "hide", await supportModule.staffHideMessage(env, supportStaff.id, String(b.messageId || ""), b.hidden !== false), ticketOrgId);
+            if (supportStaff.verb === "delete-message") return staffAudit("support_message", String(b.messageId || ""), "delete", await supportModule.staffDeleteMessage(env, supportStaff.id, String(b.messageId || "")), ticketOrgId);
+            if (supportStaff.verb === "delete") return staffAudit("support_ticket", supportStaff.id, "delete", await supportModule.staffDeleteTicket(env, supportStaff.id), ticketOrgId);
             if (supportStaff.verb === "status") return staffAudit("support_ticket", supportStaff.id, `staff_set_status:${b.status}`, await supportModule.staffSetStatus(env, supportStaff.id, b.status), ticketOrgId);
           }
 
@@ -5834,6 +5848,8 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas/domains") return html(await renderDomainsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/deployments") return html(await renderDeploymentsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/announcements") return html(await renderAnnouncementsAdminPage(env, admin));
+        const announcementEditPage = path.match(/^\/platform\/saas\/announcements\/([0-9a-f-]{36})$/);
+        if (announcementEditPage) return html(await renderAnnouncementEditPage(env, admin, announcementEditPage[1]));
         if (path === "/platform/saas/support") return html(await renderSupportInboxPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         const supportTicketPage = path.match(/^\/platform\/saas\/support\/([^/]+)$/);
         if (supportTicketPage) return html(await renderSupportTicketAdminPage(env, admin, supportTicketPage[1]));

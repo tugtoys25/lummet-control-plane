@@ -204,3 +204,88 @@ test('abandoned uploads are removed and erasing an organization removes its file
   assert.equal(t.ok, true); assert.equal(await files.purgeOrphans(e, { now: Date.now() + 3 * 86400000 }), 0);
   await files.purgeOrganization(e, a.id); assert.equal(e.PLATFORM_MEDIA.m.size, 0);
 });
+
+// ---------- management by staff ----------
+test('staff can edit, hide, show and delete an announcement; customers see only the current visible version', async () => {
+  const { e, a, viewA } = await world();
+  const up = await files.uploadFile(e, { file: mk('promo.png', PNG), purpose: 'announcement', who: { kind: 'staff', id: '1' } });
+  const sent = await announcements.send(e, { staff: { id: '1' }, subject: 'Original', body: 'First text', format: 'text', kind: 'organization', ref: a.id, channels: ['dashboard', 'email'], fileIds: [up.file.id] });
+  const id = sent.id;
+  const seen = async () => (await announcements.inbox(e, viewA, { markRead: false }));
+  assert.equal((await seen())[0].subject, 'Original');
+  assert.equal((await announcements.update(e, id, { subject: 'Corrected', body: '<p onclick="x()">Better <b>text</b></p><script>x()</script>', format: 'html' })).ok, true);
+  const edited = (await seen())[0]; assert.equal(edited.subject, 'Corrected'); assert.equal(edited.edited, true); assert.ok(!/script|onclick/.test(edited.bodyHtml));
+  assert.equal((await announcements.update(e, id, { subject: 'x', body: 'ok body', format: 'text' })).error, 'subject_required');
+  assert.equal((await announcements.setHidden(e, id, true)).ok, true);
+  assert.equal((await seen()).length, 0); assert.equal(await announcements.unreadCount(e, viewA), 0);
+  assert.equal((await announcements.listForStaff(e)).find((x) => x.id === id).hidden_at !== null, true);   // staff still see it
+  assert.equal((await announcements.setHidden(e, id, false)).ok, true); assert.equal((await seen()).length, 1);
+  const path = await files.signedPath(e, up.file.id); assert.equal((await req(e, 'GET', path)).status, 200);
+  assert.equal((await announcements.remove(e, id)).ok, true);
+  assert.equal((await seen()).length, 0);
+  assert.equal((await req(e, 'GET', path)).status, 404); assert.equal(e.PLATFORM_MEDIA.m.size, 0);
+  assert.equal((await e.LUMMET_DB.prepare('SELECT COUNT(*) AS n FROM announcement_recipients WHERE announcement_id = ?').bind(id).first()).n, 0);
+  assert.equal((await announcements.remove(e, id)).error, 'not_found');
+  assert.equal((await announcements.update(e, 'nope', { subject: 'abc', body: 'abcd', format: 'text' })).error, 'not_found');
+});
+
+test('a hidden announcement sends no further emails', async () => {
+  const { e, a } = await world();
+  const e2 = { ...e }; // make the first batch tiny by hiding before the tick runs
+  const sent = await announcements.send(e, { staff: { id: '1' }, subject: 'Later mail', body: 'Hello', format: 'text', kind: 'organization', ref: a.id, channels: ['email'] });
+  await e.LUMMET_DB.prepare(`UPDATE announcement_recipients SET email_status = 'pending' WHERE announcement_id = ?`).bind(sent.id).run();
+  await e.LUMMET_DB.prepare(`DELETE FROM email_outbox WHERE template = 'announcement'`).run();
+  await announcements.setHidden(e, sent.id, true);
+  assert.equal((await announcements.processEmails(e2)).queued, 0);
+});
+
+test('staff can edit, hide and delete support messages and whole requests', async () => {
+  const e = env(); const a = await signup(e, 'a@example.com', 'Acme');
+  const t = await support.createTicket(e, { organizationId: a.id, customerUserId: a.userId, authorLabel: 'A', subject: 'Help me', body: 'Original question' });
+  const f = await files.uploadFile(e, { file: mk('proof.png', PNG), purpose: 'support', who: { kind: 'staff', id: '7', organizationId: a.id } });
+  await support.staffReply(e, t.id, { staffLabel: 'Team', staffId: '7', body: 'First answer', fileIds: [f.file.id] });
+  const staffView = async () => (await support.getTicketForStaff(e, t.id)).messages;
+  const custView = async () => (await support.getTicket(e, a.id, t.id)).messages;
+  const [m1, m2] = await staffView();
+  assert.equal((await support.staffEditMessage(e, t.id, m2.id, 'Better answer')).ok, true);
+  assert.equal((await custView())[1].body, 'Better answer'); assert.ok((await custView())[1].edited_at);
+  assert.equal((await support.staffEditMessage(e, t.id, m2.id, 'x')).error, 'message_required');
+  assert.equal((await support.staffEditMessage(e, 'other-ticket', m2.id, 'Hijack')).error, 'not_found');
+  assert.equal((await support.staffHideMessage(e, t.id, m1.id, true)).ok, true);
+  assert.equal((await custView()).length, 1); assert.equal((await staffView()).length, 2);
+  assert.equal((await support.listTickets(e, a.id))[0].message_count, 1);
+  assert.equal((await support.staffHideMessage(e, t.id, m1.id, false)).ok, true); assert.equal((await custView()).length, 2);
+  assert.equal((await support.staffDeleteMessage(e, t.id, m2.id)).ok, true);
+  assert.equal(e.PLATFORM_MEDIA.m.size, 0); assert.equal((await staffView()).length, 1);
+  assert.equal((await support.staffDeleteMessage(e, t.id, m1.id)).error, 'last_message');
+  const f2 = await files.uploadFile(e, { file: mk('x.txt', new Uint8Array([1])), purpose: 'support', who: customerWho(a) });
+  await support.customerReply(e, a.id, t.id, { authorLabel: 'A', body: 'more', fileIds: [f2.file.id], customerUserId: a.userId });
+  assert.equal((await support.staffDeleteTicket(e, t.id)).ok, true);
+  assert.equal(await support.getTicketForStaff(e, t.id), null); assert.equal(e.PLATFORM_MEDIA.m.size, 0);
+  assert.equal((await support.staffDeleteTicket(e, t.id)).error, 'not_found');
+});
+
+test('customer menu: Notifications, Announcements and Support sit in an Inbox group at the bottom with one unread total', async () => {
+  const { renderCustomerShell } = await import('../worker/views/customer-layout.js');
+  const base = { title: 'T', activeKey: 'overview', customer: { email: 'a@example.com' }, organizations: [{ id: 'o', name: 'O' }], activeOrganizationId: 'o', bodyHtml: '' };
+  const out = renderCustomerShell({ ...base, navBadges: { notifications: 2, announcements: 3, support: 1 } });
+  const groups = [...out.matchAll(/data-group="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(groups.at(-1), 'inbox');
+  const inbox = out.slice(out.indexOf('data-group="inbox"'));
+  assert.match(inbox, /group-count nav-badge"[^>]*>6</);
+  for (const k of ['notifications', 'announcements', 'support']) assert.match(inbox, new RegExp(`href="/app/${k}"`));
+  assert.ok(!out.slice(0, out.indexOf('data-group="inbox"')).includes('href="/app/support"'));
+  assert.match(renderCustomerShell(base).slice(renderCustomerShell(base).indexOf('data-group="inbox"')), /group-count">3</);
+});
+
+test('the staff pages render with working scripts and show the management controls', async () => {
+  const { renderAnnouncementsAdminPage, renderAnnouncementEditPage } = await import('../worker/views/pages/announcements-admin.js');
+  const { renderSupportTicketAdminPage } = await import('../worker/views/pages/saas-admin.js');
+  const e = env(); const a = await signup(e, 'a@example.com', 'Acme'); const admin = { id: 1, email: 'staff@example.com', role: 'super_admin', name: 'Staff' };
+  const t = await support.createTicket(e, { organizationId: a.id, customerUserId: a.userId, authorLabel: 'A', subject: 'Help me', body: 'Original question' });
+  const s = await announcements.send(e, { staff: { id: '1' }, subject: 'Hello all', body: 'Hi there', format: 'text', kind: 'all', channels: ['dashboard'] });
+  const pages = { list: await renderAnnouncementsAdminPage(e, admin), edit: await renderAnnouncementEditPage(e, admin, s.id), ticket: await renderSupportTicketAdminPage(e, admin, t.id) };
+  for (const [name, html] of Object.entries(pages)) for (const m of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) if (m[1].trim()) assert.doesNotThrow(() => new Function(m[1]), name);
+  assert.match(pages.list, /data-an-act="delete"/); assert.match(pages.ticket, /data-msg="edit"/); assert.match(pages.ticket, /Delete request/);
+  assert.match((await renderAnnouncementEditPage(e, admin, 'missing')), /not found/);
+});

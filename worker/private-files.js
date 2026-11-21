@@ -120,3 +120,10 @@ export async function purgeOrganization(env, organizationId) {
   if (rows.length && !env.PLATFORM_MEDIA) throw new Error("file_storage_not_configured");
   for (const r of rows) { await env.PLATFORM_MEDIA.delete(r.r2_key); }
 }
+
+async function purgeRows(env, rows) {
+  for (const r of rows) { if (env.PLATFORM_MEDIA) await env.PLATFORM_MEDIA.delete(r.r2_key).catch(() => {}); await repo.remove(env, r.id); }
+}
+/** Deletes the files of support messages (storage object first, then the record). */
+export const purgeMessageFiles = async (env, messageIds) => purgeRows(env, await repo.keysForMessages(env, messageIds));
+export const purgeAnnouncementFiles = async (env, announcementId) => purgeRows(env, await repo.keysForAnnouncement(env, announcementId));

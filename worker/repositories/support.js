@@ -21,15 +21,15 @@ export async function insertWithMessage(env, { id, messageId, organizationId, cu
 export async function listForOrganization(env, organizationId, status) {
   const s = STATUS_SQL[status];
   const r = await env.LUMMET_DB.prepare(
-    `SELECT t.*, (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id = t.id) AS message_count FROM support_tickets t WHERE t.organization_id = ?${s ? " AND t.status = ?" : ""} ORDER BY (t.status = 'closed'), t.updated_at DESC LIMIT 200`
+    `SELECT t.*, (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id = t.id AND m.hidden_at IS NULL) AS message_count FROM support_tickets t WHERE t.organization_id = ?${s ? " AND t.status = ?" : ""} ORDER BY (t.status = 'closed'), t.updated_at DESC LIMIT 200`
   ).bind(...(s ? [organizationId, s] : [organizationId])).all();
   return r.results || [];
 }
 export async function getForOrganization(env, organizationId, id) {
   return env.LUMMET_DB.prepare(`SELECT * FROM support_tickets WHERE id = ? AND organization_id = ?`).bind(id, organizationId).first();
 }
-export async function messages(env, ticketId) {
-  const r = await env.LUMMET_DB.prepare(`SELECT id, author_type, author_label, body, created_at FROM support_messages WHERE ticket_id = ? ORDER BY created_at, rowid`).bind(ticketId).all();
+export async function messages(env, ticketId, { includeHidden = false } = {}) {
+  const r = await env.LUMMET_DB.prepare(`SELECT id, author_type, author_label, body, created_at, hidden_at, edited_at FROM support_messages WHERE ticket_id = ?${includeHidden ? "" : " AND hidden_at IS NULL"} ORDER BY created_at, rowid`).bind(ticketId).all();
   return r.results || [];
 }
 /** Adds a message and sets the ticket's status in one step (a customer reply re-opens, a staff reply answers or closes). */
@@ -69,3 +69,14 @@ export async function openTotal(env) {
 export async function anonymiseCustomerMessages(env, userId) {
   await env.LUMMET_DB.prepare(`UPDATE support_messages SET author_label = '[erased]' WHERE author_type = 'customer' AND ticket_id IN (SELECT id FROM support_tickets WHERE customer_user_id = ?)`).bind(userId).run();
 }
+
+export const getMessage = (env, id) => env.LUMMET_DB.prepare(`SELECT id, ticket_id, author_type, body, hidden_at FROM support_messages WHERE id = ?`).bind(id).first();
+export const updateMessageBody = (env, id, body) => env.LUMMET_DB.prepare(`UPDATE support_messages SET body = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(body, id).run();
+export const setMessageHidden = (env, id, hidden) => env.LUMMET_DB.prepare(`UPDATE support_messages SET hidden_at = ${hidden ? "CURRENT_TIMESTAMP" : "NULL"} WHERE id = ?`).bind(id).run();
+export const deleteMessage = (env, id) => env.LUMMET_DB.prepare(`DELETE FROM support_messages WHERE id = ?`).bind(id).run();
+export const messageCount = async (env, ticketId) => (await env.LUMMET_DB.prepare(`SELECT COUNT(*) AS n FROM support_messages WHERE ticket_id = ?`).bind(ticketId).first())?.n || 0;
+export const messageIds = async (env, ticketId) => ((await env.LUMMET_DB.prepare(`SELECT id FROM support_messages WHERE ticket_id = ?`).bind(ticketId).all()).results || []).map((r) => r.id);
+export const deleteTicket = (env, id) => env.LUMMET_DB.batch([
+  env.LUMMET_DB.prepare(`DELETE FROM support_messages WHERE ticket_id = ?`).bind(id),
+  env.LUMMET_DB.prepare(`DELETE FROM support_tickets WHERE id = ?`).bind(id),
+]);

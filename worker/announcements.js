@@ -138,9 +138,35 @@ export async function inbox(env, userId, { markRead = true } = {}) {
   for (const r of rows) {
     const mine = [];
     for (const f of atts.filter((x) => x.announcement_id === r.id && !r.body_html.includes(`/f/${x.id}/`))) { const p = await files.signedPath(env, f.id); if (p) mine.push({ filename: f.filename, sizeBytes: f.size_bytes, url: p, isImage: files.isImageMime(f.mime_type) }); }
-    out.push({ id: r.id, subject: r.subject, bodyHtml: r.body_html, createdAt: r.created_at, unread: !r.is_read, attachments: mine });
+    out.push({ id: r.id, subject: r.subject, bodyHtml: r.body_html, createdAt: r.created_at, edited: Boolean(r.edited_at), unread: !r.is_read, attachments: mine });
   }
   if (markRead) { const ids = rows.filter((r) => !r.is_read).map((r) => r.id); if (ids.length) await repo.markRead(env, userId, ids).catch(() => {}); }
   return out;
 }
 export const pickers = (env) => repo.pickers(env);
+
+// ---- staff management: edit, hide/show, delete. Audience and channels stay as sent; emails already sent cannot be recalled. ----
+export const getForStaff = (env, id) => repo.getAnnouncement(env, id);
+export async function update(env, id, { subject, body, format }) {
+  const a = await repo.getAnnouncement(env, id);
+  if (!a) return { ok: false, status: 404, error: "not_found" };
+  const subj = clean(subject, 140).replace(/\s+/g, " ");
+  if (subj.length < 3) return { ok: false, status: 422, error: "subject_required" };
+  const fmt = format === "text" ? "text" : "html";
+  const bodyHtml = prepareBody(fmt, body);
+  if (bodyHtml == null) return { ok: false, status: 422, error: "body_too_long" };
+  if (htmlToText(bodyHtml).trim().length < 2 && !bodyHtml.includes("<img")) return { ok: false, status: 422, error: "message_required" };
+  await repo.updateAnnouncement(env, id, { subject: subj, bodyHtml, format: fmt });
+  return { ok: true };
+}
+export async function setHidden(env, id, hidden) {
+  if (!(await repo.getAnnouncement(env, id))) return { ok: false, status: 404, error: "not_found" };
+  await repo.setHidden(env, id, hidden !== false);
+  return { ok: true };
+}
+export async function remove(env, id) {
+  if (!(await repo.getAnnouncement(env, id))) return { ok: false, status: 404, error: "not_found" };
+  await files.purgeAnnouncementFiles(env, id);
+  await repo.deleteAnnouncement(env, id);
+  return { ok: true };
+}

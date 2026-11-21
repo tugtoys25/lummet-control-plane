@@ -14,3 +14,11 @@
 - Body: HTML (cleaned: no script, handlers, styles, iframes; only http(s)/mailto/tel/relative links) or plain text. Photos can be placed in the text; other files are listed as downloads.
 - Email goes through the normal outbox (`queueEmail`, template `announcement`), 40 people per tick plus a first batch at send time, one email per person (`dedupeKey`). Attachments in email are signed links (`/f/:id/:signature`) and need `PORTAL_BASE_URL`.
 - The automatic billing and reminder emails are not touched.
+
+## Managing what was sent (migration 0108)
+- Announcements: Edit (subject and message), Hide/Show (hidden = gone from customers' dashboards and no further emails queued), Delete (removes recipients, read marks and files). Audience and channels stay as sent; emails already delivered cannot be recalled. Editing shows customers "edited".
+- Support messages (staff request page): Edit, Hide from customer / Show, Delete (and its files). The last remaining message cannot be deleted; use "Delete request", which removes the request, its messages and files.
+- Every one of these writes an audit entry.
+
+## Customer menu
+Notifications, Announcements and Support live in a last "Inbox" group. Its badge is the total of their unread/open counts, and the group opens by itself when that total is above zero.

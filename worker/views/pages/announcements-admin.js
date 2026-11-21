@@ -14,7 +14,8 @@ export async function renderAnnouncementsAdminPage(env, admin) {
   const rows = history.map((a) => {
     let ch = []; try { ch = JSON.parse(a.channels); } catch { /* ignore */ }
     const email = ch.includes("email") ? `${a.emails_queued}/${a.email_total} queued${a.emails_failed ? `, ${a.emails_failed} failed` : ""}` : "-";
-    return `<tr><td>${h(a.subject)}</td><td>${h(a.audience_label)}</td><td>${h(ch.join(" + "))}</td><td>${h(a.recipient_count)}</td><td>${h(email)}</td><td>${h(a.reads)}</td><td>${h(a.created_at || "")}</td></tr>`;
+    const manage = `<a href="/platform/saas/announcements/${h(a.id)}">Edit</a> · <a href="#" data-an-act="${a.hidden_at ? "show" : "hide"}" data-id="${h(a.id)}">${a.hidden_at ? "Show" : "Hide"}</a> · <a href="#" data-an-act="delete" data-id="${h(a.id)}">Delete</a>`;
+    return `<tr${a.hidden_at ? ' style="opacity:.6"' : ""}><td>${h(a.subject)}${a.hidden_at ? " <em>(hidden)</em>" : ""}${a.edited_at ? " <em>(edited)</em>" : ""}</td><td>${h(a.audience_label)}</td><td>${h(ch.join(" + "))}</td><td>${h(a.recipient_count)}</td><td>${h(email)}</td><td>${h(a.reads)}</td><td>${h(a.created_at || "")}</td><td>${manage}</td></tr>`;
   }).join("");
   const body = `
     <p style="color:var(--text-dim)">Send a message to customers. It appears under Announcements in their dashboard and/or arrives by email. This is separate from the automatic billing and reminder emails, which are not changed.</p>
@@ -42,7 +43,7 @@ export async function renderAnnouncementsAdminPage(env, admin) {
       <div id="an-preview-out"></div>
     </div>
     <h2>Sent announcements</h2>
-    <table><thead><tr><th>Subject</th><th>To</th><th>Where</th><th>People</th><th>Emails</th><th>Opened</th><th>Sent</th></tr></thead><tbody>${rows || `<tr><td colspan="7" style="color:var(--text-dim)">Nothing sent yet.</td></tr>`}</tbody></table>
+    <table><thead><tr><th>Subject</th><th>To</th><th>Where</th><th>People</th><th>Emails</th><th>Opened</th><th>Sent</th><th>Manage</th></tr></thead><tbody>${rows || `<tr><td colspan="8" style="color:var(--text-dim)">Nothing sent yet.</td></tr>`}</tbody></table>
     <script nonce="${nonceToken()}">
     (function () {
       var $ = function (id) { return document.getElementById(id); };
@@ -53,6 +54,12 @@ export async function renderAnnouncementsAdminPage(env, admin) {
       function ref() { var k = kind(); return k === 'user' ? $('an-user').value.trim() : k === 'organization' ? $('an-org').value : k === 'billing' ? $('an-bill').value : k === 'site' ? $('an-site').value : ''; }
       function showRef() { ['user', 'organization', 'billing', 'site'].forEach(function (k) { $('an-ref-' + k).style.display = kind() === k ? 'block' : 'none'; }); }
       $('an-kind').addEventListener('change', showRef); showRef();
+      document.addEventListener('click', function (e) {
+        var t = e.target; var act = t && t.getAttribute && t.getAttribute('data-an-act'); if (!act) return; e.preventDefault();
+        if (act === 'delete' && !confirm('Delete this announcement for good? Customers lose it from their dashboard and its files are removed. Emails already sent cannot be recalled.')) return;
+        fetch('/api/platform/saas/announcements/' + t.getAttribute('data-id') + '/' + act, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+          .then(function (r) { return r.json(); }).then(function (d) { if (d.success) location.reload(); else msg(esc(d.error || 'failed'), true); });
+      });
       function payload() {
         var ch = []; if ($('an-ch-dashboard').checked) ch.push('dashboard'); if ($('an-ch-email').checked) ch.push('email');
         return { kind: kind(), ref: ref(), subject: $('an-subject').value, body: $('an-body').value, format: $('an-format').value, channels: ch, fileIds: uploaded.map(function (f) { return f.id; }) };
@@ -108,4 +115,27 @@ export async function renderAnnouncementsAdminPage(env, admin) {
     })();
     </script>`;
   return renderShell({ title: "Announcements", activeKey: "saas-announcements", admin, env, bodyHtml: `<h1>Announcements</h1>${body}` });
+}
+
+/** Edit page: subject and message of an announcement already sent. Who it went to and where stay as sent. */
+export async function renderAnnouncementEditPage(env, admin, id) {
+  const a = await announcements.getForStaff(env, id);
+  if (!a) return renderShell({ title: "Announcement", activeKey: "saas-announcements", admin, env, bodyHtml: `<p>That announcement was not found.</p><p><a href="/platform/saas/announcements">Back</a></p>` });
+  const body = `<p><a href="/platform/saas/announcements">&larr; Announcements</a></p>
+    <p style="color:var(--text-dim)">To: ${h(a.audience_label)} · sent ${h(a.created_at || "")}${a.hidden_at ? " · <strong>hidden from customers</strong>" : ""}. Changes show in the dashboard straight away; emails that were already sent cannot be changed.</p>
+    <div id="ed-msg"></div>
+    <div class="card">
+      <label for="ed-subject">Subject</label><input type="text" id="ed-subject" maxlength="140" style="width:100%" value="${h(a.subject)}" />
+      <label for="ed-format">Message format</label><select id="ed-format"><option value="html" selected>Formatted text (HTML)</option><option value="text">Plain text</option></select>
+      <textarea id="ed-body" rows="14" style="width:100%;font-family:monospace">${h(a.body_html)}</textarea>
+      <p><button class="btn" type="button" id="ed-save">Save changes</button></p>
+    </div>
+    <script nonce="${nonceToken()}">
+    document.getElementById('ed-save').addEventListener('click', function () {
+      var m = document.getElementById('ed-msg');
+      fetch('/api/platform/saas/announcements/${h(a.id)}/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: document.getElementById('ed-subject').value, body: document.getElementById('ed-body').value, format: document.getElementById('ed-format').value }) })
+        .then(function (r) { return r.json(); }).then(function (d) { m.textContent = d.success ? 'Saved.' : 'Failed: ' + (d.error || ''); });
+    });
+    </script>`;
+  return renderShell({ title: "Edit announcement", activeKey: "saas-announcements", admin, env, bodyHtml: `<h1>Edit announcement</h1>${body}` });
 }

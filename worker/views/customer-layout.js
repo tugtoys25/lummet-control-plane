@@ -44,8 +44,7 @@ const NAV = [
       { label: "Analytics", href: "/app/analytics", key: "analytics" },
       { label: "All sites", href: "/app/all-sites", key: "all-sites" },
       { label: "Reports", href: "/app/reports", key: "reports" },
-      { label: "Alerts", href: "/app/alerts", key: "alerts" },
-      { label: "Notifications", href: "/app/notifications", key: "notifications" }
+      { label: "Alerts", href: "/app/alerts", key: "alerts" }
     ]
   },
   {
@@ -91,14 +90,24 @@ const NAV = [
     icon: "team",
     items: [
       { label: "Team", href: "/app/team", key: "team" },
-      { label: "Announcements", href: "/app/announcements", key: "announcements" },
-      { label: "Support", href: "/app/support", key: "support" },
       { label: "Sessions", href: "/app/sessions", key: "sessions" },
       { label: "Billing", href: "/app/billing", key: "billing" },
       { label: "Usage & AI", href: "/app/usage", key: "usage" },
       { label: "Settings", href: "/app/settings", key: "settings" },
       { label: "Account", href: "/app/account", key: "account" },
       { label: "Security", href: "/app/security/2fa", key: "security" }
+    ]
+  },
+  {
+    // Everything that arrives for the customer, last in the menu; the group shows the total unread/open count.
+    id: "inbox",
+    section: "Inbox",
+    icon: "team",
+    unreadTotal: true,
+    items: [
+      { label: "Notifications", href: "/app/notifications", key: "notifications" },
+      { label: "Announcements", href: "/app/announcements", key: "announcements" },
+      { label: "Support", href: "/app/support", key: "support" }
     ]
   }
 ];
@@ -126,7 +135,8 @@ function renderNav(activeKey, hiddenNavKeys = [], navBadges = {}) {
     if (visibleItems.length === 0) return null;
 
     const hasActive = visibleItems.some((item) => item.key === activeKey);
-    const open = hasActive || firstRendered;
+    const unread = section.unreadTotal ? visibleItems.reduce((n, item) => n + (Number(navBadges[item.key]) || 0), 0) : 0;
+    const open = hasActive || firstRendered || unread > 0;
     firstRendered = false;
 
     return `
@@ -134,7 +144,7 @@ function renderNav(activeKey, hiddenNavKeys = [], navBadges = {}) {
         <summary>
           <span class="icon group-icon">${ICONS[section.icon] || ""}</span>
           <span class="group-label">${escapeHtml(section.section)}</span>
-          <span class="group-count">${visibleItems.length}</span>
+          ${unread > 0 ? `<span class="group-count nav-badge" aria-label="${unread} unread">${badgeText(unread)}</span>` : `<span class="group-count">${visibleItems.length}</span>`}
           <span class="icon chevron">${ICONS.chevron}</span>
         </summary>
         <div class="nav-links">

@@ -723,7 +723,8 @@ export async function renderSupportInboxPage(env, admin, { status = "", page: ra
 export async function renderSupportTicketAdminPage(env, admin, id) {
   const t = await supportModule.getTicketForStaff(env, id);
   if (!t) return shell(env, admin, "Support request", "saas-support", `<p>That request was not found.</p><p><a href="/platform/saas/support">Back to the inbox</a></p>`);
-  const thread = t.messages.map((m) => `<div class="card" style="${m.author_type === "staff" ? "border-left:4px solid #6d5dfc" : ""}"><p style="color:var(--text-dim)"><strong>${h(m.author_label)}</strong> · ${m.author_type === "staff" ? "Lummet team" : "Customer"} · ${h(m.created_at || "")}</p><div style="white-space:pre-wrap">${h(m.body)}</div>${renderAttachments(m.attachments, (fid) => `/api/platform/saas/files/${fid}`)}</div>`).join("");
+  const thread = t.messages.map((m) => `<div class="card" id="msg-${h(m.id)}" style="${m.author_type === "staff" ? "border-left:4px solid #6d5dfc;" : ""}${m.hidden_at ? "opacity:.65;" : ""}"><p style="color:var(--text-dim)"><strong>${h(m.author_label)}</strong> · ${m.author_type === "staff" ? "Lummet team" : "Customer"} · ${h(m.created_at || "")}${m.edited_at ? " · edited" : ""}${m.hidden_at ? " · <strong>hidden from customer</strong>" : ""}</p><div class="msg-body" style="white-space:pre-wrap">${h(m.body)}</div>${renderAttachments(m.attachments, (fid) => `/api/platform/saas/files/${fid}`)}
+    <p style="margin-top:8px"><a href="#" data-msg="edit" data-id="${h(m.id)}">Edit</a> · <a href="#" data-msg="hide" data-id="${h(m.id)}" data-hidden="${m.hidden_at ? "0" : "1"}">${m.hidden_at ? "Show to customer" : "Hide from customer"}</a> · <a href="#" data-msg="delete" data-id="${h(m.id)}">Delete</a></p></div>`).join("");
   return shell(env, admin, t.subject, "saas-support", `<p><a href="/platform/saas/support">&larr; Inbox</a></p>
     <p style="color:var(--text-dim)">${orgLink(t.organization_id, t.organization)} · ${h(t.customer_email || "no email")} · ${h(supportModule.CATEGORIES[t.category] || t.category)} · priority ${h(t.priority)} · ${badge(SUPPORT_STATUS[t.status] || t.status)}</p>
     ${thread}
@@ -733,8 +734,27 @@ export async function renderSupportTicketAdminPage(env, admin, id) {
       <button class="btn"${onClick("supportReply", [t.id, false])}>Send reply</button>
       <button class="btn"${onClick("supportReply", [t.id, true])}>Send and close</button>
       ${t.status === "closed" ? `<button class="btn"${onClick("act", [`/api/platform/saas/support/${t.id}/status`, { status: "open" }, "Re-open this request?"])}>Re-open</button>` : `<button class="btn"${onClick("act", [`/api/platform/saas/support/${t.id}/status`, { status: "closed" }, "Close without replying?"])}>Close</button>`}
+      <button class="btn"${onClick("supportDeleteTicket", [t.id])}>Delete request</button>
     </div>
     <script nonce="${nonceToken()}">
+      function supportDeleteTicket(id) {
+        if (!confirm('Delete this whole request, every message and its files? This cannot be undone.')) return;
+        fetch('/api/platform/saas/support/' + id + '/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(function (r) { return r.json(); }).then(function (d) { if (d.success) location.href = '/platform/saas/support'; else alert('Failed: ' + (d.error || '')); });
+      }
+      document.addEventListener('click', function (e) {
+        var t = e.target; var kind = t && t.getAttribute && t.getAttribute('data-msg'); if (!kind) return; e.preventDefault();
+        var mid = t.getAttribute('data-id'); var tid = '${t.id}'; var base = '/api/platform/saas/support/' + tid + '/';
+        function send(verb, body) { fetch(base + verb, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function (r) { return r.json(); }).then(function (d) { if (d.success) location.reload(); else alert('Failed: ' + (d.error || '') + (d.detail ? ' - ' + d.detail : '')); }); }
+        if (kind === 'hide') return send('hide-message', { messageId: mid, hidden: t.getAttribute('data-hidden') === '1' });
+        if (kind === 'delete') { if (confirm('Delete this message and its files for good?')) send('delete-message', { messageId: mid }); return; }
+        if (kind === 'edit') {
+          var card = document.getElementById('msg-' + mid); var bodyEl = card.querySelector('.msg-body'); if (card.querySelector('textarea')) return;
+          var ta = document.createElement('textarea'); ta.rows = 6; ta.style.width = '100%'; ta.value = bodyEl.textContent;
+          var save = document.createElement('button'); save.className = 'btn'; save.textContent = 'Save'; save.type = 'button';
+          save.addEventListener('click', function () { send('edit-message', { messageId: mid, body: ta.value }); });
+          bodyEl.replaceWith(ta); ta.after(save);
+        }
+      });
       function supportReply(id, close) {
         var body = document.getElementById('support-reply').value;
         var files = Array.prototype.slice.call(document.getElementById('support-files').files || []);

@@ -76,7 +76,7 @@ export const ticketOrganizationId = (env, id) => repo.organizationIdOf(env, id);
 
 export async function getTicketForStaff(env, id) {
   const t = await repo.getForStaff(env, id);
-  return t ? withAttachments(env, { ...t, messages: await repo.messages(env, id) }) : null;
+  return t ? withAttachments(env, { ...t, messages: await repo.messages(env, id, { includeHidden: true }) }) : null;
 }
 
 export async function staffReply(env, id, { staffLabel, staffId, body, close = false, fileIds }) {
@@ -109,3 +109,37 @@ export async function staffSetStatus(env, id, status) {
 
 export const openTicketCount = (env) => repo.openTotal(env);
 export const anonymiseCustomer = (env, userId) => repo.anonymiseCustomerMessages(env, userId);
+
+// ---- staff moderation: edit, hide/show and delete a message, or delete the whole request ----
+async function ownMessage(env, ticketId, messageId) {
+  const m = await repo.getMessage(env, messageId);
+  return m && m.ticket_id === ticketId ? m : null;
+}
+export async function staffEditMessage(env, ticketId, messageId, body) {
+  const m = await ownMessage(env, ticketId, messageId);
+  if (!m) return { ok: false, status: 404, error: "not_found" };
+  const b = text(body, LIMITS.body);
+  if (b.length < 2) return { ok: false, status: 422, error: "message_required" };
+  await repo.updateMessageBody(env, messageId, b);
+  return { ok: true };
+}
+export async function staffHideMessage(env, ticketId, messageId, hidden) {
+  const m = await ownMessage(env, ticketId, messageId);
+  if (!m) return { ok: false, status: 404, error: "not_found" };
+  await repo.setMessageHidden(env, messageId, hidden !== false);
+  return { ok: true };
+}
+export async function staffDeleteMessage(env, ticketId, messageId) {
+  const m = await ownMessage(env, ticketId, messageId);
+  if (!m) return { ok: false, status: 404, error: "not_found" };
+  if ((await repo.messageCount(env, ticketId)) <= 1) return { ok: false, status: 409, error: "last_message", detail: "this is the only message; delete the whole request instead" };
+  await files.purgeMessageFiles(env, [messageId]);
+  await repo.deleteMessage(env, messageId);
+  return { ok: true };
+}
+export async function staffDeleteTicket(env, ticketId) {
+  if (!(await repo.getForStaff(env, ticketId))) return { ok: false, status: 404, error: "not_found" };
+  await files.purgeMessageFiles(env, await repo.messageIds(env, ticketId));
+  await repo.deleteTicket(env, ticketId);
+  return { ok: true };
+}

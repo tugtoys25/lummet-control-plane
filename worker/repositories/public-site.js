@@ -5,6 +5,7 @@
 // is invented: if a query returns no rows the caller renders nothing.
 // =====================================================
 
+import { SQL_LIVE_AD_SLIDES, SQL_LIVE_AD_SETTINGS, toSlide as toAdSlide } from "./ad-slider.js";
 
 const db = (env) => env.LUMMET_DB;
 
@@ -636,6 +637,18 @@ export function listFaqs(env) {
 export async function getBannerAd(env) {
   const ads = await listActiveAdsForPlacement(env, "homepage_banner");
   return ads[0] || null;
+}
+
+/** Slides and settings of the first live advertisement of a placement. Separate from loadHomeSecondary on purpose:
+ *  a database that has not run migration 0109 yet still serves the homepage (the banner then shows as one picture). */
+export async function loadAdSlider(env, placement = "homepage_banner") {
+  const day = new Date().toISOString().slice(0, 10);
+  const [slides, settings] = await readBatch(env, "ad-slider", [
+    { sql: SQL_LIVE_AD_SLIDES, binds: [placement, day, day] }, { sql: SQL_LIVE_AD_SETTINGS, binds: [placement, day, day] }
+  ]);
+  let parsed = {};
+  try { parsed = JSON.parse(settings[0]?.settings_json || "{}"); } catch (_) { parsed = {}; }
+  return { slides: slides.map(toAdSlide), settings: parsed };
 }
 
 // ---- Homepage (batched) --------------------------------

@@ -22,6 +22,7 @@ import { getCmsResourceConfig } from "../../cms-resources.js";
 import { nonceToken } from "../../csp.js";
 import * as publicSiteRepo from "../../repositories/public-site.js";
 import * as marketImages from "../../aftermarket-images.js";
+import { adSliderPanel } from "./ad-slider-panel.js";
 
 // The two lists whose items can carry images (uploaded here by staff, or by the seller in the portal).
 const IMAGE_KINDS = { listings: "listing", aftermarket_domains: "domain" };
@@ -222,7 +223,8 @@ export async function renderCmsForm(env, admin, resourceKey, id, formError, flas
         <a class="btn btn-secondary" href="/cms/${resourceKey}">Cancel</a>
       </div>
     </form>
-    ${id ? await imagesPanel(env, resourceKey, id) : `${IMAGE_KINDS[resourceKey] ? `<p class="muted">Save first, then open the item to add images.</p>` : ""}`}`;
+    ${id && resourceKey === "advertisements" ? await adSliderPanel(env, record) : ""}
+    ${id ? await imagesPanel(env, resourceKey, id) : `${IMAGE_KINDS[resourceKey] ? `<p class="muted">Save first, then open the item to add images.</p>` : resourceKey === "advertisements" ? `<p class="muted">Save first, then open the advertisement to build its slider.</p>` : ""}`}`;
 
   return renderShell({ title: `${id ? "Edit" : "New"} ${config.label}`, activeKey, admin, bodyHtml: body, env });
 }

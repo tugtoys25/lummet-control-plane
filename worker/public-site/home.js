@@ -6,7 +6,8 @@
 // (no placeholder copy, no invented numbers).
 // =====================================================
 
-import { loadHomePrimary, loadHomeSecondary } from "./data.js";
+import { loadHomePrimary, loadHomeSecondary, loadAdSlider } from "./data.js";
+import { renderAdSlider } from "../ad-slider.js";
 import { brandModel, updateModel, publicationModel, partnerModel, featureModel, faqModel } from "./models.js";
 import { sanitizeHtml } from "./sanitize.js";
 import { safeUrl, isExternal, formatDate } from "./format.js";
@@ -73,6 +74,8 @@ export async function buildHome(ctx) {
   ]);
   const { rows, features, faqs, brands } = primary;
   const { updates, publications, partners, banner } = secondary;
+  // The banner's slides and settings are a separate fail-soft read: without them the advertisement shows as one picture.
+  const slider = banner ? await soft("ad-slider", loadAdSlider(env), { slides: [], settings: {} }, 2000) : { slides: [], settings: {} };
 
   const featuresByGroup = groupBy(features, "group_key");
   const faqsByGroup = groupBy(faqs, "group_key");
@@ -186,9 +189,8 @@ export async function buildHome(ctx) {
     hero.has_secondary = Boolean(hero.secondary_label && hero.secondary_href && live(hero.secondary_href));
   }
 
-  const bannerAd = banner && safeUrl(banner.image_url)
-    ? { image_url: safeUrl(banner.image_url), link_url: safeUrl(banner.link_url), alt: banner.alt_text || banner.name || "", has_link: Boolean(safeUrl(banner.link_url)) }
-    : null;
+  const bannerHtml = banner ? renderAdSlider({ ad: banner, slides: slider.slides, settings: slider.settings, label: banner.name }) : "";
+  const bannerAd = bannerHtml ? { html: bannerHtml } : null;
 
   const faqSection = sections.find((s) => s.is_faq);
   return { hero, sections, banner: bannerAd, faqItems: faqSection ? faqSection.items : [] };

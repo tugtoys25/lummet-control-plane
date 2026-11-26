@@ -24,10 +24,9 @@
 {{/if}}
 
 {{#if banner}}
-<div class="container banner-ad">
-  {{#if banner.has_link}}<a href="{{banner.link_url}}" rel="sponsored noopener" target="_blank"><img src="{{banner.image_url}}" alt="{{banner.alt}}" loading="lazy"></a>
-  {{else}}<img src="{{banner.image_url}}" alt="{{banner.alt}}" loading="lazy">{{/if}}
-</div>
+<link rel="stylesheet" href="/static/css/ad-slider.css">
+<div class="container banner-ad">{{{banner.html}}}</div>
+<script src="/static/js/ad-slider.js" defer></script>
 {{/if}}
 
 {{#each sections}}

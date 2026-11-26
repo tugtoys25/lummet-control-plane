@@ -10,6 +10,7 @@
 // =====================================================
 
 import { getCmsResourceConfig } from "./cms-resources.js";
+import * as adSliderRepo from "./repositories/ad-slider.js";
 
 function isUniqueConstraintError(err) {
   return /UNIQUE constraint failed/i.test(String(err?.message || err));
@@ -141,6 +142,7 @@ export async function deleteCmsRecord(env, resourceKey, id) {
   if (!config) return { ok: false, status: 404, error: "unknown_resource" };
 
   await env.LUMMET_DB.prepare(`DELETE FROM ${config.table} WHERE id = ?`).bind(id).run();
+  if (resourceKey === "advertisements") await adSliderRepo.purge(env, id).catch(() => {}); // slides, settings and numbers go with the advertisement
   return { ok: true };
 }
 

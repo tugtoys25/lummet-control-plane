@@ -56,6 +56,8 @@ import { platformAccessGate } from "./cloudflare-access-jwt.js";
 
 import { observe } from "./observability.js";
 import * as healthRepo from "./repositories/health.js";
+import * as adSlider from "./ad-slider.js";
+import * as adSliderRepo from "./repositories/ad-slider.js";
 import * as requestErrorsRepo from "./repositories/request-errors.js";
 import * as organizationsRepo from "./repositories/organizations.js";
 import * as tenantLinks from "./tenant-links.js";
@@ -598,6 +600,14 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
 
     // CSP violation reports (browsers send these on their own, possibly with cookies): log and drop, no auth, no state.
     if (method === "POST" && path === "/api/csp-report") return handleCspReport(request, env);
+
+    // Advertisement slider counting (public, cookie-less, no state beyond per-day counters). Always an empty answer.
+    if (method === "POST" && path === "/api/ad-event") {
+      let body = null;
+      try { const text = await request.text(); body = text.length <= 4096 ? JSON.parse(text) : null; } catch (_) { body = null; }
+      const counted = await adSlider.recordEvents(env, body, { clientKey: await hashIP(request).catch(() => "anon") }).catch(() => ({ status: 503 }));
+      return new Response(null, { status: counted.status === 200 ? 204 : counted.status });
+    }
 
     // Round 6.3B: Cloudflare Access is an additional perimeter for /platform/* and /api/platform/*. Staff sessions, 2FA and
     // RBAC still apply after it. PLATFORM_ACCESS_JWT_MODE=off (default) changes nothing; enforce fails closed.
@@ -5715,6 +5725,34 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash
           });
           return result.ok ? back(action === "upload" ? "Image added" : action === "delete" ? "Image deleted" : "Cover changed") : back(`Could not save the image: ${result.error}`, "error");
+        }
+      }
+
+      // Advertisement sliders: picture upload, preview and save (JSON, same-origin; the CSRF guard above applies).
+      {
+        const adImage = method === "POST" && path === "/cms/advertisements/image";
+        const adSave = matchPath("/cms/advertisements/:id/slider", path);
+        const adPreview = matchPath("/cms/advertisements/:id/slider-preview", path);
+        const adTarget = adSave || adPreview;
+        if (method === "POST" && (adImage || adTarget)) {
+          const guard = await requirePermission("cms", "advertisements", "update");
+          if (guard) return guard;
+          if (adImage) {
+            let form = null;
+            try { form = await request.formData(); } catch (_) { form = null; }
+            const result = form ? await adSlider.attachPicture(env, { file: form.get("file"), actorId: admin.id }) : { ok: false, status: 400, error: "no_file" };
+            await logAudit(env, { adminId: admin.id, tenantId: null, endpoint: path, method, resource: "lummet_ad_slider_picture", action: "upload", success: result.ok, statusCode: result.ok ? 200 : result.status || 400, errorMessage: result.ok ? null : result.error, requestId, ipHash });
+            return json(result.ok ? { success: true, url: result.url, width: result.width, height: result.height } : { success: false, error: result.error }, result.ok ? 200 : result.status || 400);
+          }
+          if (!/^\d+$/.test(adTarget.id) || !(await adSliderRepo.adExists(env, Number(adTarget.id)))) return json({ success: false, error: "not_found" }, 404);
+          let body = null;
+          try { const text = await request.text(); body = text.length <= 200000 ? JSON.parse(text) : null; } catch (_) { body = null; }
+          const checked = adSlider.validateSlider(body);
+          if (!checked.ok) return json({ success: false, errors: checked.errors }, 422);
+          if (adPreview) return json({ success: true, html: adSlider.renderAdSlider({ ad: { id: Number(adTarget.id), name: "Preview" }, slides: checked.slides, settings: checked.settings, preview: true, now: null }) });
+          await adSliderRepo.saveSlider(env, Number(adTarget.id), checked.settings, checked.slides);
+          await logAudit(env, { adminId: admin.id, tenantId: null, endpoint: path, method, resource: "lummet_ad_slider", resourceId: adTarget.id, action: "update", success: true, statusCode: 200, requestId, ipHash });
+          return json({ success: true, slides: checked.slides.length });
         }
       }
 

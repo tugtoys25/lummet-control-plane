@@ -69,6 +69,12 @@ Rules:
   (retries the failed site with a new deployment and continues) or **Cancel**.
 * **Skips** sites already on the release, and sites that are not live (provisioning, suspended, failed, deleting). A site with
   another deployment already running is followed if it is the same release, or skipped (`busy_with_another_deployment`) if not.
+* **Skips a site whose account is blocked for billing.** When a deployment cannot start because the organisation's billing state blocks
+  it (`billing_access_restricted`), that site is recorded as `skipped` with that reason, keeps the version it had, and the rollout
+  carries on with the other sites. It is not a failure and does not stop the rollout. Once the account is in good standing, the next
+  rollout includes it again (it is simply still behind). The reason shows in the Detail column of the rollout table, and the progress
+  line counts it under "skipped". A canary on such a site does not count as passed. Every other start error still stops the rollout
+  (`SKIPPABLE_START_ERRORS` in `worker/rollouts.js` is the only list of reasons treated this way).
 * **One rollout at a time** (a database constraint). Starting a second returns `rollout_in_progress`.
 * **Canary.** The API accepts `siteIds` to limit a rollout to chosen sites: roll out to one site first, check it, then roll out
   to everyone (already-current sites are skipped). In the CI script: `--sites id1,id2`.

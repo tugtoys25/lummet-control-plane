@@ -10,7 +10,8 @@
 //     untouched on the version it already runs. A failed REDEPLOY never takes a serving site down (see
 //     deployments.js), so the failed site keeps serving too. Staff can fix and Resume, or Cancel.
 //   * SKIPS WHAT IS CURRENT. Sites already on the version are recorded as skipped; sites that are not live
-//     (suspended, failed, still provisioning) are never touched.
+//     (suspended, failed, still provisioning) are never touched. A site whose account is blocked for billing
+//     (billing_access_restricted) is skipped too, with that reason, instead of stopping the whole rollout.
 //   * ONE ROLLOUT AT A TIME (a database constraint), and every step runs under a compare-and-swap lock, so a
 //     pinger, an open staff page and a CI job advancing the same rollout never deploy a site twice.
 //   * RESUMABLE. Progress lives in the database, nothing in memory: advanceRollout() does one bounded step
@@ -33,6 +34,12 @@ import { deployments as realDeployments } from "./deployments.js";
 export const LOCK_MS = 90_000;
 export const ITEM_TIMEOUT_MINUTES = 45;
 export const MAX_SKIPS_PER_STEP = 25;
+/**
+ * Reasons a deployment cannot START that are about the SITE'S ACCOUNT, not about the release. One customer's locked billing must not
+ * hold back every other site, so such a site is recorded as skipped (with the reason, visible in the rollout table) and the rollout
+ * carries on. It is picked up again by the next rollout once the account is in good standing. Anything else still stops the rollout.
+ */
+export const SKIPPABLE_START_ERRORS = new Set(["billing_access_restricted"]);
 const MAX_SITE_IDS = 200;
 export const CANARY_PREFIX = "canary:";
 const ON = new Set(["on", "1", "true", "yes", "enforce", "required"]);
@@ -202,6 +209,7 @@ async function step(env, rollout, { dispatch, now, deployments, templates }) {
         });
         if (!started.ok) {
           if (started.error === "site_not_deployable") { await skip(`site_${started.currentStatus || "not_deployable"}`); }
+          else if (SKIPPABLE_START_ERRORS.has(started.error)) { await skip(started.error); }
           else {
             await repo.markItemDone(env, next.id, "failed", started.error);
             await repo.finishRollout(env, rolloutId, "failed", `could not start the deployment for ${label(next)}: ${started.error}`);

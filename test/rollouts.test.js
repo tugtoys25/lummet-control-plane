@@ -280,3 +280,55 @@ test('the dashboard summarises the fleet and the latest rollout', async (t) => {
   assert.equal(d.outdated, 0); assert.equal(d.recent[0].status, 'completed');
   assert.equal(ids.length, 2);
 });
+
+// A site whose organisation is blocked for billing must not hold back the rest of the fleet.
+import { deployments as realDeployments } from '../worker/deployments.js';
+const blockSite = (blockedId, error = 'billing_access_restricted') => ({
+  ...realDeployments,
+  startDeployment: (env, args) => (args.siteId === blockedId ? Promise.resolve({ ok: false, status: 402, error }) : realDeployments.startDeployment(env, args))
+});
+
+test('a site blocked for billing is skipped with its reason and the rollout carries on to the end', async (t) => {
+  const { env, ids, uploads, dispatch } = await fleet(t, 4);
+  const blocked = ids[0]; // the FIRST site in line, like a locked customer at the head of the queue
+  const s = await rollouts.startRollout(env, {});
+  const deployments = blockSite(blocked);
+  let last; for (let i = 0; i < 16; i++) { last = await rollouts.advanceRollout(env, s.rolloutId, { dispatch, deployments }); if (last.done) break; }
+  assert.equal(last.status, 'completed', JSON.stringify(last));
+  assert.equal(last.counts.succeeded, 3); assert.equal(last.counts.skipped, 1); assert.equal(last.counts.failed, 0);
+  assert.match(last.progress, /1 skipped/);
+  assert.equal(await versionOf(env, blocked), '1.0.0', 'the blocked site keeps its version');
+  assert.equal((await sites.getSite(env, blocked)).status, 'active');
+  for (const id of ids.slice(1)) assert.equal(await versionOf(env, id), '2.0.0');
+  assert.equal(uploads(), 3);
+  const items = (await rollouts.getRollout(env, s.rolloutId)).items;
+  const row = items.find((i) => i.site_id === blocked);
+  assert.equal(row.status, 'skipped'); assert.equal(row.detail, 'billing_access_restricted');
+});
+
+test('once the account is back in good standing, the next rollout picks the skipped site up', async (t) => {
+  const { env, ids, dispatch } = await fleet(t, 3);
+  const first = await rollouts.startRollout(env, {});
+  for (let i = 0; i < 12; i++) { const r = await rollouts.advanceRollout(env, first.rolloutId, { dispatch, deployments: blockSite(ids[0]) }); if (r.done) break; }
+  assert.equal(await versionOf(env, ids[0]), '1.0.0');
+  const second = await rollouts.startRollout(env, {});
+  assert.equal(second.total, 1, 'only the site that is still behind');
+  for (let i = 0; i < 6; i++) { const r = await rollouts.advanceRollout(env, second.rolloutId, { dispatch }); if (r.done) break; }
+  assert.equal(await versionOf(env, ids[0]), '2.0.0');
+});
+
+test('other start errors still stop the rollout; only the billing block is skipped', async (t) => {
+  const { env, ids, dispatch } = await fleet(t, 3);
+  const s = await rollouts.startRollout(env, {});
+  let last; for (let i = 0; i < 8; i++) { last = await rollouts.advanceRollout(env, s.rolloutId, { dispatch, deployments: blockSite(ids[0], 'something_else_broke') }); if (last.done) break; }
+  assert.equal(last.status, 'failed'); assert.match(last.error, /something_else_broke/);
+  assert.equal(last.counts.failed, 1); assert.equal(last.counts.succeeded + last.counts.pending, 2);
+  for (const it of (await rollouts.getRollout(env, s.rolloutId)).items.filter((i) => i.status === 'pending')) assert.equal(await versionOf(env, it.site_id), '1.0.0', 'waiting sites were not touched');
+});
+
+test('a canary on a billing-blocked site does not count as passed', async (t) => {
+  const { env, ids, dispatch } = await fleet(t, 2);
+  const c = await rollouts.startCanaryRollout(env, { canarySiteId: ids[0] });
+  for (let i = 0; i < 4; i++) { const r = await rollouts.advanceRollout(env, c.rolloutId, { dispatch, deployments: blockSite(ids[0]) }); if (r.done) break; }
+  assert.equal((await rollouts.canaryState(env, '2.0.0')).passed, false);
+});

@@ -281,12 +281,14 @@ export async function renderOrganizationDetailPage(env, admin, id) {
     <h2>Audit (latest 25)</h2>${table(["When", "Actor", "Action", "Resource", "OK"], audit.map((a) => [h(a.created_at), h(a.actor_type || ""), h(a.action || ""), h(`${a.resource || ""} ${a.resource_id || ""}`), a.success ? "✓" : `✗ ${h(a.error_message || "")}`]), "No audit rows.")}`);
 }
 
-export async function renderSubscriptionsPage(env, admin, { status = "", page: rawPage } = {}) {
+export async function renderSubscriptionsPage(env, admin, { status = "", view = "", page: rawPage } = {}) {
   const page = pageNumber(rawPage);
-  const { rows, hasMore } = paged(await staff.listSubscriptions(env, { status, ...pageArgs(page) }));
+  const archive = view === "archive";
+  const { rows, hasMore } = paged(await staff.listSubscriptions(env, { status, archive, ...pageArgs(page) }));
   return shell(env, admin, "Subscriptions", "saas-subs", `
-    <form method="get" style="margin-bottom:12px"><select name="status" ${onChange("lummetSubmitForm", ["$el"])}><option value="">all</option>${["trialing", "active", "past_due", "paused", "canceled", "expired", "suspended"].map((s) => `<option ${s === status ? "selected" : ""}>${s}</option>`).join("")}</select></form>
-    ${table(["Organization", "Plan", "Status", "Trial ends", "Period end"], rows.map((s) => [`<a href="/platform/saas/organizations/${h(s.organization_id)}">${h(s.organization)}</a>`, h(s.plan), badge(s.status), h(s.trial_ends_at || "—"), h(s.current_period_end || "—")]))}${pager("/platform/saas/subscriptions", { status }, page, hasMore)}`);
+    <form method="get" style="margin-bottom:12px">${archive ? '<input type="hidden" name="view" value="archive" />' : ""}<select name="status" ${onChange("lummetSubmitForm", ["$el"])}><option value="">all</option>${["trialing", "active", "past_due", "paused", "canceled", "expired", "suspended"].map((s) => `<option ${s === status ? "selected" : ""}>${s}</option>`).join("")}</select></form>
+    ${archive ? `<p class="ops-note">Billing archive: subscriptions of organizations that were closed, deleted or erased. <a href="/platform/saas/subscriptions">Back to current subscriptions</a></p>` : `<p class="ops-note">Billing history of deleted or erased organizations is kept in the <a href="/platform/saas/subscriptions?view=archive">billing archive</a>.</p>`}
+    ${table(["Organization", "Plan", "Status", "Trial ends", "Period end"], rows.map((s) => [`<a href="/platform/saas/organizations/${h(s.organization_id)}">${h(s.organization)}</a>${s.erased_at ? " " + badge("erased") : ""}`, h(s.plan), badge(s.status), h(s.trial_ends_at || "—"), h(s.current_period_end || "—")]))}${pager("/platform/saas/subscriptions", { status, view: archive ? "archive" : "" }, page, hasMore)}`);
 }
 
 // The plan catalog manager (full CRUD, bulk actions, labels, SEO, promotions, price versions) lives in plan-catalog-admin.js.
@@ -390,26 +392,28 @@ const NOTIFICATION_STATE_HELP = {
   sent: "delivered; it cannot be resent"
 };
 
-export async function renderNotificationsPage(env, admin, { organization = "", kind = "", state = "", page: rawPage } = {}) {
+export async function renderNotificationsPage(env, admin, { organization = "", kind = "", state = "", view = "", page: rawPage } = {}) {
   const page = pageNumber(rawPage);
   const org = String(organization || "").slice(0, 64);
   const k = BILLING_KINDS.includes(kind) ? kind : "";
   const st = notificationRepo.NOTIFICATION_STATES.includes(state) ? state : "";
-  const { rows, hasMore } = paged(await notificationRepo.listForStaff(env, { organizationId: org, kind: k, state: st, ...pageArgs(page) }));
+  const archive = view === "archive";
+  const { rows, hasMore } = paged(await notificationRepo.listForStaff(env, { organizationId: org, kind: k, state: st, archive, ...pageArgs(page) }));
   const canResend = (n) => n.state === "stuck" || n.state === "pending" || n.state === "failed";
   return shell(env, admin, "Billing notifications", "saas-notifications", `
     <p style="color:var(--text-dim)">Every billing email Lummet decided to send, one row per notice. Resend is dedupe-aware: it never writes a new message, so it cannot send a duplicate. It only retries a notice that never reached the outbox, or puts a message that failed delivery back in the queue. A delivered or in-flight notice cannot be resent. Resend does nothing unless <code>BILLING_EMAILS</code> is <code>on</code>, and every resend is audited.</p>
     <form method="get" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      <input name="organization" value="${h(org)}" placeholder="organization id" />
+      ${archive ? '<input type="hidden" name="view" value="archive" />' : ""}<input name="organization" value="${h(org)}" placeholder="organization id" />
       <select name="kind"><option value="">all kinds</option>${BILLING_KINDS.map((x) => `<option ${x === k ? "selected" : ""}>${h(x)}</option>`).join("")}</select>
       <select name="state"><option value="">all states</option>${notificationRepo.NOTIFICATION_STATES.map((x) => `<option ${x === st ? "selected" : ""}>${h(x)}</option>`).join("")}</select>
       <button class="btn" type="submit">Filter</button></form>
+    ${archive ? `<p class="ops-note">Billing archive: notices of organizations that were closed, deleted or erased. <a href="/platform/saas/notifications">Back to current notifications</a></p>` : `<p class="ops-note">Notices of deleted or erased organizations are kept in the <a href="/platform/saas/notifications?view=archive">billing archive</a>. Filtering by an organization id still finds them.</p>`}
     ${table(["When", "Organization", "Notice", "Stage", "State", "Recipients", "Detail", ""], rows.map((n) => [
       h(n.created_at), orgLink(n.organization_id, n.organization_name || n.organization_id), h(n.kind), h(n.stage || ""),
       `${badge(n.state)}`, h(n.recipient_count) + (n.suppressed_count ? ` (+${h(n.suppressed_count)} suppressed)` : ""),
       h(n.last_error || (n.failed_messages ? `${n.failed_messages} message(s) failed` : "")),
       canResend(n) ? `<button class="btn"${onClick("act", [`/api/platform/saas/notifications/${n.id}/resend`, {}, `Resend this ${n.kind} notice? Only a message that failed, or a notice that never reached the outbox, is sent again.`])}>Resend</button>` : ""
-    ]), "No billing notifications match.")}${pager("/platform/saas/notifications", { organization: org, kind: k, state: st }, page, hasMore)}
+    ]), "No billing notifications match.")}${pager("/platform/saas/notifications", { organization: org, kind: k, state: st, view: archive ? "archive" : "" }, page, hasMore)}
     <h3>States</h3><ul>${Object.entries(NOTIFICATION_STATE_HELP).map(([a, b]) => `<li>${badge(a)} ${h(b)}</li>`).join("")}</ul>`);
 }
 

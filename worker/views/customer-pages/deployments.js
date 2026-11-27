@@ -38,7 +38,8 @@ function rowActions(site, deployment, canManage) {
   return `<button class="btn"${onClick("lummetRollback", [site.id, deployment.id])}>Roll back to this</button>`;
 }
 
-function siteCard(site, deployments, latestVersion, canManage) {
+/** recentLimit (number) shows only that many of the newest deployments with a link to the site's full history; null shows them all (the original behaviour). */
+function siteCard(site, deployments, latestVersion, canManage, recentLimit = null) {
   const current = deployments.find((d) => d.is_current === 1);
   const busy = deployments.some((d) => IN_PROGRESS.has(d.status));
   const outOfDate = latestVersion && (!current || current.version !== latestVersion);
@@ -59,8 +60,12 @@ function siteCard(site, deployments, latestVersion, canManage) {
     banner += `<p><a class="btn" href="/app/sites/${encodeURIComponent(site.id)}/admin-setup">Admin setup</a></p>`;
   }
 
+  const shown = recentLimit && deployments.length > recentLimit ? deployments.slice(0, recentLimit) : deployments;
+  const more = shown.length < deployments.length
+    ? `<p class="subtitle">Showing the ${shown.length} most recent of ${deployments.length} deployments. <a class="btn btn-secondary" href="/app/deployments?site=${encodeURIComponent(site.id)}">View more deployments for this site</a></p>`
+    : "";
   const rows = deployments.length
-    ? deployments.map((d) => `
+    ? shown.map((d) => `
         <tr>
           <td class="mono">${escapeHtml(d.version)}${d.is_current ? ' <span class="badge">current</span>' : ""}</td>
           <td>${d.is_rollback ? "Rollback" : "Deploy"}</td>
@@ -79,13 +84,14 @@ function siteCard(site, deployments, latestVersion, canManage) {
         <thead><tr><th>Version</th><th>Type</th><th>Status</th><th>Started</th><th>Error</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      ${more}
     </div>`;
 }
 
 /** The site cards. Used by the page and by the live-cards endpoint, so a refresh can never show something the page would not. */
-export function renderDeploymentCards({ sites, deploymentsBySite, latestVersion, latestByLine = null, canManage }) {
+export function renderDeploymentCards({ sites, deploymentsBySite, latestVersion, latestByLine = null, canManage, recentLimit = null }) {
   return sites.length
-    ? sites.map((s) => siteCard(s, deploymentsBySite[s.id] || [], (latestByLine && latestByLine[s.template_line || "casino"]) || latestVersion, canManage)).join("")
+    ? sites.map((s) => siteCard(s, deploymentsBySite[s.id] || [], (latestByLine && latestByLine[s.template_line || "casino"]) || latestVersion, canManage, recentLimit)).join("")
     : `<div class="card"><p class="empty">Create a site first. Its deployments will show up here.</p></div>`;
 }
 
@@ -94,13 +100,25 @@ export function deploymentsAreBusy(deploymentsBySite) {
   return Object.values(deploymentsBySite || {}).some((list) => (list || []).some((d) => DEPLOYMENT_TRANSIENT.has(d.status)));
 }
 
-export function renderDeploymentsPage({ sites, deploymentsBySite, latestVersion, latestByLine = null, canManage, organizationId = null }) {
-  const cards = renderDeploymentCards({ sites, deploymentsBySite, latestVersion, latestByLine, canManage });
-  const liveSrc = organizationId ? `/api/organizations/${encodeURIComponent(organizationId)}/deployments/live-cards` : null;
+/** The number of newest deployments each site card shows on the overview list; the rest are one click away on the site's own page. */
+export const RECENT_DEPLOYMENTS = 2;
+
+/**
+ * recentLimit: show only that many deployments per site (the list page passes RECENT_DEPLOYMENTS); null keeps every row (the original behaviour).
+ * siteId: the page of one site with its whole history (sites then holds just that site).
+ */
+export function renderDeploymentsPage({ sites, deploymentsBySite, latestVersion, latestByLine = null, canManage, organizationId = null, recentLimit = null, siteId = null }) {
+  const cards = renderDeploymentCards({ sites, deploymentsBySite, latestVersion, latestByLine, canManage, recentLimit: siteId ? null : recentLimit });
+  const liveSrc = organizationId ? `/api/organizations/${encodeURIComponent(organizationId)}/deployments/live-cards${siteId ? "?site=" + encodeURIComponent(siteId) : ""}` : null;
+  const head = siteId && sites[0]
+    ? `<p><a href="/app/deployments">&larr; All sites</a></p>
+    <h1>Deployments: ${escapeHtml(sites[0].name)}</h1>
+    <p class="subtitle">Every deployment of this site, newest first.</p>`
+    : `<h1>Deployments</h1>
+    <p class="subtitle">See what version each site runs, update to the latest release, or go back to an earlier working version.</p>`;
 
   return `
-    <h1>Deployments</h1>
-    <p class="subtitle">See what version each site runs, update to the latest release, or go back to an earlier working version.</p>
+    ${head}
     <div id="deployments-live"${liveSrc ? liveAttrs(liveSrc, cards) : ""}>${cards}</div>
     <script nonce="${nonceToken()}">
       function lummetActiveOrgId() { var el = document.getElementById('org-switcher'); return el ? el.value : null; }

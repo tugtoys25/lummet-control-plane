@@ -159,12 +159,13 @@ export async function updatePlan(env, planId, { priceCents, status, trialDays, s
   return { ok: true, before: { status: plan.status, trial_days: plan.trial_days } };
 }
 
-export async function listSubscriptions(env, { status = "", limit = 100, offset = 0 } = {}) {
+/** Billing history of closed, deleted or erased organizations is the billing archive: archive=true lists only that, the default lists the rest. */
+export async function listSubscriptions(env, { status = "", archive = false, limit = 100, offset = 0 } = {}) {
   const r = await env.LUMMET_DB.prepare(
-    `SELECT s.id, s.status, s.trial_ends_at, s.current_period_end, s.created_at, o.id AS organization_id, o.name AS organization, p.name AS plan
+    `SELECT s.id, s.status, s.trial_ends_at, s.current_period_end, s.created_at, o.id AS organization_id, o.name AS organization, o.erased_at, p.name AS plan
      FROM subscriptions s JOIN organizations o ON o.id = s.organization_id JOIN plans p ON p.id = s.plan_id
-     WHERE (? = '' OR s.status = ?) ORDER BY s.created_at DESC, s.id LIMIT ? OFFSET ?`
-  ).bind(status, status, Math.min(limit, 500), off(offset)).all();
+     WHERE (? = '' OR s.status = ?) AND ((? = 1 AND o.status = 'closed') OR (? = 0 AND o.status != 'closed')) ORDER BY s.created_at DESC, s.id LIMIT ? OFFSET ?`
+  ).bind(status, status, archive ? 1 : 0, archive ? 1 : 0, Math.min(limit, 500), off(offset)).all();
   return r.results;
 }
 

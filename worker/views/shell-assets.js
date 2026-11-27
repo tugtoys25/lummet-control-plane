@@ -585,6 +585,17 @@ export const STYLES = `
   .ops-spark-label { color: var(--text-dim); font-size: 12px; margin: 10px 0 2px; }
   .ops-sub { color: var(--text-dim); font-size: 13px; margin: 10px 0 0; }
   .ops-note { color: var(--text-dim); font-size: 13px; }
+  .usage-bar { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--text-dim) 18%, transparent); overflow: hidden; margin-top: 10px; }
+  .usage-bar > span { display: block; height: 100%; background: var(--accent); }
+  .usage-bar.is-warn > span { background: var(--warn); }
+  .usage-bar.is-full > span { background: var(--danger); }
+  ol.check-list { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+  ol.check-list li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+  ol.check-list .tick { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--panel-border); flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1; }
+  ol.check-list li.is-done { color: var(--text-dim); }
+  ol.check-list li.is-done .tick { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .checklist-progress { color: var(--text-dim); font-size: 13px; margin: -6px 0 12px; }
 `;
 
 // Extra rules for the customer portal (customer-layout.js). Everything above is shared with the staff

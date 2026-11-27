@@ -265,6 +265,7 @@ const SETTING_LABELS = {
   accent_color_secondary: "Secondary accent color",
   section_background: "Default section background",
   page_header_background: "Page header band",
+  hero_background: "Homepage hero colour",
   hero_eyebrow: "Hero eyebrow text",
   hero_title: "Hero title",
   hero_subtitle: "Hero subtitle",
@@ -292,14 +293,17 @@ const SETTING_HINTS = {
   accent_color_secondary: "Optional second accent colour. The standard theme does not use it yet.",
   section_background: "Used by homepage sections whose own Background is left on Default. Normally white; pick Blue band to make every such section blue.",
   page_header_background: "Colour behind the title on inner pages (brands, updates, insights, partners, pricing, forms) and on pages left on Default. Soft grey is the original look.",
+  hero_background: "Colour behind the big title on the homepage. Default keeps the original look. Soft, Blue and Dark match the section bands; Indigo, Teal and Plum are hero-only. Text and buttons switch to light automatically on dark colours.",
   announce_text: "Solid blue bar above the header on every public page. Leave blank to hide it.",
   announce_url: "Optional. Shown as a link after the text when the link label is also filled in."
 };
 
-const BAND_LABELS = { default: "White (no band)", soft: "Soft grey", blue: "Blue band", dark: "Dark band" };
+const BAND_LABELS = { default: "White (no band)", soft: "Soft grey", blue: "Blue band", dark: "Dark band", indigo: "Indigo", teal: "Teal", plum: "Plum" };
+const HERO_LABELS = { ...BAND_LABELS, default: "Default (original look)" };
 const SETTING_SELECTS = {
   section_background: { options: ["default", "soft", "blue", "dark"], blank: "default" },
-  page_header_background: { options: ["soft", "default", "blue", "dark"], blank: "soft" }
+  page_header_background: { options: ["soft", "default", "blue", "dark"], blank: "soft" },
+  hero_background: { options: ["default", "soft", "blue", "dark", "indigo", "teal", "plum"], blank: "default", labels: HERO_LABELS }
 };
 
 function settingInput(key, settings) {
@@ -307,7 +311,7 @@ function settingInput(key, settings) {
   const value = settings[key] || "";
   if (sel) {
     const current = value || sel.blank;
-    const opts = sel.options.map((o) => `<option value="${o}" ${current === o ? "selected" : ""}>${escapeHtml(BAND_LABELS[o])}</option>`).join("");
+    const opts = sel.options.map((o) => `<option value="${o}" ${current === o ? "selected" : ""}>${escapeHtml((sel.labels || BAND_LABELS)[o])}</option>`).join("");
     return `<select name="${key}">${opts}</select>`;
   }
   return `<input type="text" name="${key}" value="${escapeHtml(value)}" />`;
@@ -334,7 +338,7 @@ export async function renderSiteSettingsPage(env, admin, flash) {
     ${flashHtml(flash)}
     <form method="POST" action="/cms/settings" class="card">
       <h3 style="margin-top:0;">Branding</h3>
-      ${["site_name", "logo_url", "accent_color", "accent_color_secondary", "section_background", "page_header_background"].map((key) => {
+      ${["site_name", "logo_url", "accent_color", "accent_color_secondary", "section_background", "page_header_background", "hero_background"].map((key) => {
         const hint = SETTING_HINTS[key];
         return `<div class="form-group">
           <label>${escapeHtml(SETTING_LABELS[key] || key)}${hint ? ` <span style="color:var(--text-dim);font-weight:400;">— ${escapeHtml(hint)}</span>` : ""}</label>
@@ -342,7 +346,7 @@ export async function renderSiteSettingsPage(env, admin, flash) {
         </div>`;
       }).join("")}
       <h3>Homepage copy</h3>
-      ${SITE_SETTING_KEYS.filter((k) => !["site_name", "logo_url", "accent_color", "accent_color_secondary", "section_background", "page_header_background"].includes(k))
+      ${SITE_SETTING_KEYS.filter((k) => !["site_name", "logo_url", "accent_color", "accent_color_secondary", "section_background", "page_header_background", "hero_background"].includes(k))
         .map((key) => {
           const isLong = ["hero_subtitle", "footer_text", "footer_note", "site_description", "brands_intro", "updates_intro", "insights_intro", "partners_intro"].includes(key);
           return `<div class="form-group">

@@ -75,3 +75,38 @@ test('page header: site setting colours inner pages, a CMS page can override it,
   assert.doesNotMatch(bad, /onload=/);
   assert.match(bad, /<header class="page-hero bg-blue">/);   // bad value is treated as Default, so it follows the site setting
 });
+
+// ---- Homepage hero colour (hero_background) ----
+import { heroBg, HERO_BACKGROUNDS } from '../worker/public-site/backgrounds.js';
+
+test('hero colour: unknown values fall back to the original look and never reach a class name', () => {
+  assert.equal(heroBg('plum'), 'plum');
+  assert.equal(heroBg('blue'), 'blue');
+  assert.equal(heroBg('x" onload="y'), 'default');
+  assert.equal(heroBg(undefined), 'default');
+  assert.ok(HERO_BACKGROUNDS.includes('default'));
+});
+
+test('hero colour: setting is listed, rendered as a select with Default selected when unset', async () => {
+  assert.ok(SITE_SETTING_KEYS.includes('hero_background'));
+  const env = createPublicEnv();
+  env.LUMMET_DB = env.db;
+  const html = await renderSiteSettingsPage(env, { id: 'a', role: 'super_admin', email: 'x@y.z' }, null);
+  assert.match(html, /<select name="hero_background">/);
+  assert.match(html, /<option value="default" selected>Default \(original look\)/);
+  assert.match(html, /<option value="plum" >Plum/);
+});
+
+test('homepage hero: default keeps the original class; a chosen colour adds bg-<colour>; junk is ignored', async () => {
+  const env = createPublicEnv();
+  await setting(env, 'hero_title', 'One platform. Many brands.');
+  let html = await text(await get(handlePublicRoute, env, '/'));
+  assert.match(html, /<section class="hero">/);
+  await setting(env, 'hero_background', 'teal');
+  html = await text(await get(handlePublicRoute, env, '/'));
+  assert.match(html, /<section class="hero bg-teal">/);
+  await setting(env, 'hero_background', 'red"><script>');
+  html = await text(await get(handlePublicRoute, env, '/'));
+  assert.match(html, /<section class="hero">/);
+  assert.doesNotMatch(html, /<script>/);
+});

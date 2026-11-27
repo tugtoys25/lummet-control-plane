@@ -559,6 +559,32 @@ export const STYLES = `
   .bb-empty { margin: 0; color: var(--text-dim); font-size: 13.5px; }
   @media (max-width: 560px) { .brand-band { padding: 14px 12px 14px; } .page-crumb strong { font-size: 15px; } }
   @media (prefers-reduced-motion: reduce) { .bb-card, .topbar .icon-btn { transition: none; } .bb-card:hover { transform: none; } }
+
+  /* Operations overview (staff dashboard) */
+  .ops-attn { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .ops-attn li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--panel-border); border-radius: var(--radius-sm); border-left-width: 4px; background: var(--panel); }
+  .ops-attn li.is-danger { border-left-color: var(--danger); }
+  .ops-attn li.is-warn { border-left-color: var(--warn); }
+  .ops-attn .ops-t { font-weight: 600; font-size: 14px; }
+  .ops-attn .ops-d { color: var(--text-dim); font-size: 13px; }
+  .ops-attn .badge { min-width: 64px; text-align: center; }
+  .ops-attn .ops-go { margin-left: auto; white-space: nowrap; font-size: 13px; }
+  .ops-allclear { display: flex; align-items: center; gap: 10px; padding: 14px; border: 1px solid var(--panel-border); border-left: 4px solid var(--ok); border-radius: var(--radius-sm); background: var(--panel); }
+  .ops-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 0; }
+  .ops-cols > .card { margin-bottom: 0; }
+  .card .ops-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  .card .ops-head h2 { margin: 0; }
+  .card .ops-head a { font-size: 13px; }
+  .ops-kv { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; font-size: 14px; margin: 0; }
+  .ops-kv dt { color: var(--text-dim); }
+  .ops-kv dd { margin: 0; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+  .ops-bar { height: 8px; border-radius: 999px; background: color-mix(in srgb, var(--text-dim) 18%, transparent); overflow: hidden; margin: 6px 0 12px; }
+  .ops-bar > span { display: block; height: 100%; background: var(--ok); }
+  .ops-spark { display: block; width: 100%; height: 36px; color: var(--accent); }
+  .ops-spark.is-bad { color: var(--danger); }
+  .ops-spark-label { color: var(--text-dim); font-size: 12px; margin: 10px 0 2px; }
+  .ops-sub { color: var(--text-dim); font-size: 13px; margin: 10px 0 0; }
+  .ops-note { color: var(--text-dim); font-size: 13px; }
 `;
 
 // Extra rules for the customer portal (customer-layout.js). Everything above is shared with the staff

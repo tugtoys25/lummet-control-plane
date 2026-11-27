@@ -19,7 +19,13 @@ import { outboxStats } from "./email.js";
 
 const like = (q) => `%${String(q || "").trim().replace(/[%_]/g, "")}%`;
 
+/**
+ * Closed (deleted) organizations are the archive. With no status and no search the list shows only current organizations;
+ * a search still finds archived ones, and status "archived" (or "closed") lists only the archive.
+ */
 export async function listOrganizations(env, { q = "", status = "", limit = 50, offset = 0 } = {}) {
+  const wanted = status === "archived" ? "closed" : status;
+  const hideClosed = wanted === "" && String(q || "").trim() === "" ? 1 : 0;
   const r = await env.LUMMET_DB.prepare(
     `SELECT o.id, o.name, o.slug, o.status, o.created_at,
        (SELECT COUNT(*) FROM organization_users WHERE organization_id = o.id) AS members,
@@ -27,9 +33,9 @@ export async function listOrganizations(env, { q = "", status = "", limit = 50, 
        (SELECT p.name || ' (' || s.status || ')' FROM subscriptions s JOIN plans p ON p.id = s.plan_id
           WHERE s.organization_id = o.id ORDER BY s.created_at DESC LIMIT 1) AS subscription
      FROM organizations o
-     WHERE (o.name LIKE ? OR o.slug LIKE ? OR o.id = ?) AND (? = '' OR o.status = ?)
+     WHERE (o.name LIKE ? OR o.slug LIKE ? OR o.id = ?) AND (? = '' OR o.status = ?) AND (? = 0 OR o.status != 'closed')
      ORDER BY o.created_at DESC, o.id LIMIT ? OFFSET ?`
-  ).bind(like(q), like(q), String(q).trim(), status, status, Math.min(limit, 200), off(offset)).all();
+  ).bind(like(q), like(q), String(q).trim(), wanted, wanted, hideClosed, Math.min(limit, 200), off(offset)).all();
   return r.results;
 }
 

@@ -233,12 +233,14 @@ export async function renderSaasOverview(env, admin) {
 
 export async function renderOrganizationsPage(env, admin, { q = "", status = "", page: rawPage } = {}) {
   const page = pageNumber(rawPage);
+  const archive = status === "archived" || status === "closed";
   const { rows: orgs, hasMore } = paged(await staff.listOrganizations(env, { q, status, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }));
   return shell(env, admin, "Organizations", "saas-orgs", `
     <form method="get" style="display:flex;gap:8px;margin-bottom:12px">
       <input name="q" value="${h(q)}" placeholder="name, slug or id" />
-      <select name="status"><option value="">all</option>${["active", "suspended", "closed"].map((s) => `<option ${s === status ? "selected" : ""}>${s}</option>`).join("")}</select>
+      <select name="status"><option value="">current</option>${["active", "suspended"].map((s) => `<option ${s === status ? "selected" : ""}>${s}</option>`).join("")}<option value="archived" ${archive ? "selected" : ""}>archive (deleted)</option></select>
       <button class="btn" type="submit">Search</button></form>
+    ${archive ? `<p class="ops-note">Showing the archive: organizations that were closed or deleted. <a href="/platform/saas/organizations">Back to current organizations</a></p>` : `<p class="ops-note">Deleted organizations are kept in the <a href="/platform/saas/organizations?status=archived">archive</a>. Searching by name or id still finds them.</p>`}
     ${table(["Name", "Status", "Members", "Sites", "Subscription", "Created"], orgs.map((o) => [`<a href="/platform/saas/organizations/${h(o.id)}">${h(o.name)}</a>`, badge(o.status), o.members, o.sites, h(o.subscription || "—"), h(o.created_at)]), "No organizations match.")}${pager("/platform/saas/organizations", { q, status }, page, hasMore)}`);
 }
 

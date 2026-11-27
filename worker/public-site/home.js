@@ -14,7 +14,7 @@ import { safeUrl, isExternal, formatDate } from "./format.js";
 import { heroGraphSvg } from "./hero-graph.js";
 import { isLiveHref } from "./links.js";
 import { plansTeaser } from "./plans-teaser.js";
-import { sectionBg } from "./backgrounds.js";
+import { sectionBg, heroBg } from "./backgrounds.js";
 import { sectionStyleClasses } from "./section-style.js";
 
 const KINDS = new Set([
@@ -171,6 +171,7 @@ export async function buildHome(ctx) {
         primary_href: safeUrl(settings.hero_cta_primary_href),
         secondary_label: settings.hero_cta_secondary_label || "",
         secondary_href: safeUrl(settings.hero_cta_secondary_href),
+        bg_class: heroBg(settings.hero_background) === "default" ? "" : ` bg-${heroBg(settings.hero_background)}`,
         graph_svg: heroGraphSvg(site.name, brandCards, ui),
         notes: plans ? [plans.from_note, plans.trial_note, ui.hero_note_cancel || ""].filter(Boolean) : []
       }

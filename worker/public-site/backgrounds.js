@@ -18,3 +18,10 @@ export function headerBg(pageBackground, siteSetting) {
   const own = normalizeBg(pageBackground);
   return own === "default" ? normalizeBg(siteSetting, "soft") : own;
 }
+
+// The homepage hero band. Same four bands as sections, plus three hero-only colours that are not offered anywhere else.
+// "default" = the original hero look (page background). Anything not in this list is treated as "default", so a bad edit can never inject a class name.
+export const HERO_BACKGROUNDS = ["default", "soft", "blue", "dark", "indigo", "teal", "plum"];
+export function heroBg(value) {
+  return HERO_BACKGROUNDS.includes(value) ? value : "default";
+}

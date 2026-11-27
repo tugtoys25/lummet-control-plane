@@ -407,3 +407,29 @@ body:has(.cta-band, .contact-card, .form-layout) .site-footer { padding-top: var
 .verify-record dd { margin: 0; overflow-wrap: anywhere; }
 .verify-values { padding-left: 1.2rem; margin: var(--space-3) 0 var(--space-4); }
 .table-wrap { overflow-x: auto; }
+
+/* ---- Homepage hero colour (Lummet Site > Site settings > Homepage hero colour). Additive: with the default value the hero keeps its
+   original look and none of these rules match. Same token re-pointing as the section bands above, so the hero card, notes, buttons
+   and the eyebrow pill follow automatically. indigo / teal / plum are hero-only colours (dark, white text). ---- */
+.hero.bg-soft { background: var(--bg-soft); }
+.hero.bg-blue { background: var(--band); }
+.hero.bg-dark { background: var(--dark-1); }
+.hero.bg-indigo { background: #312e81; }
+.hero.bg-teal { background: #134e4a; }
+.hero.bg-plum { background: #3b0764; }
+.hero:is(.bg-blue, .bg-dark, .bg-indigo, .bg-teal, .bg-plum) {
+  color: #fff; border-color: transparent;
+  --ink: #ffffff; --ink-dim: rgba(255, 255, 255, 0.88); --ink-faint: rgba(255, 255, 255, 0.82);
+  --accent-ink: #ffffff; --ok: #86efac;
+  --shadow-sm: none; --shadow-md: none; --shadow-lg: none;
+}
+.hero.bg-blue { --surface: rgba(9, 22, 64, 0.30); --surface-raised: rgba(9, 22, 64, 0.38); --bg-soft: rgba(9, 22, 64, 0.30); --bg-tint: rgba(9, 22, 64, 0.24); --accent-soft: rgba(9, 22, 64, 0.32); --ok-soft: rgba(9, 22, 64, 0.35); --border: rgba(255, 255, 255, 0.28); --border-strong: rgba(255, 255, 255, 0.5); }
+.hero:is(.bg-dark, .bg-indigo, .bg-teal, .bg-plum) { --surface: rgba(255, 255, 255, 0.06); --surface-raised: rgba(255, 255, 255, 0.09); --bg-soft: rgba(255, 255, 255, 0.06); --bg-tint: rgba(255, 255, 255, 0.08); --accent-soft: rgba(255, 255, 255, 0.14); --ok-soft: rgba(134, 239, 172, 0.18); --border: rgba(255, 255, 255, 0.16); --border-strong: rgba(255, 255, 255, 0.32); }
+.hero:is(.bg-blue, .bg-dark, .bg-indigo, .bg-teal, .bg-plum) .lede { color: rgba(255, 255, 255, 0.92); }
+.hero:is(.bg-blue, .bg-dark, .bg-indigo, .bg-teal, .bg-plum) .hero-copy h1 .hero-accent,
+.hero:is(.bg-blue, .bg-dark, .bg-indigo, .bg-teal, .bg-plum) .hero-copy h1 em { color: #fff; }
+.hero:is(.bg-blue, .bg-dark, .bg-indigo, .bg-teal, .bg-plum) :focus-visible { outline-color: #fff; }
+.hero:is(.bg-blue, .bg-dark, .bg-indigo, .bg-teal, .bg-plum) .btn-secondary { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.5); }
+.hero:is(.bg-blue, .bg-dark, .bg-indigo, .bg-teal, .bg-plum) .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: #fff; }
+.hero:is(.bg-blue, .bg-indigo, .bg-teal, .bg-plum) .btn-primary { background: #fff; color: #1e1b4b; }
+.hero:is(.bg-blue, .bg-indigo, .bg-teal, .bg-plum) .btn-primary:hover { background: #eef3ff; color: #1447b8; }

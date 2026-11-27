@@ -162,6 +162,7 @@ export const SITE_SETTING_KEYS = [
   "accent_color_secondary",
   "section_background",
   "page_header_background",
+  "hero_background",
   "hero_eyebrow",
   "hero_title",
   "hero_subtitle",

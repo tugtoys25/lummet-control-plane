@@ -87,7 +87,7 @@ export const AD_SLIDER_CLIENT = String.raw`
   }
   function settingsForm() {
     var s = state.settings, c = data.choices, L = {
-      transition: { fade: 'Fade', slide: 'Slide', zoom: 'Zoom and fade', kenburns: 'Fade with slow zoom (Ken Burns)' }, fit: { cover: 'Fill the frame (crops edges)', contain: 'Show the whole picture' },
+      transition: { fade: 'Fade', slide: 'Slide', zoom: 'Zoom and fade', kenburns: 'Fade with slow zoom (Ken Burns)' }, fit: { contain: 'Show the whole picture (nothing cropped, soft blurred fill)', cover: 'Fill the frame (crops the edges)' },
       overlay: { soft: 'Soft', strong: 'Strong', none: 'None' }, nav: { dots: 'Dots', bars: 'Bars', none: 'Hidden' }, mobile_ratio: { same: 'Same as desktop' }
     };
     return el('div', { class: 'adx-grid' }, [

@@ -23,8 +23,11 @@ import * as repo from "./repositories/billing-lifecycle.js";
 import { notify } from "./billing-notifications.js";
 import { enqueueSiteAccessPush } from "./site-access.js";
 import { deriveSafely } from "./revenue.js";
+import { enforceTrialEnd } from "./trial-extensions.js";
 
 const BILLING_SUSPENSION_REASON = "billing: suspended for non-payment";
+// Sites paused because the free trial ended (worker/trial-extensions.js). They are restored with the others once the customer pays or is granted an extension.
+export const TRIAL_END_SUSPENSION_REASON = "billing: free trial ended";
 const DAY = 86400000;
 
 const EQUIVALENT_STATE = { trialing: "trialing", active: "active", past_due: "past_due", restricted: "restricted", unpaid: "restricted", suspended: "suspended", expired: "trial_expired" };
@@ -61,7 +64,7 @@ export async function applySiteGate(env, organizationId, state) {
     }
   } else {
     for (const s of sites) {
-      if (s.status !== "suspended" || s.suspension_reason !== BILLING_SUSPENSION_REASON) continue;   // staff suspensions are never undone here
+      if (s.status !== "suspended" || (s.suspension_reason !== BILLING_SUSPENSION_REASON && s.suspension_reason !== TRIAL_END_SUSPENSION_REASON)) continue;   // staff suspensions are never undone here
       const r = await transitionSiteStatus(env, s.id, "active", { reason: "billing: restored", actorType: "system" });
       if (r.ok) {
         try { await enqueueSiteAccessPush(env, s.id, "serving", "billing: restored"); out.restored += 1; }
@@ -98,6 +101,9 @@ export async function sweep(env, now = Date.now(), { cfg, billingService } = {})
   if (billingService) Object.assign(summary, await retryPendingCancellations(env, billingService));
   // Likewise a plan change the customer asked for (sprint 3.2) is resent, with its own idempotency key, until it lands or fails.
   if (billingService?.retryPlanChangeIntents) Object.assign(summary, await billingService.retryPlanChangeIntents(env));
+
+  // Pause sites of ended trials (own switch, off by default; independent of BILLING_ENFORCE).
+  try { const te = await enforceTrialEnd(env, now, { cfg: config }); summary.trialSitesPaused = te.paused; summary.trialSitesRestored = te.restored; } catch (e) { console.error(JSON.stringify({ msg: "trial_end_sweep_failed", error: e?.message || String(e) })); }
 
   if (config.mode === "off" && config.suspendSitesMode !== "shadow") return summary;
   const enforce = config.mode === "enforce";

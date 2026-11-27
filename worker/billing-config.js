@@ -120,6 +120,8 @@ export function billingConfig(env) {
     // Suspending a site only changes a database row until the serve gate (sprint 1.3, tenant repo) exists, so
     // pushing sites to "suspended" is a separate switch, default off.
     suspendSitesMode: (() => { const raw=String((env && env.BILLING_SUSPEND_SITES)||"off").trim().toLowerCase(); return raw==="on"?"enforce":["off","shadow","enforce"].includes(raw)?raw:"off"; })(),
+    // BILLING_TRIAL_END_SITES: on = pause a customer's sites as soon as their free trial ends (until they pay or staff grant an extension). Default off.
+    trialEndSuspend: String((env && env.BILLING_TRIAL_END_SITES) || "off").trim().toLowerCase() === "on",
     suspendSites: ["on","enforce"].includes(String((env && env.BILLING_SUSPEND_SITES) || "off").trim().toLowerCase())
   };
 }

@@ -14,6 +14,7 @@ import { listActiveProducts } from "./repositories/products.js";
 import { effectiveTrialDays, withEffectiveTrial } from "./billing-config.js";
 import * as repo from "./repositories/billing-lifecycle.js";
 import { checkTrialByDomain, recordTrialByDomain } from "./trial-abuse.js";
+import { orgHadTrial as orgHadTrialBefore } from "./repositories/trial-extensions.js";
 
 /**
  * Active products. scope: "all" (default, the original behaviour), "site_types" (what a customer can pick when creating a
@@ -98,6 +99,8 @@ export async function startTrialSubscription(env, organizationId, planId) {
   if (existing) return { ok: false, status: 409, error: "organization_already_subscribed" };
 
   const trialDays = effectiveTrialDays(env, plan.trial_days);
+  // One free trial per organization, ever. After it ended the customer asks staff for an extension instead.
+  if (trialDays > 0 && (await orgHadTrialBefore(env, organizationId))) return { ok: false, status: 409, error: "trial_already_used_by_organization" };
   if (trialDays > 0 && (await hasPriorTrialElsewhere(env, organizationId))) {
     return { ok: false, status: 409, error: "trial_already_used" };
   }

@@ -204,6 +204,7 @@ const NAV = [
     superAdminOnly: true,
     items: [
       { label: "Support inbox", href: "/platform/saas/support", key: "saas-support" },
+      { label: "Trial extensions", href: "/platform/saas/trial-extensions", key: "saas-trial-extensions" },
       { label: "Announcements", href: "/platform/saas/announcements", key: "saas-announcements" }
     ]
   },

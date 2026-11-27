@@ -24,6 +24,7 @@ import { billingConfig, renewalNoticeMode, effectiveTrialDays } from "./billing-
 import { applySiteGate } from "./billing-lifecycle.js";
 import * as lifecycleRepo from "./repositories/billing-lifecycle.js";
 import * as trialAbuse from "./trial-abuse.js";
+import { orgHadTrial as orgHadTrialBefore } from "./repositories/trial-extensions.js";
 import { notify, dayOf } from "./billing-notifications.js";
 import { remindTrial, renewalWanted } from "./billing-reminders.js";
 import { otherOrgOwnedBySamePerson } from "./repositories/billing-lifecycle.js";
@@ -243,6 +244,8 @@ export function createBillingService(provider) {
       }
       if (trialRefused) trialOverride = { trialDays: 0 };
     }
+    // One free trial per organization, ever (also when BILLING_ENFORCE is off): a checkout after a finished trial charges at once.
+    if (!existingSub && !trialOverride && (plan.trial_days || 0) > 0 && (await orgHadTrialBefore(env, organizationId))) trialOverride = { trialDays: 0 };
 
     let couponProviderId = null;
     let couponId = null;

@@ -22,6 +22,7 @@ const COUPON_ERRORS = {
   coupon_not_supported_for_gateway: "Discount codes can't be used with crypto payments.",
   use_crypto_checkout_to_change_plan: "To change plans on a crypto subscription, use Pay with crypto on the plan you want.",
   not_available_for_crypto: "That option isn't available for crypto subscriptions.",
+  trial_already_used_by_organization: "Your free trial has already been used. Choose a plan, or ask for a trial extension.",
   trial_already_used: "A free trial has already been used by the owner of this account on another organization. Choose a plan below to subscribe.",
   card_required_for_trial: "Free trials start on Stripe's secure payment page. Use the plan's trial button to continue.",
   organization_already_subscribed: "This organization already has a plan. Reload the page to see it."
@@ -37,7 +38,52 @@ function planPrice(p) {
   return p.price_cents != null ? formatMoney(p.price_cents, p.currency) + " / " + escapeHtml(p.billing_period) : "Custom";
 }
 
-export function renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling = canManage, checkoutStatus, selectedPlanId = null, billingProfile = null, access = null, usage = null, aiCredits = null, cardRequiredTrial = false, cryptoReady = false }) {
+
+const EXT_ERRORS = {
+  trial_still_running: "Your trial is still running.", request_already_pending: "You already have a request waiting for review.",
+  message_required: "Please tell us briefly why you need more time.", invalid_days: "Choose between 1 and 90 days.",
+  no_trial_to_extend: "There is no ended trial to extend.", forbidden: "Only an organization admin can send this request."
+};
+
+/** After a free trial has ended: the customer cannot start another one; they ask for an extension, or choose a plan. */
+function extensionCard(ext, canManage) {
+  if (!ext || !ext.hadTrial || ext.trialEnded === false && !ext.pending && !ext.last) return "";
+  const when = (v) => (v ? formatDate(v) : "");
+  if (ext.pending) {
+    return `<div class="card" id="trial-extension" role="status"><h2>Trial extension requested</h2>
+      <p>Your request from ${escapeHtml(when(ext.pending.created_at))} is waiting for review. We will email you and post the answer in Announcements.${ext.pending.wanted_days ? ` You asked for ${escapeHtml(String(ext.pending.wanted_days))} day${ext.pending.wanted_days === 1 ? "" : "s"}.` : ""}</p>
+      <p class="subtitle">You can also choose a plan below to bring your sites back right away.</p></div>`;
+  }
+  if (!ext.trialEnded) return "";
+  const last = ext.last && ext.last.status === "declined"
+    ? `<div class="flash flash-error" role="status"><strong>Your last request was declined${ext.last.decided_at ? " on " + escapeHtml(when(ext.last.decided_at)) : ""}.</strong>${ext.last.decision_comment ? " " + escapeHtml(ext.last.decision_comment) : ""}</div>` : "";
+  const form = canManage ? `
+      <label for="trial-ext-message">Why do you need more time?</label>
+      <textarea id="trial-ext-message" rows="3" maxlength="1000" style="width:100%" placeholder="For example: we are still setting up and need another week to test."></textarea>
+      <label for="trial-ext-days">Days you would like (optional)</label>
+      <input id="trial-ext-days" type="number" min="1" max="90" style="width:8rem" />
+      <p><button class="btn" type="button"${onClick("lummetRequestExtension", [])}>Request a trial extension</button> <span id="trial-ext-msg" class="subtitle" role="status"></span></p>`
+    : `<p class="subtitle">Ask an organization admin to send the request.</p>`;
+  return `<div class="card" id="trial-extension"><h2>Your free trial has ended</h2>
+      <p>A free trial can only be used once per organization. Your sites are paused until you choose a plan, or until our team approves more trial time.</p>${last}${form}</div>
+    <script nonce="${nonceToken()}">
+      var EXT_ERRORS = ${JSON.stringify(EXT_ERRORS).replace(/</g, "\\u003c")};
+      function lummetRequestExtension() {
+        var org = document.getElementById('org-switcher'), out = document.getElementById('trial-ext-msg');
+        var days = document.getElementById('trial-ext-days').value;
+        fetch('/api/organizations/' + (org ? org.value : '') + '/trial-extension', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: document.getElementById('trial-ext-message').value, wantedDays: days ? Number(days) : null }) })
+          .then(function (r) { return r.json(); }).then(function (d) {
+            if (!d.success) { out.textContent = EXT_ERRORS[d.error] || String(d.error || 'Could not send').replace(/_/g, ' '); return; }
+            location.reload();
+          }).catch(function () { out.textContent = 'Could not send. Please try again.'; });
+      }
+    </script>`;
+}
+
+export function renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling = canManage, checkoutStatus, selectedPlanId = null, billingProfile = null, access = null, usage = null, aiCredits = null, cardRequiredTrial = false, cryptoReady = false, extension = null }) {
+  // One free trial per organization: once it has been used, no trial buttons are shown and the customer can ask for an extension instead.
+  const trialUsed = !!(extension && extension.hadTrial);
   const isPaid = !!(subscription && subscription.provider);
   const isTrialNoCard = !!(subscription && !subscription.provider);
 
@@ -86,7 +132,7 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
       </div>`
     : `
       <div class="card">
-        <h2>No plan yet</h2>
+        <h2>${trialUsed ? "Choose a plan" : "No plan yet"}</h2>
         <p style="color:var(--text-dim);font-size:14px;">${cardRequiredTrial ? "Choose a plan below. Your free trial starts on Stripe's secure payment page, where you add a card; you are not charged until the trial ends, and you can cancel before then." : "Choose a plan below. A free trial needs no card; subscribing takes you to Stripe's secure payment page."}</p>
       </div>`;
 
@@ -137,11 +183,11 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
     const crypto = `<button class="btn btn-secondary" data-crypto-plan style="display:none"${onClick("lummetCheckout", [p.id, "nowpayments"])}>Pay with crypto</button>`;
     if (isPaid) return `<button class="btn"${onClick("lummetChangePlan", [p.id])}>Switch to this plan</button> ` + crypto;
     const buy = p.active_price_id
-      ? `<button class="btn"${onClick("lummetCheckout", [p.id])}>${p.id === selectedPlanId ? "Continue with selected plan" : (cardRequiredTrial && !subscription && p.trial_days ? "Start " + escapeHtml(String(p.trial_days)) + "-day trial" : "Subscribe")}</button>`
+      ? `<button class="btn"${onClick("lummetCheckout", [p.id])}>${p.id === selectedPlanId ? "Continue with selected plan" : (cardRequiredTrial && !subscription && p.trial_days && !trialUsed ? "Start " + escapeHtml(String(p.trial_days)) + "-day trial" : "Subscribe")}</button>`
       : (cryptoReady && Number(p.price_cents) > 0
         ? `<button class="btn"${onClick("lummetCheckout", [p.id, "nowpayments"])}>Subscribe with crypto</button>`
         : `<span style="color:var(--text-dim);font-size:13px;">Not available online</span>`);
-    const trial = !cardRequiredTrial && !subscription && p.trial_days ? `<button class="btn btn-secondary"${onClick("lummetStartTrial", [p.id])}>Start ${escapeHtml(String(p.trial_days))}-day trial</button> ` : "";
+    const trial = !cardRequiredTrial && !subscription && !trialUsed && p.trial_days ? `<button class="btn btn-secondary"${onClick("lummetStartTrial", [p.id])}>Start ${escapeHtml(String(p.trial_days))}-day trial</button> ` : "";
     return trial + buy + (p.active_price_id ? " " + crypto : "");
   };
 
@@ -188,6 +234,7 @@ export function renderBillingPage({ subscription, plan, invoices, availablePlans
     ${accessBanner}
     ${usageCard}
     ${currentPlanCard}
+    ${extensionCard(extension, canManage)}
     ${profileCard}
     ${couponBox}
     ${planOptions}

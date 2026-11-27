@@ -153,6 +153,8 @@ import * as integrationsModule from "./integrations.js";
 import * as supportModule from "./support.js";
 import * as privateFiles from "./private-files.js";
 import * as announcementsModule from "./announcements.js";
+import * as trialExtensions from "./trial-extensions.js";
+import { renderTrialExtensionsPage } from "./views/pages/trial-extensions-admin.js";
 import { renderCustomerAnnouncementsPage } from "./views/customer-pages/announcements.js";
 import { renderAnnouncementEditPage, renderAnnouncementsAdminPage } from "./views/pages/announcements-admin.js";
 import { searchOrganization } from "./search.js";
@@ -1651,6 +1653,20 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               await aAudit("delete", rule[1], r);
               return r.ok ? json({ success: true }) : json({ success: false, error: r.error }, r.status);
             }
+          }
+
+          // A finished trial cannot be restarted: the customer asks for an extension, staff approve (days) or decline (comment).
+          if (method === "POST" && subPath === "/trial-extension") {
+            const guard = await requireOrgRole(organizationId, "admin");
+            if (guard) return guard;
+            const body = await request.json().catch(() => ({}));
+            const result = await trialExtensions.requestExtension(env, { organizationId, userId: customer.id, message: body.message, wantedDays: body.wantedDays });
+            await logAudit(env, {
+              actorType: "customer_user", customerUserId: customer.id, organizationId,
+              endpoint: path, method, resource: "trial_extension", resourceId: result.id || null, action: "request",
+              success: result.ok, statusCode: result.ok ? 200 : result.status, errorMessage: result.ok ? null : result.error, requestId, ipHash: customerIpHash
+            });
+            return result.ok ? json({ success: true, id: result.id }) : json({ success: false, error: result.error }, result.status);
           }
 
           if (method === "POST" && subPath === "/trial") {
@@ -3617,7 +3633,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             shell({
               title: "Billing", activeKey: "billing", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling, checkoutStatus, selectedPlanId: url.searchParams.get("plan") || null, billingProfile, access, usage, aiCredits, cardRequiredTrial: cardRequiredTrial(env), cryptoReady: await billingGateways.cryptoReady(env) })
+              bodyHtml: renderBillingPage({ subscription, plan, invoices, availablePlans, canManage, canManageBilling, checkoutStatus, selectedPlanId: url.searchParams.get("plan") || null, billingProfile, access, usage, aiCredits, cardRequiredTrial: cardRequiredTrial(env), cryptoReady: await billingGateways.cryptoReady(env), extension: await trialExtensions.extensionStateFor(env, activeOrgId).catch(() => null) })
             })
           );
         }
@@ -4871,6 +4887,15 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return r.ok ? json({ success: true, id: r.id, recipients: r.recipients, warnings: r.warnings }) : json({ success: false, error: r.error, detail: r.detail }, r.status);
           }
 
+          // Trial extension requests: approve with a number of days, or decline with a comment. Super-admin only; every decision is audited.
+          const trialExtStaff = matchPath("/api/platform/saas/trial-extensions/:id/:verb", path);
+          if (trialExtStaff && method === "POST" && (trialExtStaff.verb === "approve" || trialExtStaff.verb === "decline")) {
+            const b = await staffBody();
+            const r = await trialExtensions.decideExtension(env, trialExtStaff.id, { decision: trialExtStaff.verb, staffId: admin.id, days: b.days, comment: b.comment });
+            await logAudit(env, { adminId: admin.id, endpoint: path, method, resource: "trial_extension", resourceId: trialExtStaff.id, action: trialExtStaff.verb, success: r.ok, statusCode: r.ok ? 200 : r.status || 400, errorMessage: r.ok ? null : r.error, requestId, ipHash });
+            return r.ok ? json({ success: true, ...r }) : json({ success: false, error: r.error }, r.status || 400);
+          }
+
           // Manage a sent announcement: edit, hide/show, delete.
           const announcementStaff = matchPath("/api/platform/saas/announcements/:id/:verb", path);
           if (announcementStaff && method === "POST") {
@@ -5888,6 +5913,7 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas/errors") return html(await renderServerErrorsPage(env, admin));
         if (path === "/platform/saas/domains") return html(await renderDomainsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
         if (path === "/platform/saas/deployments") return html(await renderDeploymentsAdminPage(env, admin, { status: opStatus, page: url.searchParams.get("page") }));
+        if (path === "/platform/saas/trial-extensions") return html(await renderTrialExtensionsPage(env, admin, { status: url.searchParams.get("status") || "" }));
         if (path === "/platform/saas/announcements") return html(await renderAnnouncementsAdminPage(env, admin));
         const announcementEditPage = path.match(/^\/platform\/saas\/announcements\/([0-9a-f-]{36})$/);
         if (announcementEditPage) return html(await renderAnnouncementEditPage(env, admin, announcementEditPage[1]));

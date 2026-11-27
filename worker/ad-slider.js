@@ -19,10 +19,10 @@ export const CHOICES = {
   transition: ["fade", "slide", "zoom", "kenburns"],
   ratio: ["21:9", "3:1", "4:1", "2:1", "16:9", "3:2", "4:3", "1:1"],
   mobile_ratio: ["same", "16:9", "3:2", "4:3", "1:1", "3:4"],
-  overlay: ["soft", "strong", "none"], fit: ["cover", "contain"], nav: ["dots", "bars", "none"], text_pos: ["left", "center", "right"]
+  overlay: ["soft", "strong", "none"], fit: ["contain", "cover"], nav: ["dots", "bars", "none"], text_pos: ["left", "center", "right"]
 };
 export const DEFAULTS = { autoplay: true, interval: 6, transition: "fade", speed: 600, pause_hover: true, loop: true, arrows: true, nav: "dots", progress: true, counter: false,
-  swipe: true, keyboard: true, ratio: "3:1", mobile_ratio: "16:9", fit: "cover", overlay: "soft", ad_label: true, ad_text: "Ad" };
+  swipe: true, keyboard: true, ratio: "3:1", mobile_ratio: "16:9", fit: "contain", overlay: "soft", ad_label: true, ad_text: "Ad" };
 const SETTING_KEYS = Object.keys(DEFAULTS);
 export const SLIDE_FIELDS = ["key", "title", "subtitle", "badge", "image", "image_mobile", "alt", "url", "cta_label", "new_tab", "sponsored", "text_pos", "duration", "start_at", "end_at"];
 
@@ -114,7 +114,10 @@ function slideHtml(s, i, n, o) {
   const pic = pictureOf(s.image); if (!pic) return "";
   const mob = pictureOf(s.image_mobile);
   const loading = o.eager && i === 0 ? ' fetchpriority="high" decoding="async"' : ' loading="lazy" fetchpriority="low" decoding="async"';
-  const picture = `<picture class="ad-sl__pic">${mob ? `<source media="(max-width: 640px)" srcset="${esc(mob)}" width="800" height="${o.mh}">` : ""}<img class="ad-sl__img" src="${esc(pic)}" alt="${esc(s.alt || s.title || "")}" width="1600" height="${o.h}"${loading}></picture>`;
+  const source = mob ? `<source media="(max-width: 640px)" srcset="${esc(mob)}" width="800" height="${o.mh}">` : "";
+  // "Show the whole picture": the same picture, blurred and cropped, fills whatever the contained one leaves free (same URL, no extra download)
+  const fill = o.cfg.fit === "contain" ? `<picture class="ad-sl__bgpic" aria-hidden="true">${source}<img class="ad-sl__bg" src="${esc(pic)}" alt="" width="1600" height="${o.h}" loading="lazy" fetchpriority="low" decoding="async"></picture>` : "";
+  const picture = `${fill}<picture class="ad-sl__pic">${source}<img class="ad-sl__img" src="${esc(pic)}" alt="${esc(s.alt || s.title || "")}" width="1600" height="${o.h}"${loading}></picture>`;
   const cta = s.cta_label || "";
   const showText = s.title || s.subtitle || s.badge || (cta && href);
   const pos = CHOICES.text_pos.includes(s.text_pos) ? s.text_pos : "left";

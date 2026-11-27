@@ -88,7 +88,7 @@ describe('markup', () => {
   });
   test('performance: first picture eager and high priority, the rest lazy and low; height reserved', () => {
     const out = html([slide('a'), slide('b')], { ratio: '3:1', mobile_ratio: '4:3' });
-    assert.match(out, /src="\/brand-media\/ads\/a\.jpg"[^>]*fetchpriority="high"/); assert.equal((out.match(/loading="lazy" fetchpriority="low"/g) || []).length, 1);
+    assert.match(out, /src="\/brand-media\/ads\/a\.jpg"[^>]*fetchpriority="high"/); assert.equal((out.match(/class="ad-sl__img"[^>]*loading="lazy" fetchpriority="low"/g) || []).length, 1);
     assert.match(out, /width="1600" height="533"/); assert.match(out, /--ad-ratio:3 \/ 1;--ad-ratio-m:4 \/ 3/);
   });
   test('external links are always sponsored + noopener (new tab); internal ones only when marked paid; phone picture is a <source>; everything escaped', () => {
@@ -234,5 +234,25 @@ describe('files', () => {
   test('migration 0109 is idempotent', () => {
     const db = createTestDb(); applyMigrations(db); const sql = readFileSync(new URL('../migrations/0109_ad_slider.sql', import.meta.url), 'utf8'); db._exec(sql); db._exec(sql);
     assert.ok(readdirSync(new URL('../migrations/', import.meta.url)).includes('0109_ad_slider.sql'));
+  });
+});
+
+describe('picture fit', () => {
+  const html = (slides, settings = {}) => renderAdSlider({ ad: { id: 7, name: 'x' }, slides, settings });
+  test('default is "show the whole picture": contained picture plus a blurred, hidden-from-readers backdrop of the same file', () => {
+    assert.equal(normalizeSettings(undefined).fit, 'contain');
+    const out = html([slide('a', { image_mobile: '/brand-media/ads/a-m.jpg' }), slide('b')]);
+    assert.match(out, /ad-sl--contain/); assert.equal((out.match(/class="ad-sl__bgpic" aria-hidden="true"/g) || []).length, 2);
+    assert.match(out, /<img class="ad-sl__bg" src="\/brand-media\/ads\/a\.jpg" alt=""/);
+    assert.match(out, /<picture class="ad-sl__bgpic" aria-hidden="true"><source media="\(max-width: 640px\)" srcset="\/brand-media\/ads\/a-m\.jpg"/);
+  });
+  test('"fill the frame" has no backdrop; an old single-picture ad also shows whole', () => {
+    const cover = html([slide('a')], { fit: 'cover' }); assert.ok(!cover.includes('ad-sl__bg') && !cover.includes('ad-sl--contain'));
+    const legacy = renderAdSlider({ ad: { id: 3, name: 'Old', image_url: 'https://img.example.test/legacy.jpg', link_url: '/x', alt_text: 'Alt' }, slides: [], settings: {} });
+    assert.match(legacy, /ad-sl--contain/); assert.match(legacy, /ad-sl__bg/);
+  });
+  test('CSS: contained picture, blurred cropped backdrop', () => {
+    const css = readFileSync(new URL('../public/static/css/ad-slider.css', import.meta.url), 'utf8');
+    assert.match(css, /\.ad-sl--contain \.ad-sl__img \{ object-fit: contain; \}/); assert.match(css, /\.ad-sl__bg \{[^}]*object-fit: cover;[^}]*blur\(/);
   });
 });

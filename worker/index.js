@@ -206,6 +206,7 @@ import { renderVerifyEmailPage, renderResetPasswordPage, renderForgotPasswordPag
 
 import { renderLoginPage } from "./views/pages/login.js";
 import { renderDashboardHome } from "./views/pages/dashboard.js";
+import { loadCustomerOverview, customerAttention } from "./customer-overview.js";
 import { handlePublicRoute } from "./public-site/router.js";
 import * as aftermarketZones from "./aftermarket-zones.js";
 import * as aftermarketNotify from "./aftermarket-notify.js";
@@ -3379,12 +3380,14 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             getUsageSnapshot(env, activeOrgId)
           ]);
           const plan = subscription ? await plans.getPlan(env, subscription.plan_id) : null;
+          const overviewExtra = await loadCustomerOverview(env, { organizationId: activeOrgId, sites: sitesList, subscription, canManage }).catch(() => null);
+          const overviewAttention = overviewExtra ? customerAttention({ sites: sitesList, subscription, usage, extra: overviewExtra, twoFactorMissing: false, canManage }) : null;
 
           return html(
             shell({
               title: "Overview", activeKey: "overview", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderOverviewPage({ organization: activeOrg, subscription, plan, usage, sites: sitesList, showTwoFactorNotice: customer2faEnrollMode(env) === "on" && !(await totp.getTotpStatus(env, portalCustomer.id).catch(() => ({ enabled: true }))).enabled })
+              bodyHtml: renderOverviewPage({ organization: activeOrg, subscription, plan, usage, sites: sitesList, extra: overviewExtra, attention: overviewAttention, canManage, showTwoFactorNotice: customer2faEnrollMode(env) === "on" && !(await totp.getTotpStatus(env, portalCustomer.id).catch(() => ({ enabled: true }))).enabled })
             })
           );
         }

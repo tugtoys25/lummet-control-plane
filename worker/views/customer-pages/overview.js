@@ -80,7 +80,48 @@ function renderGettingStartedGuide() {
     </details>`;
 }
 
-export function renderOverviewPage({ organization, subscription, plan, usage, sites, showTwoFactorNotice = false }) {
+function checklistHtml({ subscription, usage }) {
+  const steps = [
+    ["Choose a plan that includes a site.", !!subscription],
+    ["Create your first site from Sites.", false],
+    ["Review the generated preview before publishing.", false],
+    ["Connect a domain when you are ready.", !!(usage && usage.customDomains && usage.customDomains.used > 0)],
+    ["Invite teammates only when needed.", !!(usage && usage.users && usage.users.used > 1)]
+  ];
+  const done = steps.filter((x) => x[1]).length;
+  return `<section class="card" aria-labelledby="first-site-checklist"><h2 id="first-site-checklist">First-site checklist</h2><p class="checklist-progress">${done} of ${steps.length} done</p><ol class="check-list">${steps.map(([t, d]) => `<li class="${d ? "is-done" : ""}"><span class="tick" aria-hidden="true">${d ? "&#10003;" : ""}</span><span>${t}${d ? ' <span class="sr-only">(done)</span>' : ""}</span></li>`).join("")}</ol><p>Checklist guidance only; no site is created automatically.</p></section>`;
+}
+
+function usageBar(u) {
+  if (!u || u.limit == null || !(u.limit > 0)) return "";
+  const pct = Math.min(100, Math.round((u.used / u.limit) * 100));
+  return `<div class="usage-bar${pct >= 100 ? " is-full" : pct >= 80 ? " is-warn" : ""}" role="img" aria-label="${pct}% used"><span style="width:${pct}%"></span></div>`;
+}
+
+function attentionHtml(items) {
+  if (!items.length) return `<section class="card" aria-label="Needs your attention"><div class="ops-head"><h2>Needs your attention</h2></div><div class="ops-allclear"><span class="badge badge-ok">All clear</span><span class="ops-note">Nothing needs your attention right now.</span></div></section>`;
+  return `<section class="card" aria-label="Needs your attention"><div class="ops-head"><h2>Needs your attention</h2></div><ul class="ops-attn">${items.slice(0, 6).map((i) => `<li class="is-${i.level}"><span class="badge ${i.level === "danger" ? "badge-danger" : "badge-warn"}">${i.level === "danger" ? "Urgent" : "Check"}</span><span><div class="ops-t">${escapeHtml(i.title)}</div><div class="ops-d">${escapeHtml(i.detail)}</div></span><a class="ops-go" href="${i.href}">Open</a></li>`).join("")}</ul></section>`;
+}
+
+function money(cents, cur) { try { return new Intl.NumberFormat("en", { style: "currency", currency: String(cur || "USD").toUpperCase() }).format((cents || 0) / 100); } catch { return `${((cents || 0) / 100).toFixed(2)} ${cur || ""}`; } }
+const day = (v) => (v ? escapeHtml(String(v).slice(0, 10)) : "");
+
+function billingHtml(b, plan) {
+  const rows = [`<dt>Plan</dt><dd>${escapeHtml(plan ? plan.name : "None")}</dd>`];
+  if (b.status === "trialing" && b.trialEnds) rows.push(`<dt>Trial ends</dt><dd>${day(b.trialEnds)}</dd>`);
+  else if (b.periodEnd) rows.push(`<dt>${b.cancelAtEnd ? "Ends on" : "Renews on"}</dt><dd>${day(b.periodEnd)}</dd>`);
+  if (b.graceEnds && b.status === "past_due") rows.push(`<dt>Pay by</dt><dd>${day(b.graceEnds)}</dd>`);
+  rows.push(`<dt>Payment method</dt><dd>${b.method ? escapeHtml((b.method.card_brand || b.method.type || "Card") + (b.method.card_last4 ? " ending " + b.method.card_last4 : "")) : "None saved"}</dd>`);
+  const inv = b.invoice;
+  const invLine = inv ? `<p class="ops-sub">Latest invoice: ${money(inv.total_cents != null ? inv.total_cents : inv.amount_due_cents, inv.currency)}, <span class="badge ${inv.status === "paid" ? "badge-ok" : inv.status === "open" ? "badge-warn" : "badge-dim"}">${escapeHtml(inv.status)}</span>${inv.hosted_invoice_url && /^https:\/\//.test(inv.hosted_invoice_url) ? ` <a href="${escapeHtml(inv.hosted_invoice_url)}">View</a>` : ""}</p>` : "";
+  return `<div class="card"><div class="ops-head"><h2>Billing</h2><a href="/app/billing">Manage</a></div><dl class="ops-kv">${rows.join("")}</dl>${invLine}</div>`;
+}
+
+function activityHtml(items) {
+  return `<div class="card"><div class="ops-head"><h2>Recent activity</h2></div>${items.length ? `<table><tbody>${items.map((a) => `<tr><td class="ops-note" style="white-space:nowrap">${escapeHtml(String(a.at).slice(0, 16))}</td><td>${escapeHtml(a.text)}${a.ok ? "" : ' <span class="badge badge-danger">Problem</span>'}</td></tr>`).join("")}</tbody></table>` : `<p class="ops-sub">Nothing yet. Updates, domain changes and team actions show up here.</p>`}</div>`;
+}
+
+export function renderOverviewPage({ organization, subscription, plan, usage, sites, showTwoFactorNotice = false, extra = null, attention = null, canManage = false }) {
   const statusBadge = subscription
     ? `<span class="badge badge-${escapeHtml(subscription.status)}">${escapeHtml(subscription.status)}</span>`
     : `<span class="badge badge-canceled">no plan</span>`;
@@ -101,6 +142,18 @@ export function renderOverviewPage({ organization, subscription, plan, usage, si
         ? banner("Your trial is running", trialNote, "/app/billing", "Choose a plan")
         : "";
 
+  const rowExtra = new Map(((extra && extra.siteRows) || []).map((r) => [r.id, r]));
+  const withHealth = !!extra;
+  const healthCell = (site) => {
+    const r = rowExtra.get(site.id);
+    if (!["active", "live"].includes(site.status)) return `<span class="badge badge-dim">—</span>`;
+    if (!r || !r.health) return `<span class="badge badge-dim">Not checked</span>`;
+    return r.health === "Online" ? `<span class="badge badge-ok">Healthy</span>` : `<span class="badge badge-danger">${escapeHtml(r.health)}</span>`;
+  };
+  const updateCell = (site) => {
+    const d = (rowExtra.get(site.id) || {}).deploy;
+    return d ? `${escapeHtml(String(d.completed_at || d.created_at || "").slice(0, 10))}${["failed", "rolled_back"].includes(d.status) ? ' <span class="badge badge-danger">' + escapeHtml(d.status.replace("_", " ")) + "</span>" : ""}` : "—";
+  };
   const sitesRows = sites.length
     ? sites
         .map(
@@ -109,11 +162,13 @@ export function renderOverviewPage({ organization, subscription, plan, usage, si
             <td><a href="/app/sites#${escapeHtml(site.id)}">${escapeHtml(site.name)}</a></td>
             <td>${escapeHtml(site.product_name || "")}</td>
             <td><span class="badge badge-${escapeHtml(site.status)}">${escapeHtml(site.status)}</span></td>
+            ${withHealth ? `<td>${healthCell(site)}</td>` : ""}
             <td class="mono">${escapeHtml(site.primary_domain || "—")}</td>
+            ${withHealth ? `<td>${updateCell(site)}</td>` : ""}
           </tr>`
         )
         .join("")
-    : `<tr><td colspan="4" class="empty">No sites yet.</td></tr>`;
+    : `<tr><td colspan="${withHealth ? 6 : 4}" class="empty">No sites yet.</td></tr>`;
 
   return `
     <h1>Overview</h1>
@@ -122,20 +177,24 @@ export function renderOverviewPage({ organization, subscription, plan, usage, si
     ${showTwoFactorNotice ? renderTwoFactorNotice() : ""}
     ${sites.length === 0 ? renderGettingStartedGuide() : ""}
     ${upgradeCta}
-    ${sites.length === 0 ? `<section class="card" aria-labelledby="first-site-checklist"><h2 id="first-site-checklist">First-site checklist</h2><ol><li>Choose a plan that includes a site.</li><li>Create your first site from Sites.</li><li>Review the generated preview before publishing.</li><li>Connect a domain when you are ready.</li><li>Invite teammates only when needed.</li></ol><p>Checklist guidance only; no site is created automatically.</p></section>` : ""}
+    ${sites.length === 0 ? checklistHtml({ subscription, usage }) : ""}
+    ${attention && (attention.length || sites.length) ? attentionHtml(attention) : ""}
 
     <div class="grid">
       <div class="card stat">
         <div class="value">${usage.sites.used}${usage.sites.limit != null ? " / " + usage.sites.limit : ""}</div>
         <div class="label">Sites</div>
+        ${usageBar(usage.sites)}
       </div>
       <div class="card stat">
         <div class="value">${usage.users.used}${usage.users.limit != null ? " / " + usage.users.limit : ""}</div>
         <div class="label">Team members</div>
+        ${usageBar(usage.users)}
       </div>
       <div class="card stat">
         <div class="value">${usage.customDomains.used}${usage.customDomains.limit != null ? " / " + usage.customDomains.limit : ""}</div>
         <div class="label">Custom domains</div>
+        ${usageBar(usage.customDomains)}
       </div>
       <div class="card stat">
         <div class="value">${statusBadge}</div>
@@ -146,10 +205,11 @@ export function renderOverviewPage({ organization, subscription, plan, usage, si
     <div class="card">
       <h2>Sites</h2>
       <table>
-        <thead><tr><th>Name</th><th>Product</th><th>Status</th><th>Domain</th></tr></thead>
+        <thead><tr><th>Name</th><th>Product</th><th>Status</th>${withHealth ? "<th>Health</th>" : ""}<th>Domain</th>${withHealth ? "<th>Last update</th>" : ""}</tr></thead>
         <tbody>${sitesRows}</tbody>
       </table>
     </div>
+    ${extra ? `<div class="ops-cols">${canManage && extra.billing ? billingHtml(extra.billing, plan) : ""}${activityHtml(extra.activity || [])}</div>` : ""}
   `;
 }
 

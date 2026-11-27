@@ -43,6 +43,7 @@ export const SETTINGS = [
   // ---- Billing ----
   def("BILLING_ENFORCE", "Billing", "enum", { options: ENFORCE, default: "off", help: "Rollout flag for the billing lifecycle: off, shadow (record what would happen) or enforce." }),
   def("BILLING_SUSPEND_SITES", "Billing", "enum", { options: ENFORCE, default: "off", help: "Push a suspended or closed state to customer sites. Use enforce only once the tenant-edge serve gate exists." }),
+  def("BILLING_TRIAL_END_SITES", "Billing", "enum", { options: ON_OFF, default: "off", help: "on = pause a customer's sites as soon as their free trial ends, until they pay or staff approve a trial extension. Sites are restored automatically." }),
   def("BILLING_EMAILS", "Billing", "enum", { options: TRI, default: "off", help: "Billing emails: off, shadow (decide and log, send nothing) or on." }),
   def("CARD_REQUIRED_TRIAL", "Billing", "enum", { options: ON_OFF, default: "off", help: "on = a trial can only start through Stripe Checkout (card up front)." }),
   def("BILLING_SAVE_FLOW", "Billing", "enum", { options: ON_OFF, default: "off", help: "Cancellation save flow (pause and resume offers)." }),

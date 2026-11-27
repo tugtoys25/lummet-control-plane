@@ -140,7 +140,7 @@ import { renderTeamPage } from "./views/customer-pages/team.js";
 import { renderSessionsPage, SESSIONS_PAGE_PATH } from "./views/customer-pages/sessions.js";
 import { handlePlanCatalogRoute } from "./plan-catalog-routes.js";
 import { qrForText } from "./qr.js";
-import { renderDeploymentsPage as renderCustomerDeploymentsPage, renderDeploymentCards, deploymentsAreBusy } from "./views/customer-pages/deployments.js";
+import { renderDeploymentsPage as renderCustomerDeploymentsPage, renderDeploymentCards, deploymentsAreBusy, RECENT_DEPLOYMENTS } from "./views/customer-pages/deployments.js";
 import { renderDeveloperPage } from "./views/customer-pages/developer.js";
 import { renderIntegrationsPage as renderCustomerIntegrationsPage } from "./views/customer-pages/integrations.js";
 import { renderSupportList as renderCustomerSupportList, renderSupportTicket as renderCustomerSupportTicket } from "./views/customer-pages/support.js";
@@ -1965,7 +1965,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           if (method === "GET" && subPath === "/deployments/live-cards") {
             const canManageCards = !(await requireOrgRole(organizationId, "admin"));
             const { sitesList, deploymentsBySite, latestByLine } = await loadDeploymentsViewData(env, organizationId);
-            const cardsHtml = renderDeploymentCards({ sites: sitesList, deploymentsBySite, latestVersion: latestByLine.casino || null, latestByLine, canManage: canManageCards });
+            const onlySite = url.searchParams.get("site");
+          const cardsHtml = renderDeploymentCards({ sites: onlySite ? sitesList.filter((s) => s.id === onlySite) : sitesList, deploymentsBySite, latestVersion: latestByLine.casino || null, latestByLine, canManage: canManageCards, recentLimit: onlySite ? null : RECENT_DEPLOYMENTS });
             return json({ success: true, data: { html: cardsHtml, hash: liveHash(cardsHtml), busy: deploymentsAreBusy(deploymentsBySite) } }, 200, { "Cache-Control": "no-store" });
           }
 
@@ -3516,11 +3517,15 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (path === "/app/deployments") {
           // The newest release of each application the organization's sites run (a site is compared with its own line's).
           const { sitesList, deploymentsBySite, latestByLine } = await loadDeploymentsViewData(env, activeOrgId);
+          // ?site=<id> opens one site with its whole deployment history; an unknown id goes back to the list.
+          const wantedSite = new URL(request.url).searchParams.get("site");
+          const oneSite = wantedSite ? sitesList.find((s) => s.id === wantedSite) : null;
+          if (wantedSite && !oneSite) return redirect("/app/deployments");
           return html(
             shell({
               title: "Deployments", activeKey: "deployments", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderCustomerDeploymentsPage({ sites: sitesList, deploymentsBySite, latestVersion: latestByLine.casino || null, latestByLine, canManage, organizationId: activeOrgId })
+              bodyHtml: renderCustomerDeploymentsPage({ sites: oneSite ? [oneSite] : sitesList, deploymentsBySite, latestVersion: latestByLine.casino || null, latestByLine, canManage, organizationId: activeOrgId, recentLimit: RECENT_DEPLOYMENTS, siteId: oneSite ? oneSite.id : null })
             })
           );
         }
@@ -5895,13 +5900,13 @@ $('reactivate').onclick=async function(){const reason=$('reason').value.trim();c
         if (path === "/platform/saas") return html(await renderSaasOverview(env, admin));
         if (path === "/platform/saas/revenue-analytics") return html(await renderRevenueAnalyticsPage(env, admin, { trialPage: url.searchParams.get("trialPage") || 1, activationPage: url.searchParams.get("activationPage") || 1 }));
         if (path === "/platform/saas/organizations") return html(await renderOrganizationsPage(env, admin, { q: url.searchParams.get("q") || "", status: url.searchParams.get("status") || "", page: url.searchParams.get("page") }));
-        if (path === "/platform/saas/subscriptions") return html(await renderSubscriptionsPage(env, admin, { status: url.searchParams.get("status") || "", page: url.searchParams.get("page") }));
+        if (path === "/platform/saas/subscriptions") return html(await renderSubscriptionsPage(env, admin, { status: url.searchParams.get("status") || "", view: url.searchParams.get("view") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/plans") return html(await renderPlansPage(env, admin, Object.fromEntries(url.searchParams)));
         if (path === "/platform/saas/jobs") return html(await renderJobsPage(env, admin, { status: url.searchParams.get("status") || "", type: url.searchParams.get("type") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/email") return html(await renderEmailPage(env, admin));
         if (path === "/platform/saas/settings") return html(await renderPlatformSettingsPage(env, admin));
         if (path === "/platform/saas/media") return html(await renderMediaLibraryPage(env, admin, { folder: url.searchParams.get("folder") || "", q: url.searchParams.get("q") || "", page: url.searchParams.get("page") || 1, kind: url.searchParams.get("kind") || "" }));
-        if (path === "/platform/saas/notifications") return html(await renderNotificationsPage(env, admin, { organization: url.searchParams.get("organization") || "", kind: url.searchParams.get("kind") || "", state: url.searchParams.get("state") || "", page: url.searchParams.get("page") }));
+        if (path === "/platform/saas/notifications") return html(await renderNotificationsPage(env, admin, { organization: url.searchParams.get("organization") || "", kind: url.searchParams.get("kind") || "", state: url.searchParams.get("state") || "", view: url.searchParams.get("view") || "", page: url.searchParams.get("page") }));
         if (path === "/platform/saas/releases") return html(await renderTenantTemplatePage(env, admin));
         if (path === "/platform/saas/site-presets") return html(await renderSitePresetsPage(env, admin, { status: url.searchParams.get("status") || "" }));
         const opStatus = url.searchParams.get("status") || "";

@@ -74,7 +74,8 @@ const STATE_SQL = `CASE
 export const NOTIFICATION_STATES = ["pending", "stuck", "queued", "failed", "sent"];
 
 /** Notifications for the staff screen, newest first. Filters are optional and combine. Never returns the payload or any address. */
-export async function listForStaff(env, { organizationId = "", kind = "", state = "", limit = 51, offset = 0 } = {}) {
+/** archive=true lists only notices of closed, deleted or erased organizations. The default hides them, unless one organization is asked for by id. */
+export async function listForStaff(env, { organizationId = "", kind = "", state = "", archive = false, limit = 51, offset = 0 } = {}) {
   return (await env.LUMMET_DB.prepare(
     `SELECT * FROM (
        SELECT n.id, n.organization_id, o.name AS organization_name, n.subscription_id, n.kind, n.stage, n.attempts, n.last_error,
@@ -82,8 +83,9 @@ export async function listForStaff(env, { organizationId = "", kind = "", state 
               (SELECT COUNT(*) FROM email_outbox m WHERE m.notification_id = n.id AND m.status = 'failed') AS failed_messages
        FROM billing_notifications n LEFT JOIN organizations o ON o.id = n.organization_id
        WHERE (? = '' OR n.organization_id = ?) AND (? = '' OR n.kind = ?)
+         AND ((? = 1 AND (o.id IS NULL OR o.status = 'closed')) OR (? = 0 AND ((o.id IS NOT NULL AND o.status != 'closed') OR ? != '')))
      ) WHERE (? = '' OR state = ?) ORDER BY created_at DESC, id LIMIT ? OFFSET ?`
-  ).bind(organizationId, organizationId, kind, kind, state, state, limit, offset).all()).results || [];
+  ).bind(organizationId, organizationId, kind, kind, archive ? 1 : 0, archive ? 1 : 0, organizationId, state, state, limit, offset).all()).results || [];
 }
 
 export async function getById(env, id) {

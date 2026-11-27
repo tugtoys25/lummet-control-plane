@@ -92,13 +92,12 @@ export async function decideExtension(env, id, { decision, staffId, days, commen
 
 // ---------- pausing and restoring sites ----------
 async function pauseOrg(env, organizationId) {
-  const sites = (await env.LUMMET_DB.prepare(`SELECT id FROM sites WHERE organization_id = ? AND status = 'active'`).bind(organizationId).all()).results || [];
   let n = 0;
-  for (const s of sites) {
-    const r = await transitionSiteStatus(env, s.id, "suspended", { reason: TRIAL_END_SUSPENSION_REASON, actorType: "system" });
+  for (const siteId of await repo.activeSiteIds(env, organizationId)) {
+    const r = await transitionSiteStatus(env, siteId, "suspended", { reason: TRIAL_END_SUSPENSION_REASON, actorType: "system" });
     if (!r.ok) continue;
-    try { await enqueueSiteAccessPush(env, s.id, "suspended", TRIAL_END_SUSPENSION_REASON); n += 1; }
-    catch (e) { await transitionSiteStatus(env, s.id, "active", { reason: "site state push enqueue failed; rolled back", actorType: "system" }); throw e; }
+    try { await enqueueSiteAccessPush(env, siteId, "suspended", TRIAL_END_SUSPENSION_REASON); n += 1; }
+    catch (e) { await transitionSiteStatus(env, siteId, "active", { reason: "site state push enqueue failed; rolled back", actorType: "system" }); throw e; }
   }
   return n;
 }

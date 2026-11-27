@@ -77,6 +77,11 @@ export async function orgsWithPausedSites(env, reason, limit = 300) {
   ).bind(reason, limit).all()).results?.map((r) => r.organization_id) || [];
 }
 
+/** Ids of the organization's sites that are live right now (the ones a trial end pauses). */
+export async function activeSiteIds(env, organizationId) {
+  return ((await env.LUMMET_DB.prepare(`SELECT id FROM sites WHERE organization_id = ? AND status = 'active'`).bind(organizationId).all()).results || []).map((r) => r.id);
+}
+
 /** The lapsed local trial rows are closed as 'expired' before a granted trial is created, so exactly one trial is ever live. */
 export async function expireLapsedLocalTrials(env, organizationId) {
   await env.LUMMET_DB.prepare(

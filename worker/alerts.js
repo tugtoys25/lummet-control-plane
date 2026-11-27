@@ -181,3 +181,8 @@ export async function tokenMatches(provided, expected) {
   for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
   return diff === 0;
 }
+
+/** The alert checks as {key, title, path}, for the staff Overview (read only, same wording as the alert emails). */
+export function alertCatalog() {
+  return CHECKS.map((c) => ({ key: c.key, title: c.title, path: c.path || "" }));
+}

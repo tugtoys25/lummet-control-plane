@@ -45,6 +45,7 @@ export const ORG_DELETE = [
   ["usage_counters", "organization_id = ?"],
   ["webhooks", "organization_id = ?"],            // delivery history cascades with it
   ["integrations", "organization_id = ?"],        // chat connections; the encrypted destination goes with the row
+  ["trial_extension_requests", "organization_id = ?"],    // a customer's trial extension asks and staff decisions; removed with the organization
   ["support_tickets", "organization_id = ?"],     // the whole conversation; messages cascade with the ticket
   ["site_backups", "organization_id = ?"],
   ["jobs", "organization_id = ?"],                // steps, runs, attempts and logs cascade with it

@@ -270,6 +270,126 @@ export function createFakeInfraProvider() {
       return { ok: true };
     },
 
+    // --- Customer-owned Cloudflare accounts (custom-hosting.js) ---
+    // Calls record env.CF_ACCOUNT_ID so tests can prove which account a call used.
+    _badTokens: new Set(),            // CF_API_TOKEN values that verifyApiToken rejects
+    _missingPerms: new Map(),         // accountId -> [capability keys that probe as forbidden]
+    _workersSubdomains: new Map(),    // accountId -> subdomain (absent = none yet; default "fake-sub")
+    _noSubdomain: new Set(),          // accountIds with no workers.dev subdomain
+    _r2KeysValid: true,
+    _r2: new Map(),                   // bucket -> Map(key -> { body, contentType })
+    _kv: new Map(),                   // namespaceId -> Map(key -> value)
+    _d1Dumps: new Map(),              // databaseId -> SQL text (export) / imported SQL
+    _turnstile: new Map(),
+    async verifyApiToken(env) {
+      calls.push({ method: "verifyApiToken", accountId: env.CF_ACCOUNT_ID });
+      if (provider._badTokens.has(env.CF_API_TOKEN)) return { ok: false, status: "invalid", expiresOn: null };
+      return { ok: true, status: "active", expiresOn: null };
+    },
+    async getAccountDetails(env) {
+      calls.push({ method: "getAccountDetails", accountId: env.CF_ACCOUNT_ID });
+      return { id: env.CF_ACCOUNT_ID, name: "Fake account" };
+    },
+    async probeAccountPermissions(env) {
+      calls.push({ method: "probeAccountPermissions", accountId: env.CF_ACCOUNT_ID });
+      const missing = provider._missingPerms.get(env.CF_ACCOUNT_ID) || [];
+      return ["workers_scripts", "d1", "kv", "r2", "turnstile", "workers_subdomain", "zones"].map((key) => missing.includes(key) ? { key, ok: false, code: key === "r2" ? "r2_not_enabled" : "forbidden", message: "forbidden" } : { key, ok: true });
+    },
+    async getWorkersSubdomain(env) {
+      calls.push({ method: "getWorkersSubdomain", accountId: env.CF_ACCOUNT_ID });
+      if (provider._noSubdomain.has(env.CF_ACCOUNT_ID)) return null;
+      return provider._workersSubdomains.get(env.CF_ACCOUNT_ID) || "fake-sub";
+    },
+    async createWorkersSubdomain(env, { subdomain }) {
+      calls.push({ method: "createWorkersSubdomain", accountId: env.CF_ACCOUNT_ID, subdomain });
+      provider._noSubdomain.delete(env.CF_ACCOUNT_ID);
+      provider._workersSubdomains.set(env.CF_ACCOUNT_ID, subdomain);
+      return subdomain;
+    },
+    async setWorkersDevEnabled(env, { workerName, enabled }) {
+      calls.push({ method: "setWorkersDevEnabled", accountId: env.CF_ACCOUNT_ID, workerName, enabled });
+      return { ok: true };
+    },
+    async listAccountZones(env) {
+      calls.push({ method: "listAccountZones", accountId: env.CF_ACCOUNT_ID });
+      return [...provider._zones].map(([id, z]) => ({ id, name: z.name, status: z.status, nameServers: z.nameServers || [], plan: "Free" }));
+    },
+    async listWorkerDomains(env, { hostname } = {}) {
+      calls.push({ method: "listWorkerDomains", accountId: env.CF_ACCOUNT_ID, hostname });
+      return [...provider._customDomains].filter(([, d]) => !hostname || d.hostname === hostname).map(([id, d]) => ({ id, hostname: d.hostname, service: d.workerName, zoneId: d.zoneId }));
+    },
+    async createTurnstileWidget(env, { name, domains }) {
+      calls.push({ method: "createTurnstileWidget", accountId: env.CF_ACCOUNT_ID, name, domains });
+      if (failNextCallOfType?.type === "createTurnstileWidget") { const m = failNextCallOfType.message; failNextCallOfType = null; throw new Error(m); }
+      const sitekey = `0xFAKESITEKEY${nextId++}`;
+      provider._turnstile.set(sitekey, { name, domains });
+      return { sitekey, secret: `0xFAKESECRET${nextId++}` };
+    },
+    async updateTurnstileWidget(env, { sitekey, name, domains }) {
+      calls.push({ method: "updateTurnstileWidget", accountId: env.CF_ACCOUNT_ID, sitekey, domains });
+      provider._turnstile.set(sitekey, { name, domains });
+      return { ok: true };
+    },
+    async deleteTurnstileWidget(env, sitekey) {
+      calls.push({ method: "deleteTurnstileWidget", accountId: env.CF_ACCOUNT_ID, sitekey });
+      provider._turnstile.delete(sitekey);
+      return { ok: true };
+    },
+    async exportD1Database(env, { databaseId }) {
+      calls.push({ method: "exportD1Database", accountId: env.CF_ACCOUNT_ID, databaseId });
+      return { status: "complete", signedUrl: `https://d1-export.fake.test/${databaseId}` };
+    },
+    async downloadD1Export(env, { signedUrl }) {
+      calls.push({ method: "downloadD1Export", signedUrl });
+      const id = signedUrl.split("/").pop();
+      return new TextEncoder().encode(provider._d1Dumps.get(id) || "CREATE TABLE t (x);");
+    },
+    async importD1Sql(env, { databaseId, sql }) {
+      calls.push({ method: "importD1Sql", accountId: env.CF_ACCOUNT_ID, databaseId });
+      provider._d1Dumps.set(databaseId, typeof sql === "string" ? sql : new TextDecoder().decode(sql));
+      return { status: "complete", bookmark: null };
+    },
+    async pollD1Import(env, { databaseId }) {
+      calls.push({ method: "pollD1Import", accountId: env.CF_ACCOUNT_ID, databaseId });
+      return { status: "complete", bookmark: null };
+    },
+    async listKvKeys(env, { namespaceId }) {
+      calls.push({ method: "listKvKeys", accountId: env.CF_ACCOUNT_ID, namespaceId });
+      return { keys: [...(provider._kv.get(namespaceId) || new Map()).keys()].map((name) => ({ name })), cursor: null };
+    },
+    async getKvValue(env, { namespaceId, key }) {
+      calls.push({ method: "getKvValue", accountId: env.CF_ACCOUNT_ID, namespaceId, key });
+      const v = (provider._kv.get(namespaceId) || new Map()).get(key);
+      if (v === undefined) throw Object.assign(new Error("key not found"), { httpStatus: 404 });
+      return typeof v === "string" ? new TextEncoder().encode(v) : v;
+    },
+    async putKvBulk(env, { namespaceId, entries }) {
+      calls.push({ method: "putKvBulk", accountId: env.CF_ACCOUNT_ID, namespaceId, count: entries.length });
+      if (!provider._kv.has(namespaceId)) provider._kv.set(namespaceId, new Map());
+      for (const e of entries) provider._kv.get(namespaceId).set(e.key, e.value);
+      return { ok: true };
+    },
+    async listR2Objects(env, { bucket }) {
+      calls.push({ method: "listR2Objects", accountId: env.CF_ACCOUNT_ID, bucket });
+      return { objects: [...(provider._r2.get(bucket) || new Map())].map(([key, o]) => ({ key, size: o.body.length, contentType: o.contentType })), cursor: null };
+    },
+    async getR2Object(env, { bucket, key }) {
+      calls.push({ method: "getR2Object", accountId: env.CF_ACCOUNT_ID, bucket, key });
+      const o = (provider._r2.get(bucket) || new Map()).get(key);
+      if (!o) throw new Error("object not found");
+      return { body: o.body, contentType: o.contentType };
+    },
+    async putR2Object(env, { bucket, key, body, contentType }) {
+      calls.push({ method: "putR2Object", accountId: env.CF_ACCOUNT_ID, bucket, key });
+      if (!provider._r2.has(bucket)) provider._r2.set(bucket, new Map());
+      provider._r2.get(bucket).set(key, { body, contentType });
+      return { ok: true };
+    },
+    async verifyR2S3Credentials(env) {
+      calls.push({ method: "verifyR2S3Credentials", accountId: env.CF_ACCOUNT_ID });
+      return provider._r2KeysValid ? { ok: true, status: 200 } : { ok: false, status: 403 };
+    },
+
     // Test-controlled: defaults to healthy; a test can call
     // _setHealthCheckResult() to simulate an unreachable deployment.
     _healthCheckResult: { ok: true, statusCode: 200 },

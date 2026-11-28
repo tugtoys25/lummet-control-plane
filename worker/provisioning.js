@@ -34,6 +34,7 @@ import { evaluateWriteGate, refusalFor } from "./access.js";
 import * as siteSetupService from "./site-setup.js";
 import { getDomainForSite, envFallbackDomain, hostFor } from "./platform-domains.js";
 import * as platformDomainsRepo from "./repositories/platform-domains.js";
+import * as customHosting from "./custom-hosting.js";
 
 export const PROVISIONING_STEPS = [
   "validate_entitlement",
@@ -67,7 +68,14 @@ export function computeResourceNames(site, env, domain = null) {
 export async function resolveResourceNames(env, site) {
   let s = site;
   if (s.platform_domain_id === undefined && env?.LUMMET_DB && s.id) s = { ...s, ...((await platformDomainsRepo.getSite(env, s.id)) || {}) };
-  return computeResourceNames(site, env, await getDomainForSite(env, s));
+  const names = computeResourceNames(site, env, await getDomainForSite(env, s));
+  // A site hosted in the customer's own Cloudflare account (custom-hosting.js) answers on its own hostname or on workers.dev.
+  // Every other site gets exactly the platform host computed above.
+  if (env?.LUMMET_DB && s.id) {
+    const custom = await customHosting.hostOverride(env, s, names.workerName);
+    if (custom) names.host = custom;
+  }
+  return names;
 }
 
 export function createProvisioningService(infra, { deploymentService = realDeployments, templateService = tenantTemplate, setupService = siteSetupService } = {}) {
@@ -178,6 +186,12 @@ export function createProvisioningService(infra, { deploymentService = realDeplo
 
     let names = null;
     const finalResult = {};
+    // Which Cloudflare account the resources are created in: Lummet's (env, unchanged) or, for a site the customer chose to
+    // host in their own account, that account (custom-hosting.js). An unusable account fails the first step that needs it.
+    let providerEnv = env;
+    let providerEnvError = null;
+    try { providerEnv = await customHosting.cloudflareEnvForSite(env, site.id); } catch (e) { providerEnvError = e; }
+    const cfEnv = () => { if (providerEnvError) throw providerEnvError; return providerEnv; };
 
     for (const step of job.steps) {
       if (step.status === "success" || step.status === "skipped") {
@@ -213,7 +227,7 @@ export function createProvisioningService(infra, { deploymentService = realDeplo
               await jobsModule.skipStep(env, jobId, step.step_key, "already created");
               break;
             }
-            const created = await infra.createDatabase(env, { name: names.d1Name });
+            const created = await infra.createDatabase(cfEnv(), { name: names.d1Name });
             await recordSiteResource(env, site.id, "d1", created.resourceId, names.d1Name, created.metadata);
             await jobsModule.completeStep(env, jobId, step.step_key, { resourceId: created.resourceId });
             break;
@@ -225,7 +239,7 @@ export function createProvisioningService(infra, { deploymentService = realDeplo
               await jobsModule.skipStep(env, jobId, step.step_key, "already created");
               break;
             }
-            const created = await infra.createKVNamespace(env, { title: names.kvTitle });
+            const created = await infra.createKVNamespace(cfEnv(), { title: names.kvTitle });
             await recordSiteResource(env, site.id, "kv", created.resourceId, names.kvTitle, created.metadata);
             await jobsModule.completeStep(env, jobId, step.step_key, { resourceId: created.resourceId });
             break;
@@ -237,7 +251,15 @@ export function createProvisioningService(infra, { deploymentService = realDeplo
               await jobsModule.skipStep(env, jobId, step.step_key, "already created");
               break;
             }
-            const created = await infra.createR2Bucket(env, { name: names.r2Name });
+            let created;
+            try { created = await infra.createR2Bucket(cfEnv(), { name: names.r2Name }); }
+            catch (e) {
+              // A customer account that never subscribed to R2 answers 10042: say what to do instead of a bare API error.
+              if (providerEnv !== env && (e?.cfCode === 10042 || /enable r2/i.test(String(e?.message)))) {
+                throw new Error("R2 is not enabled on your Cloudflare account: open R2 in the Cloudflare dashboard, subscribe to R2, then retry (see the Cloudflare hosting guide)");
+              }
+              throw e;
+            }
             await recordSiteResource(env, site.id, "r2", created.resourceId, names.r2Name, created.metadata);
             await jobsModule.completeStep(env, jobId, step.step_key, { resourceId: created.resourceId });
             break;

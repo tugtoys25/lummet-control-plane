@@ -11,9 +11,10 @@ const withBundle = (html) => html + "\n" + STYLES + "\n" + CLIENT_SCRIPT;
 // Every link the sidebar offered before the grouped redesign. The redesign
 // moves links between groups; it must never drop or add one.
 // (v7A: plus the SaaS console links, which the SaaS merge added to the staff nav.)
-// (Platform domains: plus /platform/domains, its own group because it has its own permission.)
+// (Platform domains: plus /platform/domains, its own group because it has its own permission. Same for /platform/custom-hosting.)
 const PREVIOUS_HREFS = [
   "/platform/domains",
+  "/platform/custom-hosting",
   "/dashboard",
   "/platform/saas",
   "/platform/saas/organizations",

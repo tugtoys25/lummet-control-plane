@@ -28,6 +28,7 @@ import * as repo from "./repositories/platform-domains.js";
 import { renderPlatformDomainsPage } from "./views/pages/platform-domains.js";
 import { createSiteDomainMoveService } from "./site-domain-moves.js";
 import * as movesRepo from "./repositories/site-domain-moves.js";
+import { isCustomHosted } from "./custom-hosting.js";
 
 export const PERMISSION = { area: "platform", resource: "platform_domains", read: "read", manage: "update" };
 
@@ -72,6 +73,8 @@ export async function handlePlatformDomainsRoute(ctx, deps = {}) {
       }
       if (method === "POST" && !sub) {
         const g = needManage(); if (g) return g;
+        // A site in the customer's own Cloudflare account has no platform domain to move between.
+        if (await isCustomHosted(env, siteId)) return json({ success: false, error: "site_uses_own_cloudflare" }, 409);
         const b = await body();
         const r = await moves.start(env, { siteId, targetDomainId: b.targetDomainId, confirmHostname: b.confirmHostname, redirectDays: b.redirectDays, actorId: `staff:${admin.id}` });
         await auditMove(siteId, "move_domain", r, `${b.targetDomainId || ""} ${r.ok ? "" : r.error || ""}`.trim());

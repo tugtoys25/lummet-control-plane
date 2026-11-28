@@ -62,7 +62,8 @@ const NAV = [
     items: [
       { label: "Domains", href: "/app/domains", key: "domains" },
       { label: "Deployments", href: "/app/deployments", key: "deployments" },
-      { label: "Backups", href: "/app/backups", key: "backups" }
+      { label: "Backups", href: "/app/backups", key: "backups" },
+      { label: "Cloudflare hosting", href: "/app/cloud-hosting", key: "cloud-hosting" }
     ]
   },
   {

@@ -23,6 +23,7 @@ import * as supportModule from "./support.js";
 import { verifyPassword, hashPassword } from "./auth.js";
 import * as cloudflareProvider from "./infra-cloudflare.js";
 import { routeZoneId } from "./repositories/site-resources.js";
+import * as customHosting from "./custom-hosting.js";
 
 const NOT_FOUND = /not\s*found|does\s*not\s*exist|no\s*such|could\s*not\s*(?:be\s*)?(?:find|found)/i;
 
@@ -129,12 +130,21 @@ async function deleteExternalResources(env, org, infra) {
     // Delegated custom domains (v1): detach hostnames from the Worker and delete the Cloudflare zones.
     failures.push(...(await createZoneDomainService({ infra, dns: dohResolver }).cleanupForSite(env, site.id)));
     const resources = (await env.LUMMET_DB.prepare(`SELECT id, resource_type, resource_id, resource_name, metadata FROM site_resources WHERE site_id = ? AND status = 'active'`).bind(site.id).all()).results;
+    // A site in the customer's own Cloudflare account (custom-hosting.js): its Custom Domain, Turnstile widget and any Lummet copy
+    // kept after a move go first, then its resources are deleted through THAT account. If the account no longer lets us in, the
+    // resources are the customer's own and are recorded as left there.
+    for (const f of await customHosting.cleanupSiteExtras(infra, env, site)) failures.push({ step: `custom_hosting:${f.step}`, error: f.error });
+    const hostingEnv = await customHosting.teardownEnv(env, site);
+    const siteEnv = hostingEnv.env || env;
     const order = { route: 0, worker: 1, d1: 2, kv: 3, r2: 4 };      // stop routing, then the Worker, so nothing is serving while its data goes
     for (const r of resources.sort((a, b) => (order[a.resource_type] ?? 9) - (order[b.resource_type] ?? 9))) {
-      const fn = { route: () => infra.deleteWorkerRoute(env, r.resource_id, { zoneId: routeZoneId(r) }), worker: () => infra.deleteWorkerScript(env, r.resource_name), d1: () => infra.deleteDatabase(env, r.resource_id),
-        kv: () => infra.deleteKVNamespace(env, r.resource_id), r2: () => infra.deleteR2Bucket(env, r.resource_id) }[r.resource_type];
+      const fn = { route: () => infra.deleteWorkerRoute(siteEnv, r.resource_id, { zoneId: routeZoneId(r) }), worker: () => infra.deleteWorkerScript(siteEnv, r.resource_name), d1: () => infra.deleteDatabase(siteEnv, r.resource_id),
+        kv: () => infra.deleteKVNamespace(siteEnv, r.resource_id), r2: () => infra.deleteR2Bucket(siteEnv, r.resource_id) }[r.resource_type];
       if (!fn) continue;
-      if (await attempt(`${r.resource_type}:${r.resource_id}`, fn)) {
+      const leftWithCustomer = hostingEnv.lost || undefined;
+      if (leftWithCustomer || await attempt(`${r.resource_type}:${r.resource_id}`, async () => {
+        try { await fn(); } catch (e) { if (hostingEnv.custom && customHosting.isAccessLost(e)) return; throw e; }
+      })) {
         await env.LUMMET_DB.prepare(`UPDATE site_resources SET status = 'deleted' WHERE id = ?`).bind(r.id).run();
       }
     }

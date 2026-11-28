@@ -100,7 +100,7 @@ export function sitesAreBusy(sites, setupViews = null) {
   return sites.some((s) => SITE_TRANSIENT.has(s.status) || (s.status === "active" && views[s.id]?.status === "pending"));
 }
 
-export function renderSitesPage({ sites, products, canManage, setupOptions = null, setupViews = null, platformDomains = [], siteHosts = {}, organizationId = null }) {
+export function renderSitesPage({ sites, products, canManage, setupOptions = null, setupViews = null, platformDomains = [], siteHosts = {}, organizationId = null, customHosting = null }) {
   const rows = renderSiteRows({ sites, canManage, setupViews, siteHosts });
   const liveSrc = organizationId ? `/api/organizations/${encodeURIComponent(organizationId)}/sites/live-rows` : null;
 
@@ -110,7 +110,15 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
 
 
   const domainList = Array.isArray(platformDomains) ? platformDomains : [];
-  const domainBlock = domainList.length
+  // Custom Cloudflare hosting (only when the organization has it): one more choice in the same "Where to host" list. Without it the
+  // form is exactly as before.
+  const custom = customHosting && customHosting.enabled ? customHosting : null;
+  const domainBlock = custom
+    ? `
+          <label for="site-domain">Where to host</label>
+          <select id="site-domain">${domainList.map((d) => `<option value="${escapeHtml(d.id)}" data-host="${escapeHtml(d.hostname)}"${d.isDefault ? " selected" : ""}>Lummet hosting: ${escapeHtml(d.label)} (.${escapeHtml(d.hostname)})</option>`).join("")}<option value="__custom__" data-host=""${domainList.length ? "" : " selected"}>Custom Cloudflare hosting (your own Cloudflare account)</option></select>
+          ${customHostingPanel(custom)}`
+    : domainList.length
     ? `
           ${domainList.length > 1
             ? `<label for="site-domain">Domain</label>
@@ -120,13 +128,15 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
     : "";
 
   const addressBlock = `
+          <div id="site-address-block">
           <label for="site-subdomain">Site address</label>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <input type="text" id="site-subdomain" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="40" aria-describedby="site-address-status" style="flex:1;min-width:140px" />
             <span id="site-address-suffix" class="mono"></span>
           </div>
           <p id="site-address-status" class="subtitle" aria-live="polite"></p>
-          <div id="site-address-suggest" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>`;
+          <div id="site-address-suggest" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+          </div>`;
 
   const createForm = canManage
     ? `
@@ -208,9 +218,12 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
       function lummetCreateBody() {
         var body = { name: document.getElementById('site-name').value, productId: document.getElementById('site-product').value };
         var dom = document.getElementById('site-domain');
-        if (dom && dom.value) { body.platformDomainId = dom.value; }
-        var sub = document.getElementById('site-subdomain');
-        if (sub && sub.value) { body.subdomain = sub.value; }
+        if (dom && dom.value === '__custom__') { body.hosting = lummetHostingChoice(); }
+        else {
+          if (dom && dom.value) { body.platformDomainId = dom.value; }
+          var sub = document.getElementById('site-subdomain');
+          if (sub && sub.value) { body.subdomain = sub.value; }
+        }
         var p = document.getElementById('site-preset');
         var c = document.getElementById('site-clone');
         if (c && c.value) { body.cloneFromSiteId = c.value; }
@@ -271,6 +284,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
         if (suffix) { var h = lummetDomainHost(); suffix.textContent = h ? '.' + h : ''; }
         var label = subEl.value;
         lummetRenderSuggestions({});
+        if (lummetIsCustom()) { addrOk = null; lummetAddrStatus(''); return; }
         if (!label) { addrOk = null; lummetAddrStatus(''); return; }
         var seq = ++addrSeq;
         addrOk = null;
@@ -287,7 +301,13 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
           .catch(function () { if (seq === addrSeq) { addrOk = null; lummetAddrStatus(''); } });
       }
       function lummetCheckSoon() { clearTimeout(addrTimer); addrOk = null; addrTimer = setTimeout(lummetCheckAddress, 300); }
-      function lummetAfterDomainChange() { lummetCheckAddress(); }
+      function lummetIsCustom() { var d = lummetDomainEl(); return !!(d && d.value === '__custom__'); }
+      function lummetAfterDomainChange() {
+        var block = document.getElementById('site-address-block'), panel = document.getElementById('ch-panel');
+        if (block) { block.style.display = lummetIsCustom() ? 'none' : ''; }
+        if (panel) { panel.style.display = lummetIsCustom() ? '' : 'none'; if (lummetIsCustom()) { lummetChRefresh(); } }
+        lummetCheckAddress();
+      }
       (function () {
         var dom = lummetDomainEl();
         var nameEl = document.getElementById('site-name');
@@ -300,6 +320,8 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
         if (suffix) { var h = lummetDomainHost(); suffix.textContent = h ? '.' + h : ''; }
       })();
 
+${custom ? CUSTOM_HOSTING_SCRIPT : "function lummetHostingChoice() { return null; } function lummetChRefresh() {} function lummetChValidate() { return null; }"}
+      (function () { if (document.getElementById('ch-panel')) { lummetAfterDomainChange(); } })();
       var createForm = document.getElementById('create-site-form');
       var presetSel = document.getElementById('site-preset');
       var cloneSel = document.getElementById('site-clone');
@@ -325,7 +347,8 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
       if (createForm) {
         createForm.addEventListener('submit', function (e) {
           e.preventDefault();
-          if (addrOk === false) { var se = document.getElementById('site-subdomain'); if (se) { se.focus(); } return; }
+          if (!lummetIsCustom() && addrOk === false) { var se = document.getElementById('site-subdomain'); if (se) { se.focus(); } return; }
+          if (lummetIsCustom()) { var chErr = lummetChValidate(); if (chErr) { alert(chErr); return; } }
           fetch('/api/organizations/' + lummetActiveOrgId() + '/sites', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -335,7 +358,7 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
             .then(function (data) {
               if (data.success) { location.reload(); }
               else if (data.reason) { lummetApplyCheck({ available: false, reason: data.reason, message: data.message, label: data.label, host: data.host, suggestions: data.suggestions, otherDomains: data.otherDomains }); var se2 = document.getElementById('site-subdomain'); if (se2) { se2.focus(); } }
-              else { alert('Could not create site: ' + (data.error === 'invalid_platform_domain' ? 'that domain is not available. Choose another.' : (data.error || 'unknown error'))); }
+              else { alert('Could not create site: ' + (data.error === 'invalid_platform_domain' ? 'that domain is not available. Choose another.' : (data.message || data.error || 'unknown error'))); }
             });
         });
       }
@@ -401,3 +424,137 @@ export function renderSitesPage({ sites, products, canManage, setupOptions = nul
     </script>
   `;
 }
+
+
+// ---------------------------------------------------------------- custom Cloudflare hosting on the create form
+
+function customHostingPanel(custom) {
+  const accounts = Array.isArray(custom.accounts) ? custom.accounts : [];
+  const opts = accounts.map((a) => {
+    const usable = a.status === "verified" && a.workersSubdomain;
+    return `<option value="${escapeHtml(a.id)}" data-sub="${escapeHtml(a.workersSubdomain || "")}"${usable ? "" : " disabled"}>${escapeHtml(a.label)} (${escapeHtml(a.accountName || a.accountId)})${usable ? "" : ` \u2014 ${escapeHtml(a.status === "verified" ? "needs a workers.dev subdomain" : "not verified")}`}</option>`;
+  }).join("");
+  return `
+          <div id="ch-panel" class="card" style="display:none;margin:8px 0;padding:12px">
+            <p class="subtitle" style="margin-top:0">The site runs in your own Cloudflare account. Lummet creates the Worker, database, cache, media bucket, Turnstile widget,
+            secrets and routing there through your API token, and ships every release to it. <a href="/app/cloud-hosting#guide">How to prepare your Cloudflare account</a></p>
+            <label for="ch-account">Cloudflare account</label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              <select id="ch-account" style="flex:1;min-width:220px"><option value="">Choose an account\u2026</option>${opts}</select>
+              <button type="button" class="btn" id="ch-add-toggle">Add an account</button>
+            </div>
+            <div id="ch-add" style="display:none;border:1px dashed var(--border, #ccc);padding:8px;margin:8px 0">
+              <label for="ch-add-label">Name for this account</label><input type="text" id="ch-add-label" maxlength="80" autocomplete="off" />
+              <label for="ch-add-id">Cloudflare account ID</label><input type="text" id="ch-add-id" maxlength="32" autocomplete="off" spellcheck="false" class="mono" />
+              <label for="ch-add-token">API token</label><input type="password" id="ch-add-token" autocomplete="new-password" spellcheck="false" />
+              <label for="ch-add-r2id">R2 access key ID (optional)</label><input type="text" id="ch-add-r2id" maxlength="32" autocomplete="off" spellcheck="false" class="mono" />
+              <label for="ch-add-r2secret">R2 secret access key (optional)</label><input type="password" id="ch-add-r2secret" autocomplete="new-password" spellcheck="false" />
+              <p class="subtitle">The token is checked with Cloudflare before it is saved, then stored encrypted. It is never shown again.</p>
+              <button type="button" class="btn" id="ch-add-save">Check and save</button>
+              <p id="ch-add-status" class="subtitle" aria-live="polite"></p>
+            </div>
+            <label for="ch-landing">Where the site answers</label>
+            <select id="ch-landing">
+              <option value="workers_dev">Cloudflare workers.dev address (no domain needed)</option>
+              <option value="custom_domain">A domain in this Cloudflare account</option>
+            </select>
+            <div id="ch-domain-fields" style="display:none">
+              <label for="ch-zone">Domain</label>
+              <select id="ch-zone"><option value="">Choose a domain\u2026</option></select>
+              <p class="subtitle">Only domains that are active in this Cloudflare account can be used. <a href="/app/cloud-hosting">Connect a domain</a></p>
+              <label for="ch-sub">Subdomain (leave empty to use the domain itself)</label>
+              <input type="text" id="ch-sub" maxlength="63" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="www" />
+            </div>
+            <p class="subtitle">Address: <span class="mono" id="ch-preview">\u2014</span></p>
+          </div>`;
+}
+
+const CUSTOM_HOSTING_SCRIPT = `
+      function lummetChEl(id) { return document.getElementById(id); }
+      function lummetChApi(path) { return '/api/organizations/' + lummetActiveOrgId() + '/cloud-hosting' + path; }
+      function lummetHostingChoice() {
+        var landing = lummetChEl('ch-landing').value;
+        var out = { mode: 'custom', accountId: lummetChEl('ch-account').value, landing: landing };
+        if (landing === 'custom_domain') { out.zoneId = lummetChEl('ch-zone').value; out.subdomain = lummetChEl('ch-sub').value.trim().toLowerCase(); }
+        return out;
+      }
+      function lummetChValidate() {
+        var c = lummetHostingChoice();
+        if (!c.accountId) { return 'Choose the Cloudflare account the site should run in (or add one).'; }
+        if (c.landing === 'custom_domain' && !c.zoneId) { return 'Choose the domain the site should use.'; }
+        return null;
+      }
+      function lummetChPreview() {
+        var acc = lummetChEl('ch-account'), out = lummetChEl('ch-preview');
+        var opt = acc.options[acc.selectedIndex];
+        if (lummetChEl('ch-landing').value === 'custom_domain') {
+          var z = lummetChEl('ch-zone'); var zo = z.options[z.selectedIndex];
+          var zn = zo && zo.value ? zo.getAttribute('data-name') : '';
+          var sub = lummetChEl('ch-sub').value.trim().toLowerCase();
+          out.textContent = zn ? (sub ? sub + '.' + zn : zn) : '\\u2014';
+        } else {
+          var ws = opt ? opt.getAttribute('data-sub') : '';
+          var n = lummetSlug(document.getElementById('site-name').value) || 'site';
+          out.textContent = ws ? 'lummet-site-' + n + '.' + ws + '.workers.dev' : '\\u2014';
+        }
+      }
+      var chZonesFor = null;
+      function lummetChLoadZones() {
+        var acc = lummetChEl('ch-account').value, z = lummetChEl('ch-zone');
+        if (!acc || chZonesFor === acc) { lummetChPreview(); return; }
+        chZonesFor = acc;
+        while (z.options.length > 1) { z.remove(1); }
+        z.options[0].textContent = 'Loading domains\\u2026';
+        fetch(lummetChApi('/accounts/' + encodeURIComponent(acc) + '/zones')).then(function (r) { return r.json(); }).then(function (d) {
+          z.options[0].textContent = 'Choose a domain\\u2026';
+          if (!d.success) { z.options[0].textContent = 'Could not read domains: ' + (d.message || d.error); chZonesFor = null; return; }
+          if (!d.data.length) { z.options[0].textContent = 'No domains in this account yet'; }
+          d.data.forEach(function (zone) {
+            var o = document.createElement('option');
+            o.value = zone.id; o.setAttribute('data-name', zone.name);
+            o.textContent = zone.name + (zone.active ? '' : ' (not active yet: set its nameservers)');
+            o.disabled = !zone.active;
+            z.appendChild(o);
+          });
+          lummetChPreview();
+        }).catch(function () { z.options[0].textContent = 'Could not reach the server'; chZonesFor = null; });
+      }
+      function lummetChRefresh() {
+        var custom = lummetChEl('ch-landing').value === 'custom_domain';
+        lummetChEl('ch-domain-fields').style.display = custom ? '' : 'none';
+        if (custom) { lummetChLoadZones(); } else { lummetChPreview(); }
+      }
+      (function () {
+        if (!lummetChEl('ch-panel')) { return; }
+        lummetChEl('ch-account').addEventListener('change', lummetChRefresh);
+        lummetChEl('ch-landing').addEventListener('change', lummetChRefresh);
+        lummetChEl('ch-zone').addEventListener('change', lummetChPreview);
+        lummetChEl('ch-sub').addEventListener('input', lummetChPreview);
+        document.getElementById('site-name').addEventListener('input', lummetChPreview);
+        lummetChEl('ch-add-toggle').addEventListener('click', function () { var b = lummetChEl('ch-add'); b.style.display = b.style.display === 'none' ? '' : 'none'; });
+        lummetChEl('ch-add-save').addEventListener('click', function () {
+          var st = lummetChEl('ch-add-status'), btn = lummetChEl('ch-add-save');
+          var body = { label: lummetChEl('ch-add-label').value, accountId: lummetChEl('ch-add-id').value.trim(), apiToken: lummetChEl('ch-add-token').value.trim() };
+          var r2id = lummetChEl('ch-add-r2id').value.trim(), r2s = lummetChEl('ch-add-r2secret').value.trim();
+          if (r2id || r2s) { body.r2AccessKeyId = r2id; body.r2SecretAccessKey = r2s; }
+          btn.disabled = true; st.textContent = 'Checking with Cloudflare\\u2026';
+          fetch(lummetChApi('/accounts'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              btn.disabled = false;
+              lummetChEl('ch-add-token').value = ''; lummetChEl('ch-add-r2secret').value = '';
+              if (!d.success) { st.textContent = 'Not saved: ' + (d.message || d.error); return; }
+              var a = d.data, usable = a.status === 'verified' && a.workersSubdomain;
+              var o = document.createElement('option');
+              o.value = a.id; o.setAttribute('data-sub', a.workersSubdomain || '');
+              o.textContent = a.label + ' (' + (a.accountName || a.accountId) + ')' + (usable ? '' : ' \\u2014 ' + (a.lastError || 'not ready'));
+              o.disabled = !usable;
+              lummetChEl('ch-account').appendChild(o);
+              if (usable) { lummetChEl('ch-account').value = a.id; lummetChEl('ch-add').style.display = 'none'; st.textContent = ''; }
+              else { st.textContent = 'Saved, but not ready: ' + (a.lastError || 'open Cloudflare hosting to finish the setup.'); }
+              lummetChRefresh();
+            })
+            .catch(function () { btn.disabled = false; st.textContent = 'Could not reach the server.'; });
+        });
+      })();
+`;

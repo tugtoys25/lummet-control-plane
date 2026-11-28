@@ -515,3 +515,305 @@ export async function detachWorkerDomain(env, customDomainId) {
   await cloudflareRequest(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/workers/domains/${customDomainId}`);
   return { ok: true };
 }
+
+
+// -----------------------------------------------------
+// Customer-owned Cloudflare hosting (docs/CUSTOM_CLOUDFLARE_HOSTING.md).
+//
+// Everything above works for ANY account: it reads env.CF_API_TOKEN / env.CF_ACCOUNT_ID, and for a site hosted in the
+// customer's own account the caller passes a scoped env carrying that account's token and id (custom-hosting.js
+// cloudflareEnvFor). The calls below are the extra operations that feature needs: checking a token and its
+// permissions, the account's workers.dev subdomain, zones in the account, Turnstile widgets, and the data copy used
+// when an existing site moves (D1 export / import, KV keys, R2 objects). Tokens never appear in an error message.
+// -----------------------------------------------------
+
+/** One call that also returns result_info (pagination) and, for a raw body, the Response itself. */
+async function cloudflareCall(env, method, path, { body, raw = false, rawBody, contentType } = {}) {
+  if (!env.CF_API_TOKEN) throw new Error("CF_API_TOKEN is not configured on this Worker");
+  if (!env.CF_ACCOUNT_ID) throw new Error("CF_ACCOUNT_ID is not configured on this Worker");
+  const headers = { Authorization: `Bearer ${env.CF_API_TOKEN}` };
+  if (rawBody !== undefined) headers["Content-Type"] = contentType || "application/octet-stream";
+  else if (body !== undefined) headers["Content-Type"] = "application/json";
+  const response = await fetch(`${API_BASE}${path}`, { method, headers, body: rawBody !== undefined ? rawBody : body !== undefined ? JSON.stringify(body) : undefined });
+  if (raw && response.ok) return response;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    const error = new Error(data?.errors?.[0]?.message || `Cloudflare API error (HTTP ${response.status})`);
+    error.httpStatus = response.status;
+    error.cfCode = data?.errors?.[0]?.code ?? null;
+    throw error;
+  }
+  return { result: data.result, resultInfo: data.result_info || null };
+}
+
+/** Is the token valid and active? Account-owned tokens verify on the account, user tokens on /user. */
+export async function verifyApiToken(env) {
+  for (const path of [`/accounts/${env.CF_ACCOUNT_ID}/tokens/verify`, "/user/tokens/verify"]) {
+    try {
+      const { result } = await cloudflareCall(env, "GET", path);
+      return { ok: result?.status === "active", status: result?.status || "unknown", expiresOn: result?.expires_on || null };
+    } catch (err) {
+      if (err.httpStatus && err.httpStatus >= 500) throw err;
+      // An account token does not verify on /user and vice versa: try the other form before giving up.
+    }
+  }
+  return { ok: false, status: "invalid", expiresOn: null };
+}
+
+export async function getAccountDetails(env) {
+  const { result } = await cloudflareCall(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}`);
+  return { id: result?.id || env.CF_ACCOUNT_ID, name: result?.name || null };
+}
+
+/**
+ * Read-only probes, one per capability a site needs. Each entry: { key, ok, code?, message? }. Nothing is created.
+ * r2 reports code "r2_not_enabled" when the account has not subscribed to R2 (Cloudflare error 10042).
+ */
+export async function probeAccountPermissions(env) {
+  const a = `/accounts/${env.CF_ACCOUNT_ID}`;
+  const probes = [
+    ["workers_scripts", `${a}/workers/scripts`],
+    ["d1", `${a}/d1/database?per_page=1`],
+    ["kv", `${a}/storage/kv/namespaces?per_page=1`],
+    ["r2", `${a}/r2/buckets?per_page=1`],
+    ["turnstile", `${a}/challenges/widgets?per_page=1`],
+    ["workers_subdomain", `${a}/workers/subdomain`],
+    ["zones", `/zones?per_page=5&account.id=${encodeURIComponent(env.CF_ACCOUNT_ID)}`]
+  ];
+  const out = [];
+  for (const [key, path] of probes) {
+    try { await cloudflareCall(env, "GET", path); out.push({ key, ok: true }); }
+    catch (err) {
+      let code = err.httpStatus === 401 || err.httpStatus === 403 ? "forbidden" : "error";
+      if (key === "r2" && (err.cfCode === 10042 || /enable r2|r2 .*not enabled|purchase/i.test(String(err.message)))) code = "r2_not_enabled";
+      // An account that has never claimed a workers.dev subdomain answers 404 here: the permission is fine.
+      if (key === "workers_subdomain" && err.httpStatus === 404) { out.push({ key, ok: true, code: "no_subdomain" }); continue; }
+      out.push({ key, ok: false, code, message: String(err.message || "").slice(0, 200) });
+    }
+  }
+  return out;
+}
+
+/** The account's <name>.workers.dev subdomain, or null when it has none yet. */
+export async function getWorkersSubdomain(env) {
+  try {
+    const { result } = await cloudflareCall(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/workers/subdomain`);
+    return result?.subdomain || null;
+  } catch (err) {
+    if (err.httpStatus === 404 || /not found|no subdomain/i.test(String(err.message))) return null;
+    throw err;
+  }
+}
+
+export async function createWorkersSubdomain(env, { subdomain }) {
+  const { result } = await cloudflareCall(env, "PUT", `/accounts/${env.CF_ACCOUNT_ID}/workers/subdomain`, { body: { subdomain } });
+  return result?.subdomain || subdomain;
+}
+
+/** Serves (or stops serving) a script on its workers.dev address (worker name, then the account subdomain). */
+export async function setWorkersDevEnabled(env, { workerName, enabled }) {
+  await cloudflareCall(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/workers/scripts/${workerName}/subdomain`, { body: { enabled: !!enabled, previews_enabled: false } });
+  return { ok: true };
+}
+
+/** Zones of the account (all pages, capped). Each: { id, name, status, nameServers, plan }. */
+export async function listAccountZones(env, { maxPages = 10 } = {}) {
+  const zones = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const { result, resultInfo } = await cloudflareCall(env, "GET", `/zones?account.id=${encodeURIComponent(env.CF_ACCOUNT_ID)}&per_page=50&page=${page}`);
+    for (const z of result || []) zones.push({ id: z.id, name: z.name, status: z.status, nameServers: Array.isArray(z.name_servers) ? z.name_servers : [], plan: z.plan?.name || null });
+    if (!resultInfo || page >= (resultInfo.total_pages || 1)) break;
+  }
+  return zones;
+}
+
+export async function listWorkerDomains(env, { hostname } = {}) {
+  const q = hostname ? `?hostname=${encodeURIComponent(hostname)}` : "";
+  const { result } = await cloudflareCall(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/workers/domains${q}`);
+  return (result || []).map((d) => ({ id: d.id, hostname: d.hostname, service: d.service, zoneId: d.zone_id }));
+}
+
+/** Turnstile widget for one site. Returns { sitekey, secret } (the secret is only returned on create). */
+export async function createTurnstileWidget(env, { name, domains, mode = "managed" }) {
+  const { result } = await cloudflareCall(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/challenges/widgets`, { body: { name, domains: domains.slice(0, 10), mode } });
+  return { sitekey: result.sitekey, secret: result.secret };
+}
+
+export async function updateTurnstileWidget(env, { sitekey, name, domains, mode = "managed" }) {
+  await cloudflareCall(env, "PUT", `/accounts/${env.CF_ACCOUNT_ID}/challenges/widgets/${sitekey}`, { body: { name, domains: domains.slice(0, 10), mode } });
+  return { ok: true };
+}
+
+export async function deleteTurnstileWidget(env, sitekey) {
+  await cloudflareCall(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/challenges/widgets/${sitekey}`);
+  return { ok: true };
+}
+
+// ---- data copy (moving an existing site) --------------------------------------------------------------------
+
+/**
+ * Starts or continues a D1 SQL export. Returns { status: "complete", signedUrl } or { status: "active", bookmark }.
+ * The database is unavailable to other queries while an export runs, so callers keep polling until it completes.
+ */
+export async function exportD1Database(env, { databaseId, bookmark = null }) {
+  const body = { output_format: "polling" };
+  if (bookmark) body.current_bookmark = bookmark;
+  const { result } = await cloudflareCall(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${databaseId}/export`, { body });
+  if (result?.status === "error") throw new Error(`D1 export failed: ${result.error || "unknown error"}`);
+  if (result?.status === "complete") return { status: "complete", signedUrl: result.result?.signed_url || null };
+  return { status: "active", bookmark: result?.at_bookmark || bookmark };
+}
+
+/** Downloads a finished D1 export (its signed URL) as bytes, refusing anything over maxBytes. */
+export async function downloadD1Export(env, { signedUrl, maxBytes }) {
+  const res = await fetch(signedUrl);
+  if (!res.ok) throw new Error(`could not download the database export (HTTP ${res.status})`);
+  const size = Number(res.headers.get("content-length") || 0);
+  if (maxBytes && size > maxBytes) throw Object.assign(new Error("export too large"), { tooLarge: true, size });
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (maxBytes && bytes.length > maxBytes) throw Object.assign(new Error("export too large"), { tooLarge: true, size: bytes.length });
+  return bytes;
+}
+
+/**
+ * Starts importing a SQL dump into an (empty) D1 database: init -> upload -> ingest. Returns { status, bookmark }; while the status
+ * is "active" the caller keeps calling pollD1Import with the bookmark (resumable across runs: nothing is imported twice).
+ */
+export async function importD1Sql(env, { databaseId, sql }) {
+  const bytes = typeof sql === "string" ? new TextEncoder().encode(sql) : new Uint8Array(sql);
+  const etag = await md5Hex(bytes);
+  const path = `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${databaseId}/import`;
+  const init = (await cloudflareCall(env, "POST", path, { body: { action: "init", etag } })).result || {};
+  if (init.upload_url) {
+    const put = await fetch(init.upload_url, { method: "PUT", body: bytes });
+    if (!put.ok) throw new Error(`D1 import upload failed (HTTP ${put.status})`);
+    const r2Etag = String(put.headers.get("etag") || "").replace(/"/g, "");
+    if (r2Etag && r2Etag !== etag) throw new Error("D1 import upload was corrupted in transit (checksum mismatch)");
+  }
+  const state = (await cloudflareCall(env, "POST", path, { body: { action: "ingest", etag, filename: init.filename } })).result || {};
+  return d1ImportState(state);
+}
+
+export async function pollD1Import(env, { databaseId, bookmark }) {
+  const path = `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${databaseId}/import`;
+  const state = (await cloudflareCall(env, "POST", path, { body: { action: "poll", current_bookmark: bookmark } })).result || {};
+  return d1ImportState(state, bookmark);
+}
+
+function d1ImportState(state, bookmark = null) {
+  if (state.status === "error" || state.success === false) throw new Error(`D1 import failed: ${state.error || "unknown error"}`);
+  if (state.status === "complete") return { status: "complete", numQueries: state.result?.num_queries ?? null };
+  return { status: "active", bookmark: state.at_bookmark || bookmark };
+}
+
+export async function listKvKeys(env, { namespaceId, cursor = null, limit = 1000 }) {
+  const q = `?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+  const { result, resultInfo } = await cloudflareCall(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/storage/kv/namespaces/${namespaceId}/keys${q}`);
+  return { keys: (result || []).map((k) => ({ name: k.name, expiration: k.expiration || null, metadata: k.metadata ?? null })), cursor: resultInfo?.cursor || null };
+}
+
+export async function getKvValue(env, { namespaceId, key }) {
+  const res = await cloudflareCall(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`, { raw: true });
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+/** entries: [{ key, value (base64), base64: true, expiration?, metadata? }] — at most 10,000 per call. */
+export async function putKvBulk(env, { namespaceId, entries }) {
+  await cloudflareCall(env, "PUT", `/accounts/${env.CF_ACCOUNT_ID}/storage/kv/namespaces/${namespaceId}/bulk`, { body: entries });
+  return { ok: true };
+}
+
+export async function listR2Objects(env, { bucket, cursor = null, perPage = 1000 }) {
+  const q = `?per_page=${perPage}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+  const { result, resultInfo } = await cloudflareCall(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucket}/objects${q}`);
+  return {
+    objects: (result || []).map((o) => ({ key: o.key, size: o.size || 0, contentType: o.http_metadata?.contentType || null, lastModified: o.last_modified || null })),
+    cursor: resultInfo?.is_truncated ? resultInfo.cursor : null
+  };
+}
+
+export async function getR2Object(env, { bucket, key }) {
+  const res = await cloudflareCall(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucket}/objects/${encodeR2Key(key)}`, { raw: true });
+  return { body: new Uint8Array(await res.arrayBuffer()), contentType: res.headers.get("content-type") || null };
+}
+
+export async function putR2Object(env, { bucket, key, body, contentType }) {
+  await cloudflareCall(env, "PUT", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucket}/objects/${encodeR2Key(key)}`, { rawBody: body, contentType });
+  return { ok: true };
+}
+
+function encodeR2Key(key) { return String(key).split("/").map(encodeURIComponent).join("/"); }
+
+/**
+ * Checks an R2 S3-compatible access key pair against the account (signed ListBuckets, AWS Signature V4, region "auto").
+ * Returns { ok, status }. Only the key id appears in requests; the secret is used to sign and is never sent.
+ */
+export async function verifyR2S3Credentials(env, { accessKeyId, secretAccessKey, jurisdiction = "default" }) {
+  const host = `${env.CF_ACCOUNT_ID}.${jurisdiction === "eu" ? "eu." : jurisdiction === "fedramp" ? "fedramp." : ""}r2.cloudflarestorage.com`;
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const date = amzDate.slice(0, 8);
+  const payloadHash = await sha256Hex("");
+  const query = "max-buckets=1";
+  const canonical = ["GET", "/", query, `host:${host}`, `x-amz-content-sha256:${payloadHash}`, `x-amz-date:${amzDate}`, "", "host;x-amz-content-sha256;x-amz-date", payloadHash].join("\n");
+  const scope = `${date}/auto/s3/aws4_request`;
+  const toSign = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256Hex(canonical)].join("\n");
+  let k = await hmac(new TextEncoder().encode(`AWS4${secretAccessKey}`), date);
+  for (const part of ["auto", "s3", "aws4_request"]) k = await hmac(k, part);
+  const signature = [...new Uint8Array(await hmac(k, toSign))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const auth = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=${signature}`;
+  try {
+    const res = await fetch(`https://${host}/?${query}`, { headers: { Authorization: auth, "x-amz-date": amzDate, "x-amz-content-sha256": payloadHash } });
+    return { ok: res.ok, status: res.status };
+  } catch (_) {
+    return { ok: false, status: null };
+  }
+}
+
+async function hmac(keyBytes, msg) {
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg)));
+}
+async function sha256Hex(s) {
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** MD5 (hex) of bytes — D1's import API identifies the upload by it. Workers support MD5 in crypto.subtle.digest. */
+async function md5Hex(bytes) {
+  try {
+    return [...new Uint8Array(await crypto.subtle.digest("MD5", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch (_) {
+    return md5Fallback(bytes);
+  }
+}
+
+// Plain MD5 for runtimes without MD5 in WebCrypto (Node, used by the tests). RFC 1321.
+function md5Fallback(bytes) {
+  const s = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21];
+  const K = Array.from({ length: 64 }, (_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 2 ** 32) >>> 0);
+  const len = bytes.length;
+  const padded = new Uint8Array((((len + 8) >> 6) + 1) * 64);
+  padded.set(bytes); padded[len] = 0x80;
+  const bitLen = len * 8;
+  const dv = new DataView(padded.buffer);
+  dv.setUint32(padded.length - 8, bitLen >>> 0, true);
+  dv.setUint32(padded.length - 4, Math.floor(bitLen / 2 ** 32), true);
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  for (let off = 0; off < padded.length; off += 64) {
+    const M = Array.from({ length: 16 }, (_, i) => dv.getUint32(off + i * 4, true));
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      let F, g;
+      if (i < 16) { F = (B & C) | (~B & D); g = i; }
+      else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+      else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+      else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+      F = (F + A + K[i] + M[g]) >>> 0;
+      A = D; D = C; C = B;
+      B = (B + ((F << s[i]) | (F >>> (32 - s[i])))) >>> 0;
+    }
+    a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0; c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+  }
+  return [a0, b0, c0, d0].map((w) => [0, 8, 16, 24].map((sh) => ((w >>> sh) & 0xff).toString(16).padStart(2, "0")).join("")).join("");
+}
+export const __md5ForTests = md5Fallback;

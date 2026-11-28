@@ -39,6 +39,7 @@ import * as releaseRepo from "./repositories/tenant-releases.js";
 import { lineProfile } from "./template-lines.js";
 import { newTenantSeedMigrations } from "./tenant-defaults.js";
 import * as webhooks from "./webhooks.js";
+import * as customHosting from "./custom-hosting.js";
 
 // Each application's own cron schedule lives with its template line (template-lines.js): for the casino application the
 // expired-session and conversation cleanup plus the optional link-health checks, for brokerage its notification recovery.
@@ -126,6 +127,10 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
     if (!site.tenant_id) return { ok: false, status: 409, error: "site_not_registered" };
     if (!version) return { ok: false, status: 422, error: "version_required" };
     if (!scriptContent) return { ok: false, status: 422, error: "script_content_required" };
+    // A site in the customer's own Cloudflare account (custom-hosting.js) needs that account to be usable, and a site being moved
+    // there takes no release until the move finishes. Lummet-hosted sites: always null, nothing changes.
+    const hostingBlock = await customHosting.deployBlock(env, site);
+    if (hostingBlock) return { ok: false, status: 409, error: hostingBlock.error, message: hostingBlock.message };
 
     const deploymentId = await createDeploymentRecord(env, { siteId, version, actorUserId, actorType });
 
@@ -156,6 +161,8 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
     const target = await getDeployment(env, targetDeploymentId);
     if (!target || target.site_id !== siteId) return { ok: false, status: 404, error: "target_deployment_not_found" };
     if (target.status !== "active") return { ok: false, status: 409, error: "target_deployment_was_not_successful" };
+    const hostingBlock = await customHosting.deployBlock(env, site);
+    if (hostingBlock) return { ok: false, status: 409, error: hostingBlock.error, message: hostingBlock.message };
 
     const deploymentId = await createDeploymentRecord(env, {
       siteId, version: target.version, actorUserId, actorType, isRollback: true, targetDeploymentId
@@ -205,6 +212,12 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
     // The application this site runs (its product's template line) decides bindings, cron schedule, runtime date and health URL.
     const siteLine = await releaseRepo.lineOfSite(env, site.id);
     const profile = lineProfile(siteLine);
+    // Where the site runs. null = Lummet's account: every call below gets env exactly as before. For a site in the customer's own
+    // Cloudflare account, hosting.cfEnv carries that account's token and id, and routing / bindings / health use its hooks.
+    let hosting = null;
+    let hostingError = null;
+    try { hosting = await customHosting.contextForSite(env, site); } catch (e) { hostingError = e; }
+    const cfEnv = hosting ? hosting.cfEnv : env;
 
     async function failDeployment(step, message) {
       await jobsModule.failStep(env, jobId, step, message);
@@ -221,6 +234,7 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
       }
       // A redeploy failing leaves the already-'active' site exactly
       // as it was — no site-status transition here on purpose.
+      if (hosting || hostingError) await customHosting.noteFailure(env, site.id, `${step}: ${message}`);
     }
 
     for (const step of job.steps) {
@@ -231,6 +245,7 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
       try {
         switch (step.step_key) {
           case "validate_site_state": {
+            if (hostingError) throw new Error(`the Cloudflare account this site runs on cannot be used: ${hostingError.message}`);
             const currentSite = await sites.getSite(env, site.id);
             if (!["provisioned", "active"].includes(currentSite.status)) {
               throw new Error(`site is no longer in a deployable status (now ${currentSite.status})`);
@@ -246,6 +261,7 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
           }
 
           case "run_migrations": {
+            if (hostingError) throw new Error(`the Cloudflare account this site runs on cannot be used: ${hostingError.message}`);
             await updateDeploymentStatus(env, deploymentId, "migrating");
             const d1Resource = await env.LUMMET_DB.prepare(
               `SELECT * FROM site_resources WHERE site_id = ? AND resource_type = 'd1' AND status = 'active'`
@@ -266,7 +282,7 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
                 .first();
               if (already) continue;
 
-              await applyMigrationSql(infra, env, d1Resource.resource_id, migration.sql);
+              await applyMigrationSql(infra, cfEnv, d1Resource.resource_id, migration.sql);
               await env.LUMMET_DB.prepare(
                 `INSERT INTO site_migrations_applied (site_id, migration_name, deployment_id) VALUES (?, ?, ?)`
               )
@@ -296,10 +312,18 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
               throw new Error(`release ${version} is a ${release.line || "casino"} release but this site runs the ${siteLine} application`);
             }
             const assetManifest = release && release.ok && release.assets ? release.assets : null;
-            const bindings = await buildSiteBindings(env, {
-              site, deploymentId, host: site.primary_domain || names.host, hasAssets: !!assetManifest, line: siteLine
+            if (hostingError) throw new Error(`the Cloudflare account this site runs on cannot be used: ${hostingError.message}`);
+            let bindings = await buildSiteBindings(env, {
+              site, deploymentId, host: hosting ? names.host : (site.primary_domain || names.host), hasAssets: !!assetManifest, line: siteLine
             });
-            await infra.uploadWorkerScript(env, {
+            let hostingNotes = null;
+            if (hosting) {
+              const r2 = await siteResources.findActiveResource(env, site.id, "r2");
+              const adapted = await customHosting.adaptBindings(infra, env, hosting, bindings, { line: siteLine, host: names.host, workerName: names.workerName, r2BucketName: r2?.resource_id });
+              bindings = adapted.bindings;
+              hostingNotes = adapted.notes;
+            }
+            await infra.uploadWorkerScript(cfEnv, {
               workerName: names.workerName, scriptContent, bindings, profile,
               assetsConfig: release && release.ok ? release.assetsConfig : null,
               assets: assetManifest ? { manifest: assetManifest, readAsset: (hash) => templateService.readAsset(env, hash) } : null
@@ -321,8 +345,12 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
             // site nobody can reach is not "active".
             const host = site.primary_domain || names.host;
             let routeId = null;
-            const existingRoute = await siteResources.findActiveResource(env, site.id, "route");
-            if (existingRoute) {
+            let customRouting = null;
+            const existingRoute = hosting ? null : await siteResources.findActiveResource(env, site.id, "route");
+            if (hosting) {
+              // The customer's account: workers.dev, plus a Workers Custom Domain on their own zone when the site lands on one.
+              customRouting = await customHosting.applyRouting(infra, env, hosting, { workerName: names.workerName });
+            } else if (existingRoute) {
               routeId = existingRoute.resource_id;
             } else {
               // The route lives in the zone of the site's platform domain (the default zone for sites that predate platform domains).
@@ -335,17 +363,19 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
             // The tenant's cron triggers. Not fatal (the site works without
             // them), but never silent: the outcome is recorded on the step.
             let scheduleError = null;
-            try { await infra.setWorkerSchedule(env, { workerName: names.workerName, crons: [...profile.crons] }); }
+            try { await infra.setWorkerSchedule(cfEnv, { workerName: names.workerName, crons: [...profile.crons] }); }
             catch (err) { scheduleError = String(err?.message || err).slice(0, 160); }
 
-            await jobsModule.completeStep(env, jobId, step.step_key, { workerName: names.workerName, bindingCount: bindings.length, assetCount: assetManifest ? Object.keys(assetManifest).length : 0, routeId, ...(scheduleError ? { scheduleError } : {}) });
+            await jobsModule.completeStep(env, jobId, step.step_key, { workerName: names.workerName, bindingCount: bindings.length, assetCount: assetManifest ? Object.keys(assetManifest).length : 0, routeId, ...(customRouting ? { hosting: "custom", ...customRouting, ...hostingNotes } : {}), ...(scheduleError ? { scheduleError } : {}) });
             break;
           }
 
           case "health_check": {
             await updateDeploymentStatus(env, deploymentId, "checking");
-            const url = reachableUrl(site, names.workerName, env, profile.healthPath);
-            const result = await infra.checkHealth(env, { url });
+            // A site in the customer's account is checked on workers.dev (always served; a new custom hostname's certificate
+            // can take a few minutes). Its own hostname is checked too, and reported, without failing the deployment.
+            const url = hosting ? customHosting.healthUrl(hosting, names.workerName, profile.healthPath) : reachableUrl(site, names.workerName, env, profile.healthPath);
+            const result = await infra.checkHealth(cfEnv, { url });
             if (!result.ok) {
               throw new Error(`health check failed for ${url} (status ${result.statusCode ?? "unreachable"})`);
             }
@@ -356,12 +386,17 @@ export function createDeploymentService(infra, { templateService = tenantTemplat
               ? (Object.keys(release.assets).find((p) => p.endsWith(".css")) || Object.keys(release.assets)[0]) : null;
             if (sample) {
               const assetUrl = new URL(sample, url).toString();
-              const assetResult = await infra.checkHealth(env, { url: assetUrl });
+              const assetResult = await infra.checkHealth(cfEnv, { url: assetUrl });
               if (!assetResult.ok) {
                 throw new Error(`static asset check failed for ${assetUrl} (status ${assetResult.statusCode ?? "unreachable"})`);
               }
             }
-            await jobsModule.completeStep(env, jobId, step.step_key, { url, statusCode: result.statusCode, assetChecked: sample });
+            let customDomainCheck = null;
+            if (hosting && hosting.hosting.landing === "custom_domain" && hosting.hosting.hostname) {
+              const r = await infra.checkHealth(cfEnv, { url: `https://${hosting.hosting.hostname}${profile.healthPath || "/"}` });
+              customDomainCheck = { hostname: hosting.hosting.hostname, ok: !!r.ok, statusCode: r.statusCode ?? null };
+            }
+            await jobsModule.completeStep(env, jobId, step.step_key, { url, statusCode: result.statusCode, assetChecked: sample, ...(customDomainCheck ? { customDomainCheck } : {}) });
             break;
           }
 

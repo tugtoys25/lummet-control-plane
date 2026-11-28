@@ -31,6 +31,7 @@ import * as jobsModule from "./jobs.js";
 import { provisioning as realProvisioning } from "./provisioning.js";
 import { deployments as realDeployments } from "./deployments.js";
 import { siteTeardown as realTeardown } from "./site-teardown.js";
+import { hostingTransfers as realTransfers } from "./custom-hosting-transfer.js";
 
 export const MAX_AUTO_RETRIES = 5;
 /** Wait before automatic retry number n+1 (n = retries already made), measured from when the job failed. */
@@ -44,7 +45,7 @@ export function backoffMinutes(autoRetries) {
 }
 
 /** Policy per job type. `run` resumes a job; `retry` re-opens a failed one (only where that is safe). */
-export function defaultRunners({ provisioning = realProvisioning, deployments = realDeployments, teardown = realTeardown } = {}) {
+export function defaultRunners({ provisioning = realProvisioning, deployments = realDeployments, teardown = realTeardown, transfers = realTransfers } = {}) {
   return {
     // Deleting a site (site-teardown.js): every step is idempotent and a provider that no longer has a resource counts as done,
     // so resuming and retrying are always safe, and the site stays `deleting` (its address held) until the last step succeeds.
@@ -69,6 +70,14 @@ export function defaultRunners({ provisioning = realProvisioning, deployments = 
       resumeLost: true,
       retryFailed: false,
       run: (env, job) => deployments.runJob(env, job.id)
+    },
+    // Moving a site into the customer's own Cloudflare account (custom-hosting-transfer.js): every step keeps its cursor and
+    // the ids it created, and the site keeps serving from Lummet until the last step, so resuming and retrying are safe.
+    site_hosting_transfer: {
+      resumeLost: true,
+      retryFailed: true,
+      run: (env, job) => transfers.runJob(env, job.id),
+      retry: (env, job) => transfers.runJob(env, job.id)
     }
   };
 }

@@ -14,6 +14,7 @@ import { evaluateWriteGate, refusalFor } from "./access.js";
 import { syncSiteBrand } from "./site-brands.js";
 import { planSetup, storeSetupRequest } from "./site-setup.js";
 import * as siteLabels from "./site-labels.js";
+import * as customHosting from "./custom-hosting.js";
 
 export const SITE_STATUSES = [
   "pending",
@@ -85,7 +86,7 @@ async function labelRefusal(env, { organizationId, label, domain, reason }) {
  * customer; it is not a fake success for a deployment that hasn't
  * happened.
  */
-export async function createSite(env, { organizationId, name, productId, actorUserId, preset, cloneFromSiteId, cloneFromTenantId, sections, platformDomainId, subdomain }) {
+export async function createSite(env, { organizationId, name, productId, actorUserId, preset, cloneFromSiteId, cloneFromTenantId, sections, platformDomainId, subdomain, hosting = null, hostingInfra = undefined }) {
   const gate = await evaluateWriteGate(env, { organizationId, method: "POST", subPath: "/sites" });
   if (gate.blocked) return { ok: false, status: 402, ...refusalFor(gate.access) };
   const trimmedName = (name || "").trim();
@@ -104,20 +105,33 @@ export async function createSite(env, { organizationId, name, productId, actorUs
   const planned = hasWizard ? await planSetup(env, { preset, cloneFromSiteId, cloneFromTenantId, sections, organizationId, productId, staff: false }) : null;
   if (planned && !planned.ok) return { ok: false, status: planned.status, error: planned.error };
 
+  // Optional: the site runs in the customer's OWN Cloudflare account (custom-hosting.js). Everything about it is validated here,
+  // before anything is written, and it then has no platform domain and no platform address label. Without `hosting` (or with
+  // mode "lummet") nothing below changes: the platform domain and label are chosen and checked exactly as before.
+  const custom = hosting && hosting.mode === "custom";
+  let customPlan = null;
+  if (custom) {
+    try { customPlan = await customHosting.planHosting(env, { organizationId, choice: hosting, ...(hostingInfra ? { infra: hostingInfra } : {}) }); }
+    catch (e) { if (e instanceof customHosting.HostingError) return { ok: false, status: e.status, error: e.code, message: e.message }; throw e; }
+    if (!customPlan.ok) return customPlan;
+  }
+
   // Platform domain (migration 0085): validated server-side against what this organisation may choose, before anything is written.
-  const chosen = await resolveCustomerChoice(env, { organizationId, platformDomainId });
+  const chosen = custom ? { ok: true, domain: { id: null, hostname: null } } : await resolveCustomerChoice(env, { organizationId, platformDomainId });
   if (!chosen.ok) return { ok: false, status: 422, error: chosen.error };
 
   // The address label: what the customer typed, or their site name turned into one. It is checked against the chosen domain
   // and NEVER changed on the customer's behalf: a taken or invalid label is refused with suggestions (no "-2" is added).
   const hasTyped = subdomain !== undefined && subdomain !== null && String(subdomain).trim() !== "";
-  const label = hasTyped ? siteLabels.normalizeLabel(subdomain) : siteLabels.slugifyLabel(trimmedName);
-  const labelCheck = await siteLabels.checkLabel(env, { label, domain: chosen.domain });
-  if (!labelCheck.available) return await labelRefusal(env, { organizationId, label, domain: chosen.domain, reason: labelCheck.reason });
+  const label = custom ? null : hasTyped ? siteLabels.normalizeLabel(subdomain) : siteLabels.slugifyLabel(trimmedName);
+  if (!custom) {
+    const labelCheck = await siteLabels.checkLabel(env, { label, domain: chosen.domain });
+    if (!labelCheck.available) return await labelRefusal(env, { organizationId, label, domain: chosen.domain, reason: labelCheck.reason });
+  }
 
   const id = crypto.randomUUID();
   // The slug stays globally unique and internal: the Worker, D1, KV and R2 names derive from it. The customer never sees it.
-  const slug = await uniqueSlug(env, label);
+  const slug = await uniqueSlug(env, custom ? (siteLabels.slugifyLabel(trimmedName) || "site") : label);
 
   try {
     await env.LUMMET_DB.prepare(
@@ -127,8 +141,19 @@ export async function createSite(env, { organizationId, name, productId, actorUs
       .run();
   } catch (error) {
     // Someone took the label between the check and the write: the unique index (migration 0088) decided.
-    if (/UNIQUE|constraint/i.test(String(error?.message))) return await labelRefusal(env, { organizationId, label, domain: chosen.domain, reason: "taken" });
+    if (!custom && /UNIQUE|constraint/i.test(String(error?.message))) return await labelRefusal(env, { organizationId, label, domain: chosen.domain, reason: "taken" });
     throw error;
+  }
+
+  let customHost = null;
+  if (custom) {
+    try { customHost = (await customHosting.attachToNewSite(env, { siteId: id, organizationId, plan: customPlan.plan, workerName: `lummet-site-${slug}` })).host; }
+    catch (error) {
+      // Another site took the hostname between the check and the write (unique index, migration 0111): nothing is kept.
+      await customHosting.rollbackNewSite(env, id);
+      if (/UNIQUE|constraint/i.test(String(error?.message))) return { ok: false, status: 409, error: "hostname_taken" };
+      throw error;
+    }
   }
 
   await recordStatusEvent(env, {
@@ -147,6 +172,13 @@ export async function createSite(env, { organizationId, name, productId, actorUs
 
   await webhooks.dispatchEvent(env, organizationId, "site.created", { siteId: id, name: trimmedName, slug });
 
+  if (custom) {
+    return {
+      ok: true, siteId: id, slug, label: null, platformDomain: null,
+      hosting: { mode: "custom", accountId: customPlan.plan.accountRef, landing: customPlan.plan.landing, host: customHost },
+      setup: planned ? { requestId: setupRequestId, kind: planned.plan.kind, presetId: planned.plan.presetId, presetSource: planned.plan.presetSource, status: "pending" } : null
+    };
+  }
   return {
     ok: true, siteId: id, slug, label, platformDomain: { id: chosen.domain.id || null, hostname: chosen.domain.hostname, host: hostFor({ slug, host_label: label }, chosen.domain) },
     setup: planned ? { requestId: setupRequestId, kind: planned.plan.kind, presetId: planned.plan.presetId, presetSource: planned.plan.presetSource, status: "pending" } : null

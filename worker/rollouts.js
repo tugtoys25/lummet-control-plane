@@ -30,6 +30,7 @@ import * as releaseRepo from "./repositories/tenant-releases.js";
 // (job-runner.js does the same).
 import "./provisioning.js";
 import { deployments as realDeployments } from "./deployments.js";
+import * as customHosting from "./custom-hosting.js";
 
 export const LOCK_MS = 90_000;
 export const ITEM_TIMEOUT_MINUTES = 45;
@@ -39,7 +40,9 @@ export const MAX_SKIPS_PER_STEP = 25;
  * hold back every other site, so such a site is recorded as skipped (with the reason, visible in the rollout table) and the rollout
  * carries on. It is picked up again by the next rollout once the account is in good standing. Anything else still stops the rollout.
  */
-export const SKIPPABLE_START_ERRORS = new Set(["billing_access_restricted"]);
+// custom_hosting_unavailable / site_transfer_in_progress: the site runs in (or is moving to) the customer's own Cloudflare account
+// and that account cannot take a deploy right now (custom-hosting.js). Same rule: that customer's problem never blocks the others.
+export const SKIPPABLE_START_ERRORS = new Set(["billing_access_restricted", "custom_hosting_unavailable", "site_transfer_in_progress"]);
 const MAX_SITE_IDS = 200;
 export const CANARY_PREFIX = "canary:";
 const ON = new Set(["on", "1", "true", "yes", "enforce", "required"]);
@@ -171,6 +174,12 @@ async function step(env, rollout, { dispatch, now, deployments, templates }) {
     if (verdict.state === "waiting") return;
     if (verdict.state === "succeeded") {
       await repo.markItemDone(env, running.id, "succeeded");
+    } else if (customHosting.isAccountLevelFailure(verdict.reason) && (await customHosting.isCustomHosted(env, running.site_id))) {
+      // Only a clearly account-level failure (revoked token, quota, R2 not enabled) on a site in the customer's OWN Cloudflare
+      // account is theirs to fix and says nothing about the release: it is recorded as failed (visible in the rollout, and the
+      // customer is told) and the rollout carries on. Every other failure, on any site, stops the rollout as it always did.
+      await repo.markItemDone(env, running.id, "failed", `customer Cloudflare account: ${verdict.reason}`);
+      await customHosting.notifyAccountProblem(env, running.site_id, verdict.reason).catch(() => {});
     } else {
       await repo.markItemDone(env, running.id, "failed", verdict.reason);
       await repo.finishRollout(env, rolloutId, "failed", `a site failed to deploy ${version}: ${verdict.reason}. Remaining sites were not touched.`);

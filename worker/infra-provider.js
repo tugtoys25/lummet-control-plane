@@ -98,5 +98,38 @@
  *   certificate validation) so the dashboard can show them.
  *
  * createCustomHostname additionally returns { records } with the same shape.
+ *
+ * --- Customer-owned Cloudflare accounts (optional; see docs/CUSTOM_CLOUDFLARE_HOSTING.md) ---
+ *
+ * Every function above can also run against a customer's own account: custom-hosting.js passes a scoped env
+ * (CF_ACCOUNT_ID / CF_API_TOKEN of that account, decrypted only for the call) instead of Lummet's own env.
+ * These are used only for those accounts:
+ *
+ * @property {(env: Object) => Promise<{ok: boolean, status: string, expiresOn: ?string}>} verifyApiToken
+ * @property {(env: Object) => Promise<{id: string, name: ?string}>} getAccountDetails
+ * @property {(env: Object) => Promise<Array<{key: string, ok: boolean, code?: string, message?: string}>>} probeAccountPermissions
+ *   One entry per capability (workers_scripts, d1, kv, r2, turnstile, workers_subdomain, zones); code "r2_not_enabled" when R2 needs activating.
+ * @property {(env: Object) => Promise<?string>} getWorkersSubdomain
+ * @property {(env: Object, params: {subdomain: string}) => Promise<string>} createWorkersSubdomain
+ * @property {(env: Object, params: {workerName: string, enabled: boolean}) => Promise<{ok: boolean}>} setWorkersDevEnabled
+ * @property {(env: Object) => Promise<Array<{id: string, name: string, status: string, nameServers: string[], plan: ?string}>>} listAccountZones
+ * @property {(env: Object, params?: {hostname?: string}) => Promise<Array<{id: string, hostname: string, service: string, zoneId: string}>>} listWorkerDomains
+ * @property {(env: Object, params: {name: string, domains: string[]}) => Promise<{sitekey: string, secret: string}>} createTurnstileWidget
+ * @property {(env: Object, params: {sitekey: string, name: string, domains: string[]}) => Promise<{ok: boolean}>} updateTurnstileWidget
+ * @property {(env: Object, sitekey: string) => Promise<{ok: boolean}>} deleteTurnstileWidget
+ * @property {(env: Object, params: {accessKeyId: string, secretAccessKey: string, jurisdiction?: string}) => Promise<{ok: boolean, status: ?number}>} verifyR2S3Credentials
+ *
+ * Moving an existing site to a customer account (custom-hosting-transfer.js) also copies its data:
+ *
+ * @property {(env: Object, params: {databaseId: string, bookmark?: ?string}) => Promise<{status: 'complete'|'active', signedUrl?: ?string, bookmark?: ?string}>} exportD1Database
+ * @property {(env: Object, params: {signedUrl: string, maxBytes?: number}) => Promise<Uint8Array>} downloadD1Export
+ * @property {(env: Object, params: {databaseId: string, sql: string|Uint8Array}) => Promise<{status: 'complete'|'active', bookmark: ?string}>} importD1Sql
+ * @property {(env: Object, params: {databaseId: string, bookmark: string}) => Promise<{status: 'complete'|'active', bookmark: ?string}>} pollD1Import
+ * @property {(env: Object, params: {namespaceId: string, cursor?: ?string, limit?: number}) => Promise<{keys: Array<{name: string, expiration: ?number, metadata: any}>, cursor: ?string}>} listKvKeys
+ * @property {(env: Object, params: {namespaceId: string, key: string}) => Promise<Uint8Array>} getKvValue
+ * @property {(env: Object, params: {namespaceId: string, entries: Array<Object>}) => Promise<{ok: boolean}>} putKvBulk
+ * @property {(env: Object, params: {bucket: string, cursor?: ?string, perPage?: number}) => Promise<{objects: Array<{key: string, size: number, contentType: ?string}>, cursor: ?string}>} listR2Objects
+ * @property {(env: Object, params: {bucket: string, key: string}) => Promise<{body: Uint8Array, contentType: ?string}>} getR2Object
+ * @property {(env: Object, params: {bucket: string, key: string, body: Uint8Array, contentType: string}) => Promise<{ok: boolean}>} putR2Object
  */
 export const CONTRACT_VERSION = 1;

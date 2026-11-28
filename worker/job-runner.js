@@ -78,6 +78,13 @@ export function defaultRunners({ provisioning = realProvisioning, deployments = 
       retryFailed: true,
       run: (env, job) => transfers.runJob(env, job.id),
       retry: (env, job) => transfers.runJob(env, job.id)
+    },
+    // Copying a site into the customer's account as a NEW site (same runner, the transfer row says kind = 'copy').
+    site_hosting_copy: {
+      resumeLost: true,
+      retryFailed: true,
+      run: (env, job) => transfers.runJob(env, job.id),
+      retry: (env, job) => transfers.runJob(env, job.id)
     }
   };
 }

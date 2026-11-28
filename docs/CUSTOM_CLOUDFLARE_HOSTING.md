@@ -87,6 +87,33 @@ Old address: its route is repointed to the control plane, which answers with a 3
 `CUSTOM_HOSTING_REDIRECT_DAYS` (default 90; 0 removes the route instead), and the site keeps its platform label so nobody else can
 claim it. The old D1/KV/R2 copy is kept until the customer (or staff) removes it. A database export above 100 MB is refused.
 
+## Failed moves, retry and clean-up
+
+- **The 503 bug.** The freeze writes a signed maintenance state into the source D1; the export carried that row to the new database, so
+  the moved site answered "Temporarily unavailable". The row (`system_settings.__lummet_site_access_state`) is now deleted in the new
+  database right after the import, and the target is wiped (views, virtual tables, tables) before any import.
+- **R2 name reuse.** Cloudflare blocks a deleted bucket's name for about a minute. Creation waits it out (up to 120 s, then a plain
+  message) instead of failing the move.
+- **Retry.** `POST /sites/:id/hosting/transfer/retry` re-queues a failed move; finished steps are not repeated.
+- **Cancel / Clean up and start over.** Removes the worker domain, Turnstile widget, Worker, D1, KV and R2 the move created, by recorded
+  id and, for a half-created resource, by its planned name. The result is stored (`cleanup_report`) and shown; if anything is left the
+  move is NOT marked cancelled and the button becomes "Clean up again". The Lummet site is never touched.
+
+## Copy site
+
+`POST /sites/:id/hosting/copy` `{ name, accountId, landing, zoneId?, subdomain? }` makes an exact, separate copy of a Lummet-hosted
+site as a new custom-hosted site (job `site_hosting_copy`: provision → deploy at the source's release → copy_media → copy_kv →
+copy_database → finalize). The source keeps running and is never frozen or changed; the copy counts toward `sites.max`; the two do
+not stay in sync. Retry: `copy/retry`; delete the copy and everything it created: `copy/cancel`. The maintenance-state row is not copied.
+Limits: Lummet-hosted sources only; domains connected on Lummet are not copied; the D1 export can briefly slow the source.
+
+## Domains and DNS records
+
+`/cloud-hosting/accounts/:id/zones/:zoneId/dns` (GET list, POST add, DELETE `/:recordId`; add/delete are admin-only and audited as
+`cloud_hosting_dns`). The zone must belong to the saved account. Types A, AAAA, CNAME, TXT, MX, CAA; names are normalised to the zone;
+proxy only for A/AAAA/CNAME; hostnames a site is served from, and NS/SOA, are locked. The page shows registrar steps with copy buttons,
+re-checks a pending zone every 10 s and turns active on its own. The token needs DNS: Edit for these calls.
+
 ## Backups, usage, analytics
 
 Backups, storage sync and usage collection call the site's Super API at its own address (`tenants.api_base_url`, updated on
@@ -96,12 +123,13 @@ every move) with the per-site credential the deployment binds, so they reach cus
 ## What has NOT been verified against live Cloudflare
 
 All tests use a fake provider and recorded requests. Not exercised on a real account: Workers Custom Domain over a zone with
-existing DNS records, the D1 export/import flow on a real database, the R2 REST listing field names, the exact error codes
+existing DNS records, the D1 export/import flow on a real database, the D1 wipe through sqlite_master, the find-by-name endpoints used for clean-up, the DNS record API with a real token, copy provisioning against the real API, the R2 REST listing field names, the exact error codes
 Cloudflare returns for quota / R2-not-enabled (classification is by status and message text), and workers.dev toggling. Run one
-move and one suspension on a throw-away Cloudflare account before enabling `CUSTOM_HOSTING` for customers.
+move, one copy, one cancel with clean-up, one DNS add/delete and one suspension on a throw-away Cloudflare account before enabling `CUSTOM_HOSTING` for customers.
 
 ## Files
 
+- `migrations/0113_custom_hosting_copy.sql` — transfer kind (move/copy), target site, clean-up report (additive).
 - `migrations/0112_custom_hosting_hardening.sql` — token-health, enforcement and transfer columns (additive).
 - `migrations/0111_custom_cloudflare_hosting.sql` — accounts, secrets, site hosting, org access, transfers.
 - `worker/repositories/custom-hosting.js` — all SQL.

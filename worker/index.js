@@ -3655,7 +3655,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           const [chAccounts, chSitesList] = await Promise.all([customHostingModule.listAccounts(env, activeOrgId), sites.listSitesForOrganization(env, activeOrgId)]);
           const chSites = [];
           for (const s of chSitesList.filter((x) => x.status !== "deleted" && x.status !== "deleting")) {
-            chSites.push({ id: s.id, name: s.name, status: s.status, primary_domain: s.primary_domain, hosting: await customHostingModule.siteHostingView(env, s.id), transfer: await customHostingTransfers.transferView(env, s.id) });
+            chSites.push({ id: s.id, name: s.name, status: s.status, primary_domain: s.primary_domain, hosting: await customHostingModule.siteHostingView(env, s.id), transfer: await customHostingTransfers.transferView(env, s.id), copy: await customHostingTransfers.copyView(env, s.id) });
           }
           return html(shell({
             title: "Cloudflare hosting", activeKey: "cloud-hosting", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId,

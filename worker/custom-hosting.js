@@ -444,6 +444,89 @@ export async function checkZone(env, { organizationId, id, zoneId, infra = cloud
   return { ok: true, zone: { id: zoneId, status: z.cfStatus, active: z.status === "active", nameServers: z.nameServers } };
 }
 
+// ---------------------------------------------------------------- DNS records of a connected domain
+
+const DNS_TYPES = ["A", "AAAA", "CNAME", "TXT", "MX", "CAA"];
+const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+const IPV6 = /^[0-9a-f:]{2,39}$/i;
+const DNS_LABEL = /^(\*|[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?)(\.[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?)*$/i;
+
+/** A zone of THIS saved account (never one the token merely happens to see elsewhere), or null. */
+async function zoneOfAccount(env, organizationId, id, zoneId, infra) {
+  const account = await repo.getAccount(env, organizationId, id);
+  if (!account) return { error: { ok: false, status: 404, error: "account_not_found" } };
+  if (!CF_ID.test(String(zoneId || ""))) return { error: { ok: false, status: 422, error: "invalid_zone_id" } };
+  const cfEnv = await accountEnv(env, account);
+  let zones;
+  try { zones = await infra.listAccountZones(cfEnv); } catch (e) { return { error: { ok: false, status: 502, error: e.httpStatus === 403 ? "zones_permission_missing" : "cloudflare_error", message: String(e?.message || "").slice(0, 200) } }; }
+  const zone = zones.find((z) => z.id === zoneId);
+  if (!zone) return { error: { ok: false, status: 404, error: "zone_not_found" } };
+  return { account, cfEnv, zone };
+}
+
+export async function listZoneRecords(env, { organizationId, id, zoneId, infra = cloudflareProvider }) {
+  const z = await zoneOfAccount(env, organizationId, id, zoneId, infra);
+  if (z.error) return z.error;
+  const managed = new Set(await repo.hostnamesInZone(env, organizationId, zoneId));
+  try {
+    const records = (await infra.listDnsRecords(z.cfEnv, zoneId)).map((r) => ({
+      id: r.id, type: r.type, name: r.name, content: r.content, ttl: r.ttl, proxied: !!r.proxied, priority: r.priority ?? null,
+      // Records of a hostname a site is served from are kept by the Worker Custom Domain; NS / SOA belong to Cloudflare.
+      locked: managed.has(String(r.name).toLowerCase()) || ["NS", "SOA"].includes(r.type)
+    }));
+    return { ok: true, zone: { id: zoneId, name: z.zone.name, status: z.zone.status, active: z.zone.status === "active", nameServers: z.zone.status === "active" ? [] : z.zone.nameServers }, records };
+  } catch (e) {
+    return { ok: false, status: 502, error: e.httpStatus === 403 ? "dns_permission_missing" : "cloudflare_error", message: e.httpStatus === 403 ? "The API token may not read DNS for this domain. Add DNS: Edit for the zone, then Check again." : String(e?.message || "").slice(0, 200) };
+  }
+}
+
+/** Validates and creates one DNS record in the customer's zone. Nothing is guessed: a bad value is refused with the reason. */
+export async function addZoneRecord(env, { organizationId, id, zoneId, record, infra = cloudflareProvider }) {
+  await requireEnabled(env, organizationId);
+  const z = await zoneOfAccount(env, organizationId, id, zoneId, infra);
+  if (z.error) return z.error;
+  const r = record || {};
+  const type = clean(r.type, 10).toUpperCase();
+  if (!DNS_TYPES.includes(type)) return { ok: false, status: 422, error: "invalid_record_type", message: `Record type must be one of ${DNS_TYPES.join(", ")}.` };
+  const zoneName = String(z.zone.name).toLowerCase();
+  let name = clean(r.name, 253).toLowerCase().replace(/\.$/, "");
+  if (!name || name === "@") name = zoneName;
+  else if (name !== zoneName && !name.endsWith(`.${zoneName}`)) name = `${name}.${zoneName}`;
+  if (name.length > 253 || !DNS_LABEL.test(name)) return { ok: false, status: 422, error: "invalid_record_name", message: "That name is not valid for this domain." };
+  const content = clean(r.content, 2048);
+  if (!content) return { ok: false, status: 422, error: "invalid_record_content", message: "The record needs a value." };
+  if (type === "A" && !IPV4.test(content)) return { ok: false, status: 422, error: "invalid_record_content", message: "An A record needs an IPv4 address." };
+  if (type === "AAAA" && !(IPV6.test(content) && content.includes(":"))) return { ok: false, status: 422, error: "invalid_record_content", message: "An AAAA record needs an IPv6 address." };
+  if ((type === "CNAME" || type === "MX") && !DNS_LABEL.test(content.replace(/\.$/, ""))) return { ok: false, status: 422, error: "invalid_record_content", message: `A ${type} record needs a host name.` };
+  if (type === "CNAME" && name === zoneName) return { ok: false, status: 422, error: "invalid_record_name", message: "The bare domain cannot be a CNAME." };
+  const ttl = r.ttl === undefined || r.ttl === null || r.ttl === "" || Number(r.ttl) === 1 ? 1 : Number(r.ttl);
+  if (ttl !== 1 && !(Number.isInteger(ttl) && ttl >= 60 && ttl <= 86400)) return { ok: false, status: 422, error: "invalid_ttl", message: "TTL is Auto or between 60 and 86400 seconds." };
+  let priority;
+  if (type === "MX") { priority = Number(r.priority ?? 10); if (!Number.isInteger(priority) || priority < 0 || priority > 65535) return { ok: false, status: 422, error: "invalid_priority", message: "MX priority is a whole number from 0 to 65535." }; }
+  const proxied = ["A", "AAAA", "CNAME"].includes(type) && r.proxied === true;
+  const managed = await repo.hostnamesInZone(env, organizationId, zoneId);
+  if (managed.includes(name)) return { ok: false, status: 409, error: "hostname_used_by_a_site", message: "A site is served from that name; its DNS is kept by Cloudflare. Change the site's address instead." };
+  try {
+    const made = await infra.createDnsRecord(z.cfEnv, zoneId, { type, name, content, ttl, proxied, ...(priority !== undefined ? { priority } : {}) });
+    return { ok: true, record: { id: made.id, type, name, content, ttl, proxied, priority: priority ?? null, locked: false } };
+  } catch (e) {
+    return { ok: false, status: e.httpStatus === 403 ? 403 : 409, error: e.httpStatus === 403 ? "dns_permission_missing" : "dns_refused", message: e.httpStatus === 403 ? "The API token may not edit DNS for this domain. Add DNS: Edit, then Check again." : String(e?.message || "Cloudflare refused that record.").slice(0, 200) };
+  }
+}
+
+export async function deleteZoneRecord(env, { organizationId, id, zoneId, recordId, infra = cloudflareProvider }) {
+  await requireEnabled(env, organizationId);
+  if (!CF_ID.test(String(recordId || ""))) return { ok: false, status: 422, error: "invalid_record_id" };
+  const listed = await listZoneRecords(env, { organizationId, id, zoneId, infra });
+  if (!listed.ok) return listed;
+  const rec = listed.records.find((r) => r.id === recordId);
+  if (!rec) return { ok: false, status: 404, error: "record_not_found" };
+  if (rec.locked) return { ok: false, status: 409, error: "record_locked", message: "This record belongs to a site's address or to Cloudflare and cannot be deleted here." };
+  const z = await zoneOfAccount(env, organizationId, id, zoneId, infra);
+  try { await infra.deleteDnsRecord(z.cfEnv, zoneId, recordId); return { ok: true }; }
+  catch (e) { return { ok: false, status: e.httpStatus === 404 ? 404 : 502, error: e.httpStatus === 404 ? "record_not_found" : "cloudflare_error", message: String(e?.message || "").slice(0, 200) }; }
+}
+
 // ---------------------------------------------------------------- choosing hosting for a site
 
 /**
@@ -759,22 +842,37 @@ export async function cleanupSiteExtras(infra, env, site) {
   return failures;
 }
 
-/** Removes what an unfinished move created in the customer's account (Worker, D1, KV, R2, domain, Turnstile). Returns failures. */
-export async function removeTransferTargets(infra, env, transfer) {
+/**
+ * Removes what an unfinished move or copy created in the customer's account: Custom Domain, Turnstile widget, Worker (with its
+ * secrets, routes and schedule), D1, KV and R2. Resources are removed by the ids the job recorded AND, for any the job started to
+ * create but did not get to record (a call that succeeded while the save failed), by the exact names it intended to create
+ * (`target.names`, written before each create). Returns the list of failures (empty = clean); `failures.removed` lists what was
+ * removed and `failures.left` what could not be. Safe to run again.
+ */
+export async function removeTransferTargets(infra, env, transfer, { siteId = transfer.kind === "copy" ? transfer.target_site_id : transfer.site_id } = {}) {
   const failures = [];
+  failures.removed = []; failures.left = [];
   const target = parseJson(transfer.target_resources, {});
   let ctx = null;
-  try { ctx = await contextForSite(env, transfer.site_id, { includeTransferring: true }); } catch (_) { return failures; }   // account gone: nothing reachable
+  try { ctx = await contextForSite(env, siteId, { includeTransferring: true }); } catch (_) { return failures; }   // account gone: nothing reachable
   if (!ctx) return failures;
   const gone = (e) => e?.httpStatus === 404 || /not\s*found|does\s*not\s*exist|no\s*such/i.test(String(e?.message || e)) || isAccessLost(e);
-  const tryDo = async (step, fn) => { try { await fn(); return true; } catch (e) { if (gone(e)) return true; failures.push({ step, error: String(e?.message || e).slice(0, 160) }); return false; } };
-  const domain = await repo.activeResourceRow(env, transfer.site_id, "worker_domain");
-  if (domain && (await tryDo("worker_domain", () => infra.detachWorkerDomain(ctx.cfEnv, domain.resource_id)))) await repo.markResourceDeleted(env, transfer.site_id, "worker_domain");
+  const tryDo = async (step, fn) => {
+    try { await fn(); failures.removed.push(step); return true; }
+    catch (e) { if (gone(e)) return true; failures.push({ step, error: String(e?.message || e).slice(0, 160) }); failures.left.push(step); return false; }
+  };
+  const names = target.names || {};
+  const domain = await repo.activeResourceRow(env, siteId, "worker_domain");
+  if (domain && (await tryDo("worker_domain", () => infra.detachWorkerDomain(ctx.cfEnv, domain.resource_id)))) await repo.markResourceDeleted(env, siteId, "worker_domain");
   if (ctx.hosting.turnstile_sitekey) await tryDo("turnstile", () => infra.deleteTurnstileWidget(ctx.cfEnv, ctx.hosting.turnstile_sitekey));
-  if (target.worker) await tryDo("worker", () => infra.deleteWorkerScript(ctx.cfEnv, target.worker.name));
-  if (target.d1) await tryDo("d1", () => infra.deleteDatabase(ctx.cfEnv, target.d1.id));
-  if (target.kv) await tryDo("kv", () => infra.deleteKVNamespace(ctx.cfEnv, target.kv.id));
-  if (target.r2) await tryDo("r2", () => infra.deleteR2Bucket(ctx.cfEnv, target.r2.id));
+  const workerName = target.worker?.name || names.worker;
+  if (workerName) await tryDo("worker", () => infra.deleteWorkerScript(ctx.cfEnv, workerName));
+  const d1Id = target.d1?.id || (names.d1 && (await infra.findDatabaseByName(ctx.cfEnv, { name: names.d1 }).catch(() => null))?.resourceId);
+  if (d1Id) await tryDo("d1", () => infra.deleteDatabase(ctx.cfEnv, d1Id));
+  const kvId = target.kv?.id || (names.kv && (await infra.findKVNamespaceByName(ctx.cfEnv, { title: names.kv }).catch(() => null))?.resourceId);
+  if (kvId) await tryDo("kv", () => infra.deleteKVNamespace(ctx.cfEnv, kvId));
+  const r2Id = target.r2?.id || names.r2;          // an R2 bucket is addressed by its name
+  if (r2Id) await tryDo("r2", () => infra.deleteR2Bucket(ctx.cfEnv, r2Id));
   return failures;
 }
 

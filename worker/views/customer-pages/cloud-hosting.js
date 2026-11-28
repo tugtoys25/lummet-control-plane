@@ -12,7 +12,9 @@ const STATUS_TONE = { verified: "good", invalid: "bad", disabled: "bad", unverif
 const STEP_LABEL = {
   validate: "Check the account and destination", create_resources: "Create database, cache and media bucket in your account",
   copy_media: "Copy media files", copy_kv: "Copy cached data", deploy_target: "Deploy the site in your account",
-  cutover: "Final window: pause the site, copy the database and the latest changes, check the copy, switch over"
+  cutover: "Final window: pause the site, copy the database and the latest changes, check the copy, switch over",
+  provision: "Create the new site's database, cache and media bucket", deploy: "Deploy the copy in your account",
+  copy_database: "Copy the database", finalize: "Check the copy and finish"
 };
 const fmtBytes = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} KB` : `${n || 0} B`);
 
@@ -62,12 +64,13 @@ function accountCard(a, { canManage, enabled }) {
         <button class="btn" type="submit">Save</button> <span class="subtitle">Changes to R2 or email are applied to the sites on this account with an automatic redeploy.</span>
       </form>` : ""}
       <div id="zones-${h(a.id)}" style="display:none;border-top:1px solid var(--border, #ddd);margin-top:8px;padding-top:8px">
-        <div class="zone-list subtitle">Loading\u2026</div>
+        <div class="zone-list subtitle"></div>
+        <p class="subtitle" id="zmsg-${h(a.id)}" aria-live="polite"></p>
         ${canManage && enabled ? `<form style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"${onSubmit("chAddZone", ["$el", a.id], { prevent: true })}>
           <input name="domain" placeholder="example.com" required autocomplete="off" spellcheck="false" style="flex:1;min-width:200px" />
           <button class="btn" type="submit">Connect a domain to this account</button>
         </form>
-        <p class="subtitle">Connecting adds the domain to your Cloudflare account. You then change its nameservers at your registrar to the two shown, and press Check.</p>` : ""}
+        <p class="subtitle">Connecting adds the domain to your Cloudflare account. The steps to finish it, its live status and its DNS records appear above; you can add or delete DNS records there too.</p>` : ""}
       </div>
     </div>`;
 }
@@ -94,30 +97,54 @@ function destinationFields(prefix, accounts, { fixedAccount = null } = {}) {
         </div>`;
 }
 
-function transferBlock(site, t, { canManage }) {
+function cleanupNote(t) {
+  const c = t.cleanup;
+  if (!c) return "";
+  const removed = (c.removed || []).map((x) => `<li>\u2713 removed ${h(x)}</li>`).join("");
+  const left = (c.left || []).map((x) => `<li style="color:var(--danger, #b42318)">\u2717 still there: ${h(x)}</li>`).join("");
+  if (!removed && !left) return "";
+  return `<details${left ? " open" : ""} style="margin-top:4px"><summary class="subtitle">Clean-up report (${h(String(c.at || "").slice(0, 16).replace("T", " "))})</summary><ul style="margin:4px 0 0 16px;padding:0;font-size:13px">${removed}${left}</ul>
+          ${left ? `<p class="subtitle">These could not be deleted yet. Press Clean up again, or delete them in the Cloudflare dashboard.</p>` : ""}</details>`;
+}
+
+function transferBlock(site, t, { canManage, kind = "move" }) {
   if (!t) return "";
+  const copy = kind === "copy";
+  const base = copy ? "copy" : "transfer";
   const steps = t.steps.map((s) => `<li>${s.status === "success" ? "\u2713" : s.status === "running" ? "\u2026" : s.status === "failed" ? "\u2717" : "\u25cb"} ${h(STEP_LABEL[s.key] || s.key)}${s.error ? ` <span style="color:var(--danger, #b42318)">${h(s.error)}</span>` : ""}</li>`).join("");
-  const copied = `Copied so far: ${t.copied.media} media files (${fmtBytes(t.copied.mediaBytes)}), ${t.copied.kv} cache entries${t.copied.database ? ", the database" : ""}.${t.copied.mediaSkippedTooLarge ? ` ${t.copied.mediaSkippedTooLarge} media files over 95 MB were not copied: upload them again in the site after the move.` : ""}`;
+  const copied = `Copied so far: ${t.copied.media} media files (${fmtBytes(t.copied.mediaBytes)}), ${t.copied.kv} cache entries${t.copied.database ? ", the database" : ""}.${t.copied.mediaSkippedTooLarge ? ` ${t.copied.mediaSkippedTooLarge} media files over 95 MB were not copied: upload them again in the site afterwards.` : ""}`;
   const open = ["queued", "running", "failed"].includes(t.status);
+  const failed = t.status === "failed";
+  const cancelLabel = failed ? (t.cleanup && (t.cleanup.left || []).length ? "Clean up again" : copy ? "Delete the copy and start over" : "Clean up and start over") : copy ? "Cancel and delete the copy" : "Cancel the move";
+  const cancelConfirm = copy
+    ? "Stop this copy and delete everything it created in your Cloudflare account, including the new site? Your site on Lummet is not touched."
+    : "Cancel this move? Everything it created in your Cloudflare account is removed, so you can start again; the site keeps running on Lummet exactly as before.";
+  const title = copy ? "Copy to your Cloudflare account" : "Move to your Cloudflare account";
   return `
-      <div class="transfer" data-site="${h(site.id)}" data-status="${h(t.status)}" style="margin-top:8px">
-        <strong>Move to your Cloudflare account:</strong> ${badge(t.status, STATUS_TONE[t.status])} ${t.paused ? `<span class="subtitle">(continuing)</span>` : ""}
+      <div class="transfer" data-site="${h(site.id)}" data-kind="${base}" data-status="${h(t.status)}" style="margin-top:8px">
+        <strong>${title}:</strong> ${badge(t.status, STATUS_TONE[t.status])} ${t.paused ? `<span class="subtitle">(continuing)</span>` : ""}
         <ol style="margin:4px 0 4px 18px;padding:0;font-size:13px">${steps}</ol>
         <div class="subtitle">${h(copied)}</div>
         ${t.error ? `<p style="color:var(--danger, #b42318)">${h(t.error)}</p>` : ""}
-        ${t.status === "completed" ? `<p class="subtitle">Finished ${h(t.completedAt || "")}. The site now answers at <span class="mono">${h(t.newHost || site.primary_domain || "")}</span>${t.sourceHost ? `; its old address <span class="mono">${h(t.sourceHost)}</span> ${t.redirectUntil ? `redirects to it until ${h(String(t.redirectUntil).slice(0, 10))} and stays reserved for this site` : "is no longer served"}` : ""}.
+        ${failed ? `<p class="subtitle">Nothing is lost: ${copy ? "your Lummet site is untouched" : "the site still runs on Lummet"}. Retry continues from the step that failed, or ${copy ? "delete the copy" : "clean up"} to start over with a clean account.</p>` : ""}
+        ${t.status === "completed" && !copy ? `<p class="subtitle">Finished ${h(t.completedAt || "")}. The site now answers at <span class="mono">${h(t.newHost || site.primary_domain || "")}</span>${t.sourceHost ? `; its old address <span class="mono">${h(t.sourceHost)}</span> ${t.redirectUntil ? `redirects to it until ${h(String(t.redirectUntil).slice(0, 10))} and stays reserved for this site` : "is no longer served"}` : ""}.
           ${t.oldCopy === "kept" || t.oldCopy === "failed" ? `A safety copy of the old database, cache and media stays in Lummet's account until you remove it.` : t.oldCopy === "removed" ? "The old Lummet copy has been removed." : ""}</p>` : ""}
+        ${t.status === "completed" && copy ? `<p class="subtitle">Finished ${h(t.completedAt || "")}. The copy is the separate site <strong>${h(t.targetName || "")}</strong>${t.targetHost ? ` at <span class="mono">${h(t.targetHost)}</span>` : ""}; this site still runs on Lummet. The two no longer stay in sync.</p>` : ""}
         ${t.frozen ? `<p class="subtitle">The site is in maintenance for the final copy (a few minutes). It serves again as soon as the move finishes or is stopped.</p>` : ""}
         ${t.needsConfirmation ? `<p style="color:var(--danger, #b42318)">The move is paused: ${t.skippedMedia.length} media file(s) are too large to copy automatically${t.skippedMedia.length ? ` (<span class="mono">${h(t.skippedMedia.slice(0, 5).map((o) => o.key).join(", "))}</span>)` : ""}. Copy them into the new bucket yourself, then confirm; or cancel the move. The site was not touched.</p>
         ${canManage ? `<button class="btn" type="button"${onClick("chConfirmSkipped", [site.id], { confirm: "Continue the move WITHOUT these files? They will not exist in the new copy until you copy them into the new bucket yourself." })}>Continue without these files</button>` : ""}` : ""}
-        ${canManage && open ? `<button class="btn" type="button"${onClick("chCancelMove", [site.id], { confirm: "Cancel this move? What it created in your Cloudflare account is removed; the site keeps running on Lummet exactly as before." })}>Cancel the move</button>` : ""}
-        ${canManage && t.status === "completed" && (t.oldCopy === "kept" || t.oldCopy === "failed") ? `<button class="btn btn-danger" type="button"${onClick("chRemoveOld", [site.id], { confirm: "Delete the old copy of this site's database, cache and media from Lummet's account? The site in your Cloudflare account is not touched. This cannot be undone." })}>Remove the old Lummet copy</button>` : ""}
+        ${canManage && failed && !(t.cleanup && (t.cleanup.left || []).length) ? `<button class="btn" type="button"${onClick("chRetry", [site.id, base])}>Retry</button>` : ""}
+        ${canManage && open ? `<button class="btn${failed ? "" : ""}" type="button"${onClick("chCancelJob", [site.id, base], { confirm: cancelConfirm })}>${h(cancelLabel)}</button>` : ""}
+        ${canManage && t.status === "completed" && !copy && (t.oldCopy === "kept" || t.oldCopy === "failed") ? `<button class="btn btn-danger" type="button"${onClick("chRemoveOld", [site.id], { confirm: "Delete the old copy of this site's database, cache and media from Lummet's account? The site in your Cloudflare account is not touched. This cannot be undone." })}>Remove the old Lummet copy</button>` : ""}
+        ${cleanupNote(t)}
       </div>`;
 }
 
 function siteRow(site, { accounts, canManage, enabled }) {
   const hv = site.hosting || { mode: "lummet" };
   const t = site.transfer;
+  const cp = site.copy && site.copy.status !== "cancelled" ? site.copy : null;
+  const copyOpen = cp && ["queued", "running", "failed"].includes(cp.status);
   const custom = hv.mode === "custom";
   const head = `<h3 style="margin:0">${h(site.name)} ${custom ? badge(hv.status === "transferring" ? "moving to your account" : "your Cloudflare account", hv.status === "transferring" ? "warn" : "good") : badge("Lummet hosting")}</h3>
       <div class="subtitle">Address <span class="mono">${h(site.primary_domain || "\u2014")}</span> \u00b7 status ${h(site.status)}${custom && hv.account ? ` \u00b7 account ${h(hv.account.label)}` : ""}</div>`;
@@ -141,15 +168,23 @@ function siteRow(site, { accounts, canManage, enabled }) {
           <label style="display:flex;gap:4px;align-items:center"><input type="checkbox" name="secret" checked style="width:auto" /> secret</label>
           <button class="btn" type="submit">Add and redeploy</button>
         </form></details>` : ""}`;
-  } else if (!custom && enabled && canManage && site.status === "active" && !(t && ["queued", "running", "failed"].includes(t.status))) {
+  } else if (!custom && enabled && canManage && site.status === "active" && !(t && ["queued", "running", "failed"].includes(t.status)) && !copyOpen) {
     body = `<details style="margin-top:6px"><summary>Move this site to my Cloudflare account</summary>
         <p class="subtitle">The site keeps running on Lummet while its database, cache and media are copied and a copy is deployed and checked in your account;
         only then does it switch. Media and data written during the move may not be carried over, so move at a quiet time. Custom domains connected on Lummet must be removed first.</p>
         <form${onSubmit("chMove", ["$el", site.id, site.name], { prevent: true })}>${destinationFields("m", accounts)}
           <button class="btn" type="submit">Start the move</button>
+        </form></details>
+      <details style="margin-top:6px"><summary>Copy this site to my Cloudflare account</summary>
+        <p class="subtitle">Makes an exact, separate copy (pages, settings, media, database) as a new site in your Cloudflare account. This site stays on Lummet and keeps its address.
+        The copy counts as one more site in your plan, and the two do not stay in sync afterwards. Domains connected on Lummet are not copied.</p>
+        <form${onSubmit("chCopy", ["$el", site.id, site.name], { prevent: true })}>
+          <label>Name of the copy</label><input name="name" required maxlength="120" value="${h(`${site.name} (copy)`)}" />
+          ${destinationFields("c", accounts)}
+          <button class="btn" type="submit">Start the copy</button>
         </form></details>`;
   }
-  return `<div class="card site-hosting" style="margin:10px 0">${head}${body}${transferBlock(site, t, { canManage })}</div>`;
+  return `<div class="card site-hosting" style="margin:10px 0">${head}${body}${transferBlock(site, t, { canManage })}${cp ? transferBlock(site, cp, { canManage, kind: "copy" }) : ""}</div>`;
 }
 
 function guide() {
@@ -245,7 +280,7 @@ export function renderCloudHostingPage({ access, accounts, sites, canManage, org
     </div>` : "";
   const accountCards = accounts.length ? accounts.map((a) => accountCard(a, { canManage, enabled })).join("") : `<p class="subtitle">No Cloudflare accounts saved yet.</p>`;
   const siteCards = sites.length ? sites.map((s) => siteRow(s, { accounts, canManage, enabled })).join("") : `<p class="subtitle">No sites yet.</p>`;
-  const running = sites.some((s) => s.transfer && ["queued", "running"].includes(s.transfer.status));
+  const running = sites.some((s) => [s.transfer, s.copy].some((x) => x && ["queued", "running"].includes(x.status)));
 
   const script = `<script nonce="${nonceToken()}">
 var CH_ORG = ${JSON.stringify(String(organizationId || ""))};
@@ -287,34 +322,136 @@ function chSaveEdit(f, id) {
   chCall('PATCH', '/cloud-hosting/accounts/' + encodeURIComponent(id), body).then(chDone);
 }
 function chText(parent, tag, text, css) { var e = document.createElement(tag); e.textContent = text; if (css) { e.style.cssText = css; } parent.appendChild(e); return e; }
+function chCopyText(text, btn) {
+  var done = function () { if (btn) { var o = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = o; }, 1500); } };
+  if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, function () {}); } else { done(); }
+}
+var CH_POLL = {};
+function chZonePath(id, zid, rest) { return '/cloud-hosting/accounts/' + encodeURIComponent(id) + '/zones' + (zid ? '/' + encodeURIComponent(zid) : '') + (rest || ''); }
 function chZones(id) {
   var box = document.getElementById('zones-' + id);
   box.style.display = '';
   var list = box.querySelector('.zone-list');
-  list.textContent = 'Loading domains\\u2026';
-  chCall('GET', '/cloud-hosting/accounts/' + encodeURIComponent(id) + '/zones').then(function (d) {
+  if (!list.firstChild) { list.textContent = 'Loading domains…'; }
+  return chCall('GET', chZonePath(id)).then(function (d) {
+    if (!d.success) { list.textContent = ''; chText(list, 'span', 'Could not read the domains: ' + chErr(d)); return; }
+    var open = {};
+    Array.prototype.forEach.call(list.querySelectorAll('details[data-zone]'), function (el) { open[el.getAttribute('data-zone')] = el.open; });
     list.textContent = '';
-    if (!d.success) { chText(list, 'span', 'Could not read the domains: ' + chErr(d)); return; }
-    if (!d.data.length) { chText(list, 'span', 'No domains in this Cloudflare account yet.'); return; }
-    d.data.forEach(function (z) {
-      var row = chText(list, 'div', '', 'margin:4px 0');
-      chText(row, 'strong', z.name + ' ');
-      chText(row, 'span', z.active ? 'active' : ('not active (' + z.status + ')' + (z.nameServers && z.nameServers.length ? ': set the nameservers to ' + z.nameServers.join(' and ') : '')));
-      if (!z.active) {
-        var b = chText(row, 'button', 'Check'); b.className = 'btn'; b.type = 'button'; b.style.marginLeft = '6px';
-        b.addEventListener('click', function () { chCall('POST', '/cloud-hosting/accounts/' + encodeURIComponent(id) + '/zones/' + encodeURIComponent(z.id) + '/check').then(function (r) {
-          if (!r.success) { alert('Could not check: ' + chErr(r)); return; }
-          alert(r.data.active ? z.name + ' is active and can be used now.' : z.name + ' is not active yet. Nameservers: ' + (r.data.nameServers || []).join(', '));
-          chZones(id);
-        }); });
-      }
+    if (!d.data.length) { chText(list, 'span', 'No domains in this Cloudflare account yet. Connect one below.'); return; }
+    var anyPending = false;
+    d.data.forEach(function (z) { if (!z.active) { anyPending = true; } chZoneCard(list, id, z, open[z.id] === undefined ? !z.active : open[z.id]); });
+    // Live: while a domain waits for its nameservers the status is re-checked with Cloudflare every 10 seconds.
+    clearInterval(CH_POLL[id]); CH_POLL[id] = null;
+    if (anyPending) { CH_POLL[id] = setInterval(function () { chZonePoll(id); }, 10000); }
+  });
+}
+function chZonePoll(id) {
+  var box = document.getElementById('zones-' + id);
+  if (!box || box.style.display === 'none') { clearInterval(CH_POLL[id]); return; }
+  var pending = Array.prototype.slice.call(box.querySelectorAll('details[data-zone][data-active="0"]'));
+  if (!pending.length) { clearInterval(CH_POLL[id]); return; }
+  var changed = false;
+  Promise.all(pending.map(function (el) {
+    return chCall('POST', chZonePath(id, el.getAttribute('data-zone'), '/check')).then(function (r) {
+      var st = el.querySelector('.zone-live'); if (st) { st.textContent = 'Checked ' + new Date().toLocaleTimeString() + (r.success ? ' · ' + r.data.status : ''); }
+      if (r.success && r.data.active) { changed = true; }
+    }).catch(function () {});
+  })).then(function () { if (changed) { chZones(id); } });
+}
+function chZoneCard(list, id, z, isOpen) {
+  var d = document.createElement('details'); d.setAttribute('data-zone', z.id); d.setAttribute('data-active', z.active ? '1' : '0'); d.open = !!isOpen;
+  d.style.cssText = 'margin:6px 0;border:1px solid var(--border, #ddd);border-radius:6px;padding:6px 10px';
+  var sum = chText(d, 'summary', '', 'cursor:pointer');
+  chText(sum, 'strong', z.name + ' ');
+  chText(sum, 'span', z.active ? '✓ active' : '… waiting for nameservers (' + z.status + ')', 'color:' + (z.active ? 'var(--success, #067647)' : '#8a5300'));
+  list.appendChild(d);
+  var body = chText(d, 'div', '', 'margin-top:6px');
+  if (!z.active) {
+    var steps = chText(body, 'div', '', 'font-size:13px');
+    chText(steps, 'strong', 'To finish connecting ' + z.name + ':');
+    var ol = chText(steps, 'ol', '', 'margin:4px 0 4px 18px;padding:0');
+    chText(ol, 'li', 'Open the place where you bought the domain (your registrar) and find its nameserver settings.');
+    chText(ol, 'li', 'Replace the current nameservers with these two:');
+    (z.nameServers || []).forEach(function (ns) {
+      var row = chText(ol, 'div', '', 'margin:2px 0');
+      chText(row, 'code', ns, 'margin-right:6px');
+      var cb = chText(row, 'button', 'Copy'); cb.type = 'button'; cb.className = 'btn';
+      cb.addEventListener('click', function () { chCopyText(ns, cb); });
     });
+    chText(ol, 'li', 'Save. It can take from a few minutes up to 24 hours; this page checks with Cloudflare every 10 seconds and turns green when it is active.');
+    chText(steps, 'span', 'Not checked yet', 'font-size:12px').className = 'zone-live subtitle';
+    var chk = chText(steps, 'button', 'Check now', 'margin-left:8px'); chk.type = 'button'; chk.className = 'btn';
+    chk.addEventListener('click', function () { chk.disabled = true; chCall('POST', chZonePath(id, z.id, '/check')).then(function (r) {
+      chk.disabled = false;
+      if (!r.success) { chText(steps, 'div', 'Could not check: ' + chErr(r), 'color:var(--danger, #b42318)'); return; }
+      if (r.data.active) { chZones(id); } else { var l = d.querySelector('.zone-live'); if (l) { l.textContent = 'Checked ' + new Date().toLocaleTimeString() + ' · still ' + r.data.status; } }
+    }); });
+  }
+  var dnsBox = chText(body, 'div', '', 'margin-top:8px');
+  var dh = chText(dnsBox, 'strong', 'DNS records ');
+  var rf = chText(dnsBox, 'button', 'Refresh'); rf.type = 'button'; rf.className = 'btn';
+  var tbl = chText(dnsBox, 'div', 'Loading…', 'font-size:13px;margin-top:4px');
+  rf.addEventListener('click', function () { chDnsLoad(id, z, tbl); });
+  var f = document.createElement('form'); f.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center';
+  var sel = document.createElement('select'); sel.name = 'type';
+  ['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'CAA'].forEach(function (t) { var o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o); });
+  var mk = function (name, ph, w, req) { var i = document.createElement('input'); i.name = name; i.placeholder = ph; i.autocomplete = 'off'; i.spellcheck = false; i.style.cssText = 'width:' + w; if (req) { i.required = true; } return i; };
+  var nm = mk('name', 'name (www, @ for the domain)', '170px', true), ct = mk('content', 'value (IP, target, text)', '220px', true), pr = mk('priority', 'priority', '80px');
+  pr.type = 'number'; pr.min = '0'; pr.max = '65535'; pr.style.display = 'none';
+  var ttl = mk('ttl', 'TTL (auto)', '90px'); ttl.type = 'number'; ttl.min = '60';
+  var pxl = document.createElement('label'); pxl.style.cssText = 'display:flex;gap:4px;align-items:center';
+  var px = document.createElement('input'); px.type = 'checkbox'; px.name = 'proxied'; px.style.width = 'auto'; pxl.appendChild(px); pxl.appendChild(document.createTextNode(' proxied'));
+  var add = document.createElement('button'); add.type = 'submit'; add.className = 'btn'; add.textContent = 'Add record';
+  var msg = document.createElement('span'); msg.className = 'subtitle'; msg.setAttribute('aria-live', 'polite');
+  sel.addEventListener('change', function () { pr.style.display = sel.value === 'MX' ? '' : 'none'; pxl.style.display = ['A', 'AAAA', 'CNAME'].indexOf(sel.value) >= 0 ? '' : 'none'; });
+  [sel, nm, ct, pr, ttl, pxl, add, msg].forEach(function (e) { f.appendChild(e); });
+  f.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var rec = { type: sel.value, name: nm.value.trim(), content: ct.value.trim() };
+    if (ttl.value) { rec.ttl = Number(ttl.value); }
+    if (sel.value === 'MX') { rec.priority = Number(pr.value || 10); }
+    if (['A', 'AAAA', 'CNAME'].indexOf(sel.value) >= 0) { rec.proxied = !!px.checked; }
+    add.disabled = true; msg.textContent = 'Adding…';
+    chCall('POST', chZonePath(id, z.id, '/dns'), rec).then(function (r) {
+      add.disabled = false;
+      if (!r.success) { msg.textContent = 'Not added: ' + chErr(r); return; }
+      msg.textContent = 'Added.'; nm.value = ''; ct.value = ''; chDnsLoad(id, z, tbl);
+    }).catch(function () { add.disabled = false; msg.textContent = 'Could not reach the server.'; });
+  });
+  dnsBox.appendChild(f);
+  chText(dnsBox, 'p', 'Records of the addresses your sites answer on are managed by Lummet and shown locked. Proxied = traffic goes through Cloudflare (orange cloud).', 'font-size:12px').className = 'subtitle';
+  chDnsLoad(id, z, tbl);
+}
+function chDnsLoad(id, z, tbl) {
+  chCall('GET', chZonePath(id, z.id, '/dns')).then(function (r) {
+    tbl.textContent = '';
+    if (!r.success) { chText(tbl, 'span', chErr(r), 'color:var(--danger, #b42318)'); return; }
+    if (!r.data.records.length) { chText(tbl, 'span', 'No records yet.'); return; }
+    var t = document.createElement('table'); t.style.cssText = 'width:100%;border-collapse:collapse';
+    var hr = t.insertRow(); ['Type', 'Name', 'Value', 'TTL', 'Proxy', ''].forEach(function (x) { var th = document.createElement('th'); th.textContent = x; th.style.textAlign = 'left'; hr.appendChild(th); });
+    r.data.records.forEach(function (rec) {
+      var tr = t.insertRow();
+      [rec.type, rec.name, (rec.priority !== null && rec.priority !== undefined ? rec.priority + ' ' : '') + rec.content, rec.ttl === 1 ? 'auto' : rec.ttl, rec.proxied ? 'yes' : ''].forEach(function (x, i) { var td = tr.insertCell(); td.textContent = x; td.style.cssText = 'padding:2px 6px 2px 0;word-break:break-all' + (i < 3 ? ';font-family:monospace' : ''); });
+      var act = tr.insertCell();
+      if (rec.locked) { act.textContent = 'locked'; act.className = 'subtitle'; return; }
+      var del = document.createElement('button'); del.type = 'button'; del.className = 'btn btn-danger'; del.textContent = 'Delete';
+      del.addEventListener('click', function () {
+        if (!confirm('Delete the ' + rec.type + ' record ' + rec.name + '?')) { return; }
+        del.disabled = true;
+        chCall('DELETE', chZonePath(id, z.id, '/dns/' + encodeURIComponent(rec.id))).then(function (x) { if (x.success) { chDnsLoad(id, z, tbl); } else { del.disabled = false; alert('Not deleted: ' + chErr(x)); } });
+      });
+      act.appendChild(del);
+    });
+    tbl.appendChild(t);
   });
 }
 function chAddZone(f, id) {
-  chCall('POST', '/cloud-hosting/accounts/' + encodeURIComponent(id) + '/zones', { domain: chVal(f, 'domain') }).then(function (d) {
-    if (!d.success) { alert('Could not connect the domain: ' + chErr(d)); return; }
-    alert(d.data.name + ' was added to your Cloudflare account. Set its nameservers at your registrar to: ' + (d.data.nameServers || []).join(' and ') + ', then press Check.');
+  var btn = f.querySelector('button[type=submit]'); if (btn) { btn.disabled = true; }
+  chCall('POST', chZonePath(id), { domain: chVal(f, 'domain') }).then(function (d) {
+    if (btn) { btn.disabled = false; }
+    if (!d.success) { var m = document.getElementById('zmsg-' + id); if (m) { m.textContent = 'Could not connect the domain: ' + chErr(d); } return; }
+    var m2 = document.getElementById('zmsg-' + id); if (m2) { m2.textContent = d.data.name + ' was added. Follow the steps below.'; }
     f.reset(); chZones(id);
   });
 }
@@ -355,6 +492,22 @@ function chVarAdd(f, siteId) {
 }
 function chVarRemove(siteId, name) { chCall('POST', '/sites/' + encodeURIComponent(siteId) + '/hosting/variables', { variables: [{ name: name, value: null }] }).then(chDone); }
 function chCancelMove(siteId) { chCall('POST', '/sites/' + encodeURIComponent(siteId) + '/hosting/transfer/cancel').then(chDone); }
+function chRetry(siteId, kind) { chCall('POST', '/sites/' + encodeURIComponent(siteId) + '/hosting/' + (kind === 'copy' ? 'copy' : 'transfer') + '/retry').then(chDone); }
+function chCancelJob(siteId, kind) {
+  chCall('POST', '/sites/' + encodeURIComponent(siteId) + '/hosting/' + (kind === 'copy' ? 'copy/cancel' : 'transfer/cancel')).then(function (d) {
+    if (d && d.success) { location.reload(); return; }
+    if (d && d.error === 'cleanup_incomplete') { alert((d.message || 'Some resources could not be removed yet.') + '\\n\\nThe clean-up report below the steps lists what is left.'); location.reload(); return; }
+    alert('That did not work: ' + chErr(d));
+  });
+}
+function chCopy(f, siteId, name) {
+  var body = chDest(f); if (!body) { return; }
+  if (!body.accountId) { alert('Choose the Cloudflare account.'); return; }
+  body.name = chVal(f, 'name');
+  if (!body.name) { alert('Give the copy a name.'); return; }
+  if (!confirm('Copy ' + name + ' to your Cloudflare account as "' + body.name + '"? Your site on Lummet is not changed.')) { return; }
+  chCall('POST', '/sites/' + encodeURIComponent(siteId) + '/hosting/copy', body).then(chDone);
+}
 function chConfirmSkipped(siteId) { chCall('POST', '/sites/' + encodeURIComponent(siteId) + '/hosting/transfer/confirm-skipped').then(chDone); }
 function chRemoveOld(siteId) { chCall('POST', '/sites/' + encodeURIComponent(siteId) + '/hosting/transfer/remove-old-copy').then(chDone); }
 (function () {
@@ -363,7 +516,7 @@ function chRemoveOld(siteId) { chCall('POST', '/sites/' + encodeURIComponent(sit
   var boxes = Array.prototype.slice.call(document.querySelectorAll('.transfer'));
   setInterval(function () {
     boxes.forEach(function (b) {
-      chCall('GET', '/sites/' + encodeURIComponent(b.getAttribute('data-site')) + '/hosting/transfer').then(function (d) {
+      chCall('GET', '/sites/' + encodeURIComponent(b.getAttribute('data-site')) + '/hosting/' + (b.getAttribute('data-kind') === 'copy' ? 'copy' : 'transfer')).then(function (d) {
         if (d.success && d.data && d.data.status !== b.getAttribute('data-status')) { location.reload(); }
       }).catch(function () {});
     });

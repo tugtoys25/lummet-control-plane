@@ -28,6 +28,7 @@ import { createZoneDomainService } from "./zone-domains.js";
 import * as dohResolver from "./dns-doh.js";
 import { routeZoneId } from "./repositories/site-resources.js";
 import * as repo from "./repositories/site-teardown.js";
+import * as customHosting from "./custom-hosting.js";
 
 export const TEARDOWN_STEPS = ["stop_routing", "remove_custom_domains", "delete_worker", "delete_database", "delete_kv", "delete_r2", "delete_backups", "finalize"];
 export const JOB_TYPE = "site_teardown";
@@ -67,6 +68,9 @@ export function createSiteTeardownService(infra, { zoneService = null } = {}) {
   }
 
   const gone = (e) => NOT_FOUND.test(String(e?.message || e));
+  // A site in the customer's own Cloudflare account (custom-hosting.js): when that account no longer lets us in (token revoked,
+  // account removed) its resources are the customer's to delete, so they are recorded as left there instead of blocking forever.
+  const goneFor = (env, e) => gone(e) || (env?.LUMMET_HOSTING === "custom" && customHosting.isAccessLost(e));
 
   const resourcesOf = (env, siteId, type) => repo.activeResources(env, siteId, type);
   const markResourceDeleted = (env, id) => repo.markResourceDeleted(env, id);
@@ -74,7 +78,7 @@ export function createSiteTeardownService(infra, { zoneService = null } = {}) {
   async function dropResources(env, siteId, type, fn) {
     let n = 0;
     for (const r of await resourcesOf(env, siteId, type)) {
-      try { await fn(r); } catch (e) { if (!gone(e)) throw new Error(`${type} ${r.resource_name || r.resource_id}: ${String(e?.message || e).slice(0, 160)}`); }
+      try { if (env?.__hostingLost) throw Object.assign(new Error("customer account unreachable"), { code: "custom_hosting_unavailable" }); await fn(r); } catch (e) { if (!goneFor(env, e)) throw new Error(`${type} ${r.resource_name || r.resource_id}: ${String(e?.message || e).slice(0, 160)}`); }
       await markResourceDeleted(env, r.id);
       n++;
     }
@@ -82,26 +86,30 @@ export function createSiteTeardownService(infra, { zoneService = null } = {}) {
   }
 
   const STEP = {
-    async stop_routing(env, site) {
+    async stop_routing(env, site, baseEnv = env) {
       let routes = await dropResources(env, site.id, "route", (r) => infra.deleteWorkerRoute(env, r.resource_id, { zoneId: routeZoneId(r) }));
       // After a domain move the OLD address redirects through its own route; that route must go too.
-      for (const r of await repo.redirectsForSite(env, site.id)) {
+      // Redirect routes live on platform zones, in Lummet's account (baseEnv), whoever hosts the site now.
+      for (const r of await repo.redirectsForSite(baseEnv, site.id)) {
         if (r.route_id) {
-          try { await infra.deleteWorkerRoute(env, r.route_id, { zoneId: r.zone_id || undefined }); } catch (e) { if (!gone(e)) throw new Error(`redirect route ${r.old_host}: ${String(e?.message || e).slice(0, 160)}`); }
+          try { await infra.deleteWorkerRoute(baseEnv, r.route_id, { zoneId: r.zone_id || undefined }); } catch (e) { if (!gone(e)) throw new Error(`redirect route ${r.old_host}: ${String(e?.message || e).slice(0, 160)}`); }
           routes++;
         }
         await repo.deleteRedirect(env, r.old_host);
       }
       return { routes };
     },
-    async remove_custom_domains(env, site) {
+    async remove_custom_domains(env, site, baseEnv = env) {
+      // Customer-owned hosting extras (its Workers Custom Domain and Turnstile widget, a Lummet copy kept after a move).
+      const extra = await customHosting.cleanupSiteExtras(infra, baseEnv, site);
+      if (extra.length) throw new Error(`customer hosting: ${extra.map((f) => `${f.step}: ${f.error}`).join("; ").slice(0, 300)}`);
       let hostnames = 0;
       for (const d of await repo.customHostnames(env, site.id)) {
-        try { await infra.deleteCustomHostname(env, d.ssl_resource_id); } catch (e) { if (!gone(e)) throw new Error(`custom hostname ${d.id}: ${String(e?.message || e).slice(0, 160)}`); }
+        try { await infra.deleteCustomHostname(baseEnv, d.ssl_resource_id); } catch (e) { if (!gone(e)) throw new Error(`custom hostname ${d.id}: ${String(e?.message || e).slice(0, 160)}`); }
         await repo.markHostnameRemoved(env, d.id);
         hostnames++;
       }
-      const failures = await zones().cleanupForSite(env, site.id);          // delegated hostnames, their routes and zones
+      const failures = await zones().cleanupForSite(baseEnv, site.id);          // delegated hostnames, their routes and zones
       if (failures.length) throw new Error(`custom domains: ${failures.map((f) => `${f.step}: ${f.error}`).join("; ").slice(0, 300)}`);
       return { hostnames };
     },
@@ -155,13 +163,16 @@ export function createSiteTeardownService(infra, { zoneService = null } = {}) {
 
     await jobsModule.markJobRunning(env, jobId);
     const result = {};
+    // Provider calls for a site in the customer's own account use that account; Lummet-hosted sites get env unchanged.
+    const hostingEnv = await customHosting.teardownEnv(env, site);
+    const stepEnv = hostingEnv.lost ? { ...env, LUMMET_HOSTING: "custom", __hostingLost: true } : hostingEnv.env;
     for (const step of job.steps) {
       // Every step runs on every attempt, even one that succeeded before: each only acts on what is still recorded as active, so
       // a repeat is a no-op, and a resource a straggling setup job created after its step passed is still caught and removed.
       await jobsModule.startStep(env, jobId, step.step_key);
       try {
         if (site.status === "deleted" && step.step_key !== "finalize") { await jobsModule.skipStep(env, jobId, step.step_key, "site already deleted"); continue; }
-        const output = await STEP[step.step_key](env, site);
+        const output = await STEP[step.step_key](stepEnv, site, env);
         result[step.step_key] = output;
         await jobsModule.completeStep(env, jobId, step.step_key, output);
       } catch (error) {

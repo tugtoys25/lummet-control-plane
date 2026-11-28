@@ -28,6 +28,11 @@ export const ORG_DELETE = [
   ["coupon_reservations", "organization_id = ?"],
   ["coupons", "organization_id = ?"],             // only coupons reserved for this organization; shared coupons have no organization_id
   ["email_outbox", "organization_id = ?"],
+  ["site_custom_hosting", "organization_id = ?"],        // customer-owned Cloudflare hosting (migration 0111)
+  ["site_hosting_transfers", "organization_id = ?"],
+  ["custom_hosting_secrets", "organization_id = ?"],     // encrypted Cloudflare API tokens, R2 secret keys and site secrets
+  ["customer_cloudflare_accounts", "organization_id = ?"],
+  ["custom_hosting_org_access", "organization_id = ?"],  // staff allow / deny for this organization
   ["billing_notifications", "organization_id = ?"],
   ["cancellation_feedback", "organization_id = ?"],
   ["usage_snapshots", "organization_id = ?"],
@@ -77,6 +82,9 @@ export const SITE_DELETE = [
   ["site_storage_usage", "site_id = ?"],
   ["site_domain_moves", "site_id = ?"],           // moving a site to another platform domain: hostnames, route/zone ids, step log, short error text; no personal data
   ["site_host_redirects", "site_id = ?"],         // temporary old-host redirect of a moved site (hostnames only)
+  ["site_hosting_transfers", "site_id = ?"],      // moving a site into the customer's own Cloudflare account: resource ids, hostnames, copy counters, short error text
+  ["custom_hosting_secrets", "owner_type = 'site' AND owner_id = ?"], // the site's encrypted Turnstile secret and custom variables (customer-owned Cloudflare hosting)
+  ["site_custom_hosting", "site_id = ?"],          // which customer Cloudflare account the site ran on and its hostname (no personal data)
   ["site_setup_requests", "site_id = ?"]            // Phase 9: first-configuration requests (preset or clone source ids, short error codes; no content). Rows for a manually registered tenant have no site and stay with the tenant registry
 ];
 

@@ -42,7 +42,10 @@ const ZERO_ACCESS_ENTITLEMENTS = {
   "dedicated_infrastructure.enabled": { type: "boolean", value: false },
   // Round 6.4C: organization IP allowlist. Off for every plan until the owner grants it to the plans he calls "business" (a plan_entitlements
   // row, or a staff override on one subscription). No plan name appears in code.
-  "security.ip_allowlist.enabled": { type: "boolean", value: false }
+  "security.ip_allowlist.enabled": { type: "boolean", value: false },
+  // Customer-owned Cloudflare hosting (migration 0111). Off for every plan until staff grant it to a plan or one subscription;
+  // the platform setting CUSTOM_HOSTING must also be on, and a per-organization staff allow/deny wins over the plan.
+  "hosting.custom_cloudflare.enabled": { type: "boolean", value: false }
 };
 
 function castValue(type, raw) {

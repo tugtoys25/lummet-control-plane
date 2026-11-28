@@ -250,6 +250,15 @@ const NAV = [
     items: [
       { label: "Platform domains", href: "/platform/domains", key: "platform-domains", area: "platform", resource: "platform_domains" }
     ]
+  },
+  {
+    // Custom Cloudflare hosting: own permission (area platform, resource custom_hosting), same reasoning as Platform domains.
+    id: "custom-hosting",
+    section: "Customer hosting",
+    icon: "platform",
+    items: [
+      { label: "Custom Cloudflare hosting", href: "/platform/custom-hosting", key: "custom-hosting", area: "platform", resource: "custom_hosting" }
+    ]
   }
 ];
 

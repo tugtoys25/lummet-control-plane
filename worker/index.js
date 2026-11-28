@@ -104,6 +104,7 @@ import * as platformSettings from "./platform-settings.js";
 import { handlePublicBrandingRoute } from "./portal-branding.js";
 import { handlePortalBrandingRoute } from "./portal-branding-routes.js";
 import { handlePlatformDomainsRoute } from "./platform-domains-routes.js";
+import { handleCustomHostingRoute } from "./custom-hosting-routes.js";
 import * as platformDomainsModule from "./platform-domains.js";
 import { createSiteDomainMoveService, redirectResponseFor } from "./site-domain-moves.js";
 import * as cloudflareInfra from "./infra-cloudflare.js";
@@ -311,6 +312,11 @@ import {
 import { renderTwoFactorPage, renderChangePasswordPage, submitChangePassword } from "./views/pages/account.js";
 import { runBackfillTick as runRevenueBackfillTick } from "./revenue.js";
 import { runDailyRevenueJob } from "./revenue-job.js";
+import * as customHostingApi from "./custom-hosting-api.js";
+import { hostingInfra as customHostingInfra, hostingTransfers as customHostingTransfers } from "./custom-hosting-transfer.js";
+import { renderCloudHostingPage } from "./views/customer-pages/cloud-hosting.js";
+import { isCustomHosted as siteIsCustomHosted } from "./custom-hosting.js";
+import * as customHostingModule from "./custom-hosting.js";
 import {
   renderCountryPagesList,
   renderCountryPageForm,
@@ -1371,6 +1377,18 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             return json({ success: true, data: await organizations.listMembers(env, organizationId) });
           }
 
+          // Custom Cloudflare hosting (custom-hosting-api.js; docs/CUSTOM_CLOUDFLARE_HOSTING.md): the customer's own Cloudflare accounts, their
+          // domains, per-site hosting settings and moving a Lummet-hosted site into the customer's account. 404 unless the organization has
+          // the feature (staff switch + plan entitlement or staff allow) or already uses it. Reading: any member; changes: admin, audited.
+          if (subPath === "/cloud-hosting" || /^\/cloud-hosting\/accounts(?:\/([^/]+))?(?:\/(verify|subdomain|zones))?(?:\/([^/]+)\/check)?$/.test(subPath) || /^\/sites\/([^/]+)\/hosting(?:\/(domain|variables|transfer|transfer\/cancel|transfer\/remove-old-copy))?$/.test(subPath)) {
+            return customHostingApi.handleCustomHostingRoute({
+              env, ctx, request, method, path, organizationId, customer, requireOrgRole, json,
+              audit: (fields) => logAudit(env, { actorType: "customer_user", customerUserId: customer.id, organizationId, endpoint: path, method, requestId, ipHash: customerIpHash, ...fields }),
+              dispatchJob: (jobId) => jobRunner.dispatchJob(env, ctx, jobId),
+              redeploy: makeDomainRedeploy(env, ctx)
+            });
+          }
+
           // Round 6.4C: IP allowlist and SSO requirement stub. Owner only for changes; the service audits every change and refusal.
           if (subPath === "/ip-allowlist" && (method === "GET" || method === "PUT")) {
             if (method === "GET") {
@@ -1941,7 +1959,11 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             const result = await sites.createSite(env, {
               organizationId, name: body.name, productId: body.productId, actorUserId: customer.id,
               preset: body.preset, cloneFromSiteId: body.cloneFromSiteId, cloneFromTenantId: body.cloneFromTenantId, sections: body.sections,
-              platformDomainId: body.platformDomainId, subdomain: body.subdomain
+              platformDomainId: body.platformDomainId, subdomain: body.subdomain,
+              // Optional: { mode: "custom", accountId, landing, zoneId, subdomain } puts the site in the customer's own Cloudflare account.
+              // Without it (every existing client) nothing changes.
+              hosting: body.hosting && typeof body.hosting === "object" && body.hosting.mode === "custom" ? body.hosting : null,
+              hostingInfra: customHostingInfra
             });
             await logAudit(env, {
               actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -1951,7 +1973,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             });
             // A taken or unusable address comes back with what the customer can pick instead; nothing was created or renamed.
             if (!result.ok) return json({ success: false, error: result.error, ...(result.reason ? { reason: result.reason, message: result.message, label: result.label, host: result.host, suggestions: result.suggestions || [], otherDomains: result.otherDomains || [] } : {}) }, result.status);
-            return json({ success: true, siteId: result.siteId, slug: result.slug, label: result.label, host: result.platformDomain?.host || null, setup: result.setup ? { kind: result.setup.kind, presetId: result.setup.presetId, status: result.setup.status } : null });
+            return json({ success: true, siteId: result.siteId, slug: result.slug, label: result.label, host: result.hosting?.host || result.platformDomain?.host || null, ...(result.hosting ? { hosting: result.hosting } : {}), setup: result.setup ? { kind: result.setup.kind, presetId: result.setup.presetId, status: result.setup.status } : null });
           }
 
           // Live regions (see live.js): the Sites table and the Deployments cards refresh themselves. Any member may read; "canManage" decides whether
@@ -2112,6 +2134,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               if (guard) return guard;
 
               const body = await request.json().catch(() => ({}));
+              // A site in the customer's own Cloudflare account takes its domains there (Cloudflare hosting page), not on Lummet's side.
+              if (await siteIsCustomHosted(env, siteId)) return json({ success: false, error: "site_uses_own_cloudflare" }, 409);
               const result = await domains.addDomain(env, { siteId, hostname: body.hostname, actorUserId: customer.id });
               await logAudit(env, {
                 actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -2139,6 +2163,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               const guard = await requireOrgRole(organizationId, "admin");
               if (guard) return guard;
               const body = await request.json().catch(() => ({}));
+              // A site in the customer's own Cloudflare account takes its domains there (Cloudflare hosting page), not on Lummet's side.
+              if (await siteIsCustomHosted(env, siteId)) return json({ success: false, error: "site_uses_own_cloudflare" }, 409);
               const result = await zoneDomains.addZone(env, { siteId, domain: body.domain, actorUserId: customer.id, organizationId });
               await logAudit(env, {
                 actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -2164,6 +2190,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
               const guard = await requireOrgRole(organizationId, "admin");
               if (guard) return guard;
               const body = await request.json().catch(() => ({}));
+              // A site in the customer's own Cloudflare account takes its domains there (Cloudflare hosting page), not on Lummet's side.
+              if (await siteIsCustomHosted(env, siteId)) return json({ success: false, error: "site_uses_own_cloudflare" }, 409);
               const result = await zoneDomains.addSubdomain(env, { siteId, hostname: body.hostname, actorUserId: customer.id, organizationId, redeploy: makeDomainRedeploy(env, ctx) });
               await logAudit(env, {
                 actorType: "customer_user", customerUserId: customer.id, organizationId,
@@ -3356,7 +3384,7 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         // another organization of the same person, which is checked on its own list.
         // The organization row and the plan's feature flags do not depend on the IP verdict, so they are read at the same time (a denied
         // visitor simply never uses them); that removes two round trips from the start of every portal page.
-        const [portalIpVerdict, activeOrg, [hasBackups, hasAutomations, analyticsLevel, hasReports, hasAffiliate, hasAlerts, openNotifications, supportAnswered, unreadAnnouncements]] = await Promise.all([
+        const [portalIpVerdict, activeOrg, [hasBackups, hasAutomations, analyticsLevel, hasReports, hasAffiliate, hasAlerts, openNotifications, supportAnswered, unreadAnnouncements], cloudHostingAccess] = await Promise.all([
           orgSecurityPolicy.evaluateOrgIpAccess(env, request, activeOrgId),
           organizations.getOrganization(env, activeOrgId),
           Promise.all([
@@ -3369,7 +3397,8 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             notificationsRepo.countOpen(env, activeOrgId),
             supportModule.openCountForOrg(env, activeOrgId).catch(() => 0),
             announcementsModule.unreadCount(env, portalCustomer.id)
-          ])
+          ]),
+          customHostingModule.accessFor(env, activeOrgId).catch(() => null)
         ]);
         if (portalIpVerdict.wouldDeny && !portalIpVerdict.denied) console.log(JSON.stringify({ msg: "org_ip_allowlist_would_deny", organizationId: activeOrgId, mode: portalIpVerdict.mode }));
         if (portalIpVerdict.denied) return html(renderOrgIpDeniedPage(), 403, { "Cache-Control": "no-store" });
@@ -3384,7 +3413,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           ...(hasAnalytics ? [] : ["analytics", "all-sites"]), ...(hasReports ? [] : ["reports"]),
           ...(hasAffiliate ? [] : ["campaigns"]), ...(hasAlerts ? [] : ["alerts"]),
           // Sessions page (H.5): shown to owners and admins only, and only while CUSTOMER_SESSION_ADMIN is not off.
-          ...(portalSessionsVisible ? [] : ["sessions"])
+          ...(portalSessionsVisible ? [] : ["sessions"]),
+          // Cloudflare hosting: only for organizations that have the feature or already use it.
+          ...(cloudHostingAccess && (cloudHostingAccess.enabled || cloudHostingAccess.inUse) ? [] : ["cloud-hosting"])
         ];
         const shell = (opts) => renderCustomerShell({ hiddenNavKeys, securityLink: customer2faEnrollMode(env) === "on", navBadges: { notifications: openNotifications, support: supportAnswered, announcements: unreadAnnouncements }, ...opts });
         const myMembership = myOrgs.find((o) => o.id === activeOrgId);
@@ -3599,10 +3630,11 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         if (path === "/app/sites") {
           // Everything the page needs is read together (it used to be four rounds, one after another). Each read is fail-open: if one
           // fails the page still shows the sites and the plain create form.
-          const [{ sitesList, setupViews, siteHosts }, products, platformDomains] = await Promise.all([
+          const [{ sitesList, setupViews, siteHosts }, products, platformDomains, customHostingForm] = await Promise.all([
             loadSitesViewData(env, activeOrgId),
             plans.listProducts(env, { scope: "site_types" }),
-            platformDomainsModule.customerDomainOptions(env, { organizationId: activeOrgId }).catch(() => [])
+            platformDomainsModule.customerDomainOptions(env, { organizationId: activeOrgId }).catch(() => []),
+            customHostingModule.createFormData(env, activeOrgId).catch(() => null)
           ]);
           // The create form's starting points depend on the first product, so they follow the product list.
           const setupOptions = await siteSetup.getSetupOptions(env, { organizationId: activeOrgId, productId: products[0]?.id || null }).catch(() => null);
@@ -3610,9 +3642,25 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
             shell({
               title: "Sites", activeKey: "sites", customer: portalCustomer,
               organizations: myOrgs, activeOrganizationId: activeOrgId,
-              bodyHtml: renderSitesPage({ sites: sitesList, products, canManage, setupOptions, setupViews, platformDomains, siteHosts, organizationId: activeOrgId })
+              bodyHtml: renderSitesPage({ sites: sitesList, products, canManage, setupOptions, setupViews, platformDomains, siteHosts, organizationId: activeOrgId, customHosting: customHostingForm })
             })
           );
+        }
+
+        // Custom Cloudflare hosting (custom-hosting.js): the organization's own Cloudflare accounts, their domains, its sites' hosting and the guide.
+        // Not offered (404 page) unless the organization has the feature or already uses it.
+        if (path === "/app/cloud-hosting") {
+          const chAccess = await customHostingModule.accessFor(env, activeOrgId);
+          if (!chAccess.enabled && !chAccess.inUse) return html(shell({ title: "Not found", activeKey: "cloud-hosting", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId, bodyHtml: `<h1>Not found</h1><p class="subtitle">This page is not available for your organization.</p>` }), 404);
+          const [chAccounts, chSitesList] = await Promise.all([customHostingModule.listAccounts(env, activeOrgId), sites.listSitesForOrganization(env, activeOrgId)]);
+          const chSites = [];
+          for (const s of chSitesList.filter((x) => x.status !== "deleted" && x.status !== "deleting")) {
+            chSites.push({ id: s.id, name: s.name, status: s.status, primary_domain: s.primary_domain, hosting: await customHostingModule.siteHostingView(env, s.id), transfer: await customHostingTransfers.transferView(env, s.id) });
+          }
+          return html(shell({
+            title: "Cloudflare hosting", activeKey: "cloud-hosting", customer: portalCustomer, organizations: myOrgs, activeOrganizationId: activeOrgId,
+            bodyHtml: renderCloudHostingPage({ access: chAccess, accounts: chAccounts, sites: chSites, canManage, organizationId: activeOrgId })
+          }));
         }
 
         if (path === "/app/billing") {
@@ -4823,6 +4871,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
           // Platform domains (migration 0085): own permission (platform / platform_domains), read-only for support roles.
           const platformDomainsResponse = await handlePlatformDomainsRoute({ env, request, url, method, path, admin, requestId, ipHash, json, html, logAudit, redeploy: makeMoveRedeploy(env, ctx) });
           if (platformDomainsResponse) return platformDomainsResponse;
+          // Custom Cloudflare hosting (custom-hosting-routes.js): own permission (platform / custom_hosting).
+          const customHostingResponse = await handleCustomHostingRoute({ env, request, url, method, path, admin, requestId, ipHash, json, html, logAudit, dispatchJob: (jobId) => jobRunner.dispatchJob(env, ctx, jobId) });
+          if (customHostingResponse) return customHostingResponse;
         }
 
         // Phase 9: the preset new sites start from, per plan or per product (no entry = "full"). Super admin only, validated, audited.
@@ -5876,6 +5927,9 @@ async function handleRequest(request, env, ctx, requestId = crypto.randomUUID(),
         // Platform domains (migration 0085): own permission (platform / platform_domains), read-only for support roles.
         const platformDomainsResponse = await handlePlatformDomainsRoute({ env, request, url, method, path, admin, requestId, ipHash, json, html, logAudit, redeploy: makeMoveRedeploy(env, ctx) });
         if (platformDomainsResponse) return platformDomainsResponse;
+        // Custom Cloudflare hosting (custom-hosting-routes.js): own permission (platform / custom_hosting).
+        const customHostingResponse = await handleCustomHostingRoute({ env, request, url, method, path, admin, requestId, ipHash, json, html, logAudit, dispatchJob: (jobId) => jobRunner.dispatchJob(env, ctx, jobId) });
+        if (customHostingResponse) return customHostingResponse;
       }
 
       if (method === "GET" && path.startsWith("/platform/saas")) {
@@ -6093,6 +6147,9 @@ async function runScheduled(event, env, ctx) {
   ctx.waitUntil(privateFiles.purgeOrphans(env).catch(() => {}));
   ctx.waitUntil(rollouts.advanceRunning(env, { dispatch: makeRolloutDispatch(env, ctx, { inline: false }) }).catch(() => {}));
   ctx.waitUntil(automationSweep.sweepTrackingLinkEvents(env).catch(() => {}));
+  // Custom Cloudflare hosting: token re-verification + edge enforcement for suspended sites (both are no-ops without custom-hosted accounts).
+  ctx.waitUntil(customHostingModule.sweepAccountHealth(env).catch((error) => console.error(JSON.stringify({msg:"custom_hosting_health_sweep_failed",error:error?.message||String(error)}))));
+  ctx.waitUntil(customHostingModule.enforceAccessSweep(env).catch((error) => console.error(JSON.stringify({msg:"custom_hosting_enforce_sweep_failed",error:error?.message||String(error)}))));
   // Phase 10 A4: retry first-configuration requests that failed or were never applied (backoff, at most 6 attempts, SETUP_RETRY_SWEEP=off disables).
   ctx.waitUntil(runSetupRetrySweep(env));
   ctx.waitUntil(requestErrorsRepo.purgeOlderThanDays(env, 14).catch(() => {}));

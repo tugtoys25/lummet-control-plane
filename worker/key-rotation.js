@@ -26,7 +26,9 @@ export const ENCRYPTED_TARGETS = [
   { table: "customer_totp", pk: "user_id", enc: "encrypted_secret", iv: "secret_iv" },
   { table: "lummet_admin_totp", pk: "admin_id", enc: "encrypted_secret", iv: "secret_iv" },
   { table: "organization_sso_settings", pk: "organization_id", enc: "encrypted_client_secret", iv: "client_secret_iv" },
-  { table: "email_outbox", pk: "id", enc: "body_encrypted", iv: "body_iv" }
+  { table: "email_outbox", pk: "id", enc: "body_encrypted", iv: "body_iv" },
+  // Customer-owned Cloudflare hosting (migration 0111): API tokens, R2 secret keys, email keys, Turnstile secrets, site variables.
+  { table: "custom_hosting_secrets", pk: "id", enc: "encrypted_secret", iv: "secret_iv" }
 ];
 const bindColumn = (t) => t.bind || t.pk;
 

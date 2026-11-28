@@ -26,10 +26,12 @@ import { lineProfile } from "./template-lines.js";
 
 const activeResource = siteResources.findActiveResource;
 
-export async function buildSiteBindings(env, { site, deploymentId, host, hasAssets, line = null }) {
+export async function buildSiteBindings(env, { site, deploymentId, host, hasAssets, line = null, resources = null }) {
   // The line decides the R2 binding name and whether the AI binding exists (casino: MEDIA_BUCKET + AI, brokerage: PRIVATE_FILES).
   const profile = lineProfile(line);
-  const [d1, kv, r2] = await Promise.all([
+  // `resources` ({ d1, kv, r2 }, each { resource_id }) is only passed while a site is moved to the customer's own Cloudflare
+  // account (custom-hosting-transfer.js): the copies there are bound before the site's records switch to them.
+  const [d1, kv, r2] = resources ? [resources.d1, resources.kv, resources.r2] : await Promise.all([
     activeResource(env, site.id, "d1"), activeResource(env, site.id, "kv"), activeResource(env, site.id, "r2")
   ]);
   const missing = [["d1", d1], ["kv", kv], ["r2", r2]].filter(([, r]) => !r).map(([t]) => t);

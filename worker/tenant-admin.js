@@ -15,6 +15,7 @@
 import * as sites from "./sites.js";
 import * as cloudflareProvider from "./infra-cloudflare.js";
 import * as resourcesRepo from "./repositories/site-resources.js";
+import * as customHosting from "./custom-hosting.js";
 import * as releaseRepo from "./repositories/tenant-releases.js";
 
 export const MIN_PASSWORD_LENGTH = 12;
@@ -51,16 +52,19 @@ export function createTenantAdminService(infra) {
     const d1 = await resourcesRepo.findActiveResource(env, siteId, "d1");
     if (!d1) return { ok: false, status: 409, error: "site_has_no_database" };
 
+    // The database lives in the customer's own Cloudflare account for a custom-hosted site (custom-hosting.js).
+    let d1Env = env;
+    try { d1Env = await customHosting.cloudflareEnvForSite(env, siteId); } catch (_) { return { ok: false, status: 409, error: "custom_hosting_unavailable" }; }
     const passwordHash = await hashTenantPassword(password);
     const normalized = email.trim().toLowerCase();
     try {
-      await infra.runD1Query(env, {
+      await infra.runD1Query(d1Env, {
         databaseId: d1.resource_id,
         sql: `INSERT INTO users (email, password_hash, role) VALUES (?, ?, 'admin')
               ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash, role = 'admin', updated_at = CURRENT_TIMESTAMP`,
         params: [normalized, passwordHash]
       });
-      await infra.runD1Query(env, {
+      await infra.runD1Query(d1Env, {
         databaseId: d1.resource_id,
         sql: `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE email = ?)`,
         params: [normalized]

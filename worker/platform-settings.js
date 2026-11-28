@@ -102,7 +102,8 @@ export const SETTINGS = [
   def("SECURITY_TXT_EXPIRES", "Public site", "text", { max: 40, pattern: /^\d{4}-\d{2}-\d{2}(T[0-9:.]+Z?)?$/, default: "", help: "security.txt Expires date, e.g. 2027-12-31." }),
   // ---- Platform ----
   def("PLATFORM_DOMAIN_SUFFIX", "Platform", "hostname", { default: "sites.lummet.app", help: "First-run default only: used once, to create the default row in Platform domains. After that, manage platform domains in the Platform domains screen; changing this does not move any domain or site." }),
-  def("CF_WORKERS_DEV_SUBDOMAIN", "Platform", "text", { max: 63, pattern: /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/i, default: "workers", help: "workers.dev subdomain used as the health-check target for a site without a verified domain." })
+  def("CF_WORKERS_DEV_SUBDOMAIN", "Platform", "text", { max: 63, pattern: /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/i, default: "workers", help: "workers.dev subdomain used as the health-check target for a site without a verified domain." }),
+  def("CUSTOM_HOSTING", "Platform", "enum", { options: ON_OFF, default: "off", help: "Customer-owned Cloudflare hosting: allowed customers may run sites in their own Cloudflare account. Off hides it for new sites and moves; sites already running in a customer's account keep deploying. Per-organization access is in Custom hosting." })
 ];
 
 const BY_KEY = new Map(SETTINGS.map((d) => [d.key, d]));

@@ -44,6 +44,9 @@ export const ENTITLEMENT_CATALOG = [
   { key: "approval_workflows.enabled", label: "Approval workflows", type: "boolean", group: "Features" },
   { key: "white_label.enabled", label: "White label", type: "boolean", group: "Enterprise" },
   { key: "dedicated_infrastructure.enabled", label: "Dedicated infrastructure", type: "boolean", group: "Enterprise" },
+  // Customer-owned Cloudflare hosting (docs/CUSTOM_CLOUDFLARE_HOSTING.md): sites may run in the customer's own Cloudflare account.
+  // Only takes effect while staff have the feature switched on (platform setting CUSTOM_HOSTING); staff can also allow or deny one organization.
+  { key: "hosting.custom_cloudflare.enabled", label: "Custom Cloudflare hosting", type: "boolean", group: "Enterprise" },
   { key: "security.ip_allowlist.enabled", label: "IP allowlist", type: "boolean", group: "Enterprise" }
 ];
 const KNOWN_TYPE = new Map(ENTITLEMENT_CATALOG.map((e) => [e.key, e.type]));

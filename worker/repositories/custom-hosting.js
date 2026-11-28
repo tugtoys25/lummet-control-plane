@@ -225,9 +225,9 @@ export async function listRecentTransfers(env, { limit = 50, organizationId = nu
 
 export async function insertTransfer(env, row) {
   await env.LUMMET_DB.prepare(
-    `INSERT INTO site_hosting_transfers (id, site_id, organization_id, account_ref, job_id, status, landing, hostname, zone_id, zone_name, source_host, requested_by, progress)
-     VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, '{}')`
-  ).bind(row.id, row.siteId, row.organizationId, row.accountRef, row.jobId || null, row.landing, row.hostname || null, row.zoneId || null, row.zoneName || null, row.sourceHost || null, row.requestedBy || null).run();
+    `INSERT INTO site_hosting_transfers (id, site_id, organization_id, account_ref, job_id, status, landing, hostname, zone_id, zone_name, source_host, requested_by, progress, kind, target_site_id)
+     VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, '{}', ?, ?)`
+  ).bind(row.id, row.siteId, row.organizationId, row.accountRef, row.jobId || null, row.landing, row.hostname || null, row.zoneId || null, row.zoneName || null, row.sourceHost || null, row.requestedBy || null, row.kind || "move", row.targetSiteId || null).run();
 }
 
 export async function getTransfer(env, id) {
@@ -242,11 +242,21 @@ export async function openTransferForSite(env, siteId) {
   return env.LUMMET_DB.prepare(`SELECT * FROM site_hosting_transfers WHERE site_id = ? AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1`).bind(siteId).first();
 }
 
-export async function latestTransferForSite(env, siteId) {
-  return env.LUMMET_DB.prepare(`SELECT * FROM site_hosting_transfers WHERE site_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`).bind(siteId).first();
+export async function latestTransferForSite(env, siteId, kind = "move") {
+  return env.LUMMET_DB.prepare(`SELECT * FROM site_hosting_transfers WHERE site_id = ? AND kind = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`).bind(siteId, kind).first();
 }
 
-const TRANSFER_COLUMNS = new Set(["job_id", "status", "target_resources", "source_resources", "progress", "lease_until", "old_copy_status", "error_message", "completed_at", "confirm_skipped", "frozen_at"]);
+/** A copy whose NEW site is `targetSiteId` (the target site's own page shows where it came from). */
+export async function copyByTargetSite(env, targetSiteId) {
+  return env.LUMMET_DB.prepare(`SELECT * FROM site_hosting_transfers WHERE kind = 'copy' AND target_site_id = ? ORDER BY created_at DESC LIMIT 1`).bind(targetSiteId).first();
+}
+
+/** Failed copies whose new site may be removed together with them; the sweep and the customer's "start over" use this. */
+export async function listCopiesOfOrganization(env, organizationId) {
+  return (await env.LUMMET_DB.prepare(`SELECT * FROM site_hosting_transfers WHERE organization_id = ? AND kind = 'copy' ORDER BY created_at DESC LIMIT 50`).bind(organizationId).all()).results || [];
+}
+
+const TRANSFER_COLUMNS = new Set(["job_id", "status", "target_resources", "source_resources", "progress", "lease_until", "old_copy_status", "error_message", "completed_at", "confirm_skipped", "frozen_at", "cleanup_report", "target_site_id"]);
 export async function patchTransfer(env, id, patch) {
   const keys = Object.keys(patch).filter((k) => TRANSFER_COLUMNS.has(k));
   if (!keys.length) return;
@@ -347,4 +357,9 @@ export async function saveHostRedirect(env, { oldHost, newHost, siteId, moveId, 
 /** Outcome of one signed access-state push (used to confirm a site really entered maintenance). */
 export async function accessPushStatus(env, siteId, generation) {
   return env.LUMMET_DB.prepare(`SELECT status, last_error FROM site_access_push_jobs WHERE site_id = ? AND generation = ?`).bind(siteId, generation).first();
+}
+
+/** Hostnames sites of this organization serve from a zone: their DNS records belong to the Worker Custom Domain and are not edited by hand. */
+export async function hostnamesInZone(env, organizationId, zoneId) {
+  return ((await env.LUMMET_DB.prepare(`SELECT hostname FROM site_custom_hosting WHERE organization_id = ? AND zone_id = ? AND hostname IS NOT NULL`).bind(organizationId, zoneId).all()).results || []).map((r) => String(r.hostname).toLowerCase());
 }

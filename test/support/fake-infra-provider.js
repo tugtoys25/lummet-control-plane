@@ -28,8 +28,16 @@ export function createFakeInfraProvider() {
         failNextCallOfType = null;
         throw new Error(message);
       }
-      return { resourceId: `fake-d1-${nextId++}`, metadata: { name } };
+      const resourceId = `fake-d1-${nextId++}`;
+      provider._databases.set(resourceId, name);
+      return { resourceId, metadata: { name } };
     },
+    _databases: new Map(),      // resourceId -> name (what exists in the account)
+    _namespaces: new Map(),     // resourceId -> title
+    _buckets: new Set(),        // bucket resource ids
+    _bucketBlocked: new Map(),  // bucket name -> ISO time until which it cannot be recreated (R2 rule after a delete)
+    async findDatabaseByName(env, { name }) { calls.push({ method: "findDatabaseByName", name }); for (const [id, n] of provider._databases) if (n === name) return { resourceId: id, name: n }; return null; },
+    async findKVNamespaceByName(env, { title }) { calls.push({ method: "findKVNamespaceByName", title }); for (const [id, t] of provider._namespaces) if (t === title) return { resourceId: id, title: t }; return null; },
 
     // Test-controlled: make a delete call fail until cleared (_deleteFailures.delete(name)).
     _deleteFailures: new Map(),
@@ -84,6 +92,7 @@ export function createFakeInfraProvider() {
     async deleteDatabase(env, resourceId) {
       calls.push({ method: "deleteDatabase", resourceId });
       if (provider._deleteFailures.has("deleteDatabase")) throw new Error(provider._deleteFailures.get("deleteDatabase"));
+      provider._databases.delete(resourceId);
       return { ok: true };
     },
 
@@ -94,12 +103,15 @@ export function createFakeInfraProvider() {
         failNextCallOfType = null;
         throw new Error(message);
       }
-      return { resourceId: `fake-kv-${nextId++}`, metadata: { title } };
+      const resourceId = `fake-kv-${nextId++}`;
+      provider._namespaces.set(resourceId, title);
+      return { resourceId, metadata: { title } };
     },
 
     async deleteKVNamespace(env, resourceId) {
       calls.push({ method: "deleteKVNamespace", resourceId });
       if (provider._deleteFailures.has("deleteKVNamespace")) throw new Error(provider._deleteFailures.get("deleteKVNamespace"));
+      provider._namespaces.delete(resourceId);
       return { ok: true };
     },
 
@@ -110,12 +122,18 @@ export function createFakeInfraProvider() {
         failNextCallOfType = null;
         throw new Error(message);
       }
-      return { resourceId: `fake-r2-${nextId++}`, metadata: { name } };
+      const blocked = provider._bucketBlocked.get(name);
+      if (blocked && Date.parse(blocked) > Date.now()) throw Object.assign(new Error(`Bucket was deleted at ${new Date().toISOString()}; same-name recreation is blocked until ${blocked}`), { httpStatus: 409 });
+      const resourceId = `fake-r2-${nextId++}`;
+      provider._buckets.add(resourceId);
+      provider._bucketNames = provider._bucketNames || new Map(); provider._bucketNames.set(resourceId, name);
+      return { resourceId, metadata: { name } };
     },
 
     async deleteR2Bucket(env, resourceId) {
       calls.push({ method: "deleteR2Bucket", resourceId });
       if (provider._deleteFailures.has("deleteR2Bucket")) throw new Error(provider._deleteFailures.get("deleteR2Bucket"));
+      provider._buckets.delete(resourceId);
       return { ok: true };
     },
 
@@ -202,7 +220,7 @@ export function createFakeInfraProvider() {
       calls.push({ method: "createDnsRecord", zoneId, record });
       const z = provider._zones.get(zoneId);
       if (z.records.some((r) => r.type === record.type && r.name === record.name && r.content === record.content)) throw new Error("Record already exists.");
-      const rec = { id: `fake-rec-${nextId++}`, ttl: 1, proxied: false, priority: null, ...record };
+      const rec = { id: String(nextId++).padStart(32, "0"), ttl: 1, proxied: false, priority: null, ...record };
       z.records.push(rec);
       return rec;
     },

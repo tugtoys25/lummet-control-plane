@@ -15,7 +15,8 @@ import { hostingTransfers, hostingInfra } from "./custom-hosting-transfer.js";
 
 const ID = /^[A-Za-z0-9-]{1,64}$/;
 const ACCOUNTS = /^\/cloud-hosting\/accounts(?:\/([^/]+))?(?:\/(verify|subdomain|zones))?(?:\/([^/]+)\/check)?$/;
-const SITE = /^\/sites\/([^/]+)\/hosting(?:\/(domain|variables|transfer|transfer\/cancel|transfer\/confirm-skipped|transfer\/remove-old-copy))?$/;
+const DNS = /^\/cloud-hosting\/accounts\/([^/]+)\/zones\/([a-f0-9]{32})\/dns(?:\/([a-f0-9]{32}))?$/i;
+const SITE = /^\/sites\/([^/]+)\/hosting(?:\/(domain|variables|transfer|transfer\/cancel|transfer\/retry|transfer\/confirm-skipped|transfer\/remove-old-copy|copy|copy\/cancel|copy\/retry))?$/;
 
 export function isCustomHostingPath(subPath) {
   return subPath === "/cloud-hosting" || ACCOUNTS.test(subPath) || SITE.test(subPath);
@@ -51,6 +52,32 @@ export async function handleCustomHostingRoute(c) {
     const siteViews = [];
     for (const h of hosted) siteViews.push({ siteId: h.site_id, name: h.site_name || null, ...(await customHosting.siteHostingView(env, h.site_id)), transfer: await hostingTransfers.transferView(env, h.site_id) });
     return json({ success: true, data: { access: accessView, accounts: await customHosting.listAccounts(env, organizationId), sites: siteViews } });
+  }
+
+  const dn = subPath.match(DNS);
+  if (dn) {
+    const [, id, zoneId, recordId] = dn;
+    if (!ID.test(id)) return json({ success: false, error: "not_found" }, 404);
+    if (method === "GET" && !recordId) {
+      const r = await customHosting.listZoneRecords(env, { organizationId, id, zoneId, infra: hostingInfra });
+      return r.ok ? json({ success: true, data: { zone: r.zone, records: r.records } }, 200, { "Cache-Control": "no-store" }) : fail(r);
+    }
+    const g = await admin(); if (g) return g;
+    if (method === "POST" && !recordId) {
+      return guarded(async () => {
+        const r = await customHosting.addZoneRecord(env, { organizationId, id, zoneId, record: await body(), infra: hostingInfra });
+        await c.audit({ resource: "cloud_hosting_dns", resourceId: r.ok ? r.record.id : zoneId, action: "create", success: r.ok, statusCode: r.ok ? 201 : r.status, errorMessage: r.ok ? null : r.error });
+        return r.ok ? json({ success: true, data: r.record }, 201) : fail(r);
+      });
+    }
+    if (method === "DELETE" && recordId) {
+      return guarded(async () => {
+        const r = await customHosting.deleteZoneRecord(env, { organizationId, id, zoneId, recordId, infra: hostingInfra });
+        await c.audit({ resource: "cloud_hosting_dns", resourceId: recordId, action: "delete", success: r.ok, statusCode: r.ok ? 200 : r.status, errorMessage: r.ok ? null : r.error });
+        return r.ok ? json({ success: true }) : fail(r);
+      });
+    }
+    return json({ success: false, error: "method_not_allowed" }, 405);
   }
 
   const a = subPath.match(ACCOUNTS);
@@ -149,7 +176,7 @@ export async function handleCustomHostingRoute(c) {
 
     if (!action) {
       if (method !== "GET") return json({ success: false, error: "method_not_allowed" }, 405);
-      return json({ success: true, data: { ...(await customHosting.siteHostingView(env, siteId)), transfer: await hostingTransfers.transferView(env, siteId), canMove: access.enabled } });
+      return json({ success: true, data: { ...(await customHosting.siteHostingView(env, siteId)), transfer: await hostingTransfers.transferView(env, siteId), copy: await hostingTransfers.copyView(env, siteId), canMove: access.enabled } });
     }
     if (action === "domain") {
       if (method !== "POST") return json({ success: false, error: "method_not_allowed" }, 405);
@@ -186,6 +213,48 @@ export async function handleCustomHostingRoute(c) {
       if (!r.ok) return fail(r);
       await c.dispatchJob(r.jobId);
       return json({ success: true, transferId: r.transferId, jobId: r.jobId }, 202);
+    }
+    if (action === "transfer/retry") {
+      if (method !== "POST") return json({ success: false, error: "method_not_allowed" }, 405);
+      const g = await admin(); if (g) return g;
+      const r = await hostingTransfers.retryTransfer(env, { organizationId, siteId });
+      await c.audit({ resource: "site_hosting", resourceId: siteId, action: "transfer_retry", success: r.ok, statusCode: r.ok ? 202 : r.status, errorMessage: r.ok ? null : r.error });
+      if (!r.ok) return fail(r);
+      await c.dispatchJob(r.jobId).catch(() => {});
+      return json({ success: true, jobId: r.jobId }, 202);
+    }
+    if (action === "copy") {
+      if (method === "GET") {
+        const view = await hostingTransfers.copyView(env, siteId);
+        if (view && ["queued", "running"].includes(view.status) && view.jobId) await c.dispatchJob(view.jobId).catch(() => {});
+        return json({ success: true, data: view });
+      }
+      if (method !== "POST") return json({ success: false, error: "method_not_allowed" }, 405);
+      const g = await admin(); if (g) return g;
+      const input = await body();
+      const r = await hostingTransfers.startCopy(env, { organizationId, siteId, name: input.name, choice: input, actorUserId: c.customer.id });
+      await c.audit({ resource: "site_hosting", resourceId: siteId, action: "copy_start", success: r.ok, statusCode: r.ok ? 202 : r.status, errorMessage: r.ok ? null : r.error });
+      if (!r.ok) return fail(r);
+      await c.dispatchJob(r.jobId).catch(() => {});
+      return json({ success: true, transferId: r.transferId, jobId: r.jobId, siteId: r.targetSiteId, host: r.host }, 202);
+    }
+    if (action === "copy/retry") {
+      if (method !== "POST") return json({ success: false, error: "method_not_allowed" }, 405);
+      const g = await admin(); if (g) return g;
+      const r = await hostingTransfers.retryCopy(env, { organizationId, siteId });
+      await c.audit({ resource: "site_hosting", resourceId: siteId, action: "copy_retry", success: r.ok, statusCode: r.ok ? 202 : r.status, errorMessage: r.ok ? null : r.error });
+      if (!r.ok) return fail(r);
+      await c.dispatchJob(r.jobId).catch(() => {});
+      return json({ success: true, jobId: r.jobId }, 202);
+    }
+    if (action === "copy/cancel") {
+      if (method !== "POST") return json({ success: false, error: "method_not_allowed" }, 405);
+      const g = await admin(); if (g) return g;
+      const r = await hostingTransfers.cancelCopy(env, { organizationId, siteId });
+      await c.audit({ resource: "site_hosting", resourceId: siteId, action: "copy_cancel", success: r.ok, statusCode: r.ok ? 200 : r.status, errorMessage: r.ok ? null : r.error });
+      if (!r.ok) return fail(r);
+      if (r.teardownJobId) await c.dispatchJob(r.teardownJobId).catch(() => {});
+      return json({ success: true });
     }
     if (action === "transfer/confirm-skipped") {
       if (method !== "POST") return json({ success: false, error: "method_not_allowed" }, 405);

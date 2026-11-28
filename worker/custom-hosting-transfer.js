@@ -42,8 +42,15 @@ import { computeResourceNames } from "./provisioning.js";
 import { routeZoneId } from "./repositories/site-resources.js";
 import * as customHosting from "./custom-hosting.js";
 import * as siteAccess from "./site-access.js";
+import * as setupRepo from "./repositories/site-setup.js";
+import { checkEntitlement } from "./entitlements.js";
+import { createProvisioningService } from "./provisioning.js";
+import { createDeploymentService } from "./deployments.js";
+import { createSiteTeardownService } from "./site-teardown.js";
 
 export const JOB_TYPE = "site_hosting_transfer";
+export const COPY_JOB_TYPE = "site_hosting_copy";
+export const COPY_STEPS = ["provision", "deploy", "copy_media", "copy_kv", "copy_database", "finalize"];
 export const TRANSFER_STEPS = ["validate", "create_resources", "copy_media", "copy_kv", "deploy_target", "cutover"];
 const LEASE_MS = 90_000;
 const DEFAULT_BUDGET_MS = 20_000;
@@ -75,7 +82,29 @@ const defaultAccess = {
 const redirectDays = (env) => { const n = Number(env?.CUSTOM_HOSTING_REDIRECT_DAYS); return Number.isFinite(n) && n >= 0 && n <= 365 ? Math.floor(n) : 90; };
 const selfWorker = (env) => env.CF_SELF_WORKER_NAME || "lummet-control-plane";
 
-export function createTransferService(infra, { templateService = tenantTemplate, access = defaultAccess } = {}) {
+/**
+ * Cloudflare does not let a deleted R2 bucket's name be created again for about a minute ("Bucket was deleted at ...; same-name
+ * recreation is blocked until <time>"). A move started right after a cancel meets that. Short waits are waited out here; a longer
+ * one fails with the time to try again at.
+ */
+async function createBucketPatiently(infra, cfEnv, name, env) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await infra.createR2Bucket(cfEnv, { name }); }
+    catch (e) {
+      const m = /recreation is blocked until\s+(\S+)/i.exec(String(e?.message || ""));
+      if (!m || attempt >= 1) throw m ? new Error(`Cloudflare still blocks re-creating the bucket "${name}" (it was deleted a moment ago) until ${m[1]}. Try again after that time.`) : e;
+      const wait = Date.parse(m[1]) - Date.now();
+      if (!(wait <= 120_000)) throw new Error(`Cloudflare blocks re-creating the bucket "${name}" until ${m[1]}. Try again after that time.`);
+      await new Promise((ok) => setTimeout(ok, Math.max(0, wait) + Number(env?.CUSTOM_HOSTING_BUCKET_WAIT_PAD_MS ?? 1500)));
+    }
+  }
+}
+
+export function createTransferService(infra, { templateService = tenantTemplate, access = defaultAccess, deploymentService = null, provisioningService = null, teardownService = null } = {}) {
+  deploymentService ||= createDeploymentService(infra, { templateService });
+  provisioningService ||= createProvisioningService(infra, { deploymentService, templateService });
+  teardownService ||= createSiteTeardownService(infra);
+
   /** Starts a move. Every check that can fail is done before anything is written. The caller dispatches the job. */
   async function startTransfer(env, { organizationId, siteId, choice, actorUserId }) {
     const site = await sites.getSite(env, siteId);
@@ -110,7 +139,7 @@ export function createTransferService(infra, { templateService = tenantTemplate,
   async function runJob(env, jobId, { budgetMs = Number(env.CUSTOM_HOSTING_TRANSFER_BUDGET_MS) || DEFAULT_BUDGET_MS, maxSubrequests = DEFAULT_SUBREQUESTS, now = () => Date.now() } = {}) {
     const job = await jobsModule.getJob(env, jobId);
     if (!job) return { ok: false, status: 404, error: "job_not_found" };
-    if (job.type !== JOB_TYPE) return { ok: false, status: 409, error: "not_a_transfer_job" };
+    if (job.type !== JOB_TYPE && job.type !== COPY_JOB_TYPE) return { ok: false, status: 409, error: "not_a_transfer_job" };
     if (job.status === "success") return { ok: true, alreadyDone: true };
     if (!["queued", "running", "failed"].includes(job.status)) return { ok: false, status: 409, error: `cannot run a job in status ${job.status}` };
     const transfer = await repo.getTransferByJob(env, jobId);
@@ -128,15 +157,20 @@ export function createTransferService(infra, { templateService = tenantTemplate,
     await repo.patchTransfer(env, transfer.id, { status: "running", error_message: null });
     try {
       const site = await sites.getSite(env, transfer.site_id);
-      if (!site || site.status !== "active") throw new Error(`the site is ${site?.status || "gone"}; only a live site can be moved`);
-      const ctx = await customHosting.contextForSite(env, site, { includeTransferring: true });
+      if (!site || site.status !== "active") throw new Error(`the site is ${site?.status || "gone"}; only a live site can be ${transfer.kind === "copy" ? "copied" : "moved"}`);
+      const copy = transfer.kind === "copy";
+      const targetSite = copy ? await sites.getSite(env, transfer.target_site_id) : null;
+      if (copy && (!targetSite || ["deleting", "deleted"].includes(targetSite.status))) throw new Error("the new site was removed");
+      const ctx = await customHosting.contextForSite(env, copy ? targetSite : site, { includeTransferring: true });
       if (!ctx) throw new Error("the destination was removed");
-      const names = computeResourceNames(site, env);
+      const names = computeResourceNames(copy ? targetSite : site, env);
+      const table = copy ? COPY_IMPL : STEPS;
 
       for (const step of job.steps) {
         if (step.status === "success" || step.status === "skipped") continue;
         if (step.status !== "running") await jobsModule.startStep(env, jobId, step.step_key);
-        const output = await STEPS[step.step_key]({ env, site, ctx, names, state, spend, save, transfer });
+        if (copy) await loadCopyTargets(env, targetSite.id, state);
+        const output = await table[step.step_key]({ env, site, ctx, names, state, spend, save, transfer, targetSite });
         await save();
         await jobsModule.completeStep(env, jobId, step.step_key, output || null);
       }
@@ -170,11 +204,13 @@ export function createTransferService(infra, { templateService = tenantTemplate,
 
     async create_resources({ env, ctx, names, state, spend, save }) {
       const t = state.target;
+      // The names are written BEFORE anything is created: a clean-up can then find a resource whose id was never recorded.
+      if (!t.names) { t.names = { worker: names.workerName, d1: names.d1Name, kv: names.kvTitle, r2: names.r2Name }; await save(); }
       if (!t.d1) { spend(); const r = await infra.createDatabase(ctx.cfEnv, { name: names.d1Name }); t.d1 = { id: r.resourceId, name: names.d1Name }; await save(); }
       if (!t.kv) { spend(); const r = await infra.createKVNamespace(ctx.cfEnv, { title: names.kvTitle }); t.kv = { id: r.resourceId, name: names.kvTitle }; await save(); }
       if (!t.r2) {
         spend();
-        try { const r = await infra.createR2Bucket(ctx.cfEnv, { name: names.r2Name }); t.r2 = { id: r.resourceId, name: names.r2Name }; }
+        try { const r = await createBucketPatiently(infra, ctx.cfEnv, names.r2Name, env); t.r2 = { id: r.resourceId, name: names.r2Name }; }
         catch (e) {
           if (e?.cfCode === 10042 || /enable r2/i.test(String(e?.message))) throw new Error("R2 is not enabled on your Cloudflare account: subscribe to R2 in the Cloudflare dashboard, then retry the move");
           throw e;
@@ -341,7 +377,7 @@ export function createTransferService(infra, { templateService = tenantTemplate,
     return { copied: p.copied };
   }
 
-  async function copyDatabase({ env, site, ctx, state, spend, save }) {
+  async function copyDatabase({ env, site, ctx, state, spend, save }, { wipeFirst = false } = {}) {
       const src = await siteResources.findActiveResource(env, site.id, "d1");
       const p = (state.progress.d1 ||= { phase: "export", bookmark: null, importBookmark: null, numQueries: null });
       if (p.phase === "export") {
@@ -359,6 +395,7 @@ export function createTransferService(infra, { templateService = tenantTemplate,
           throw e;
         }
         spend(3);
+        if (wipeFirst) await wipeDatabase(ctx, state.target.d1.id);
         const imp = await infra.importD1Sql(ctx.cfEnv, { databaseId: state.target.d1.id, sql });
         p.phase = imp.status === "complete" ? "done" : "import";
         p.importBookmark = imp.bookmark || null;
@@ -372,7 +409,27 @@ export function createTransferService(infra, { templateService = tenantTemplate,
         if (imp.status === "complete") { p.phase = "done"; p.numQueries = imp.numQueries ?? null; }
         else { p.importBookmark = imp.bookmark; await save(); await new Promise((ok) => setTimeout(ok, Number(env.CUSTOM_HOSTING_POLL_MS ?? 1000))); }
       }
+      if (!p.accessCleared) {
+        // The copy is a copy of the site's DATABASE, which also holds the signed access state (a maintenance pause pushed for the
+        // final window, or a suspension). That state describes the OLD site; left in the copy it makes the new Worker answer 503.
+        spend();
+        try { await infra.runD1Query(ctx.cfEnv, { databaseId: state.target.d1.id, sql: "DELETE FROM system_settings WHERE key = '__lummet_site_access_state'" }); }
+        catch (e) { if (!/no such table/i.test(String(e?.message))) throw e; }
+        p.accessCleared = true; await save();
+      }
       return { exportBytes: p.exportBytes || null, numQueries: p.numQueries };
+  }
+
+  /** Empties a database that already has the application's tables (a copy target) so the dump can be imported over nothing. */
+  async function wipeDatabase(ctx, databaseId) {
+    const q = await infra.runD1Query(ctx.cfEnv, { databaseId, sql: "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table', 'view')" });
+    const rows = q.results?.[0]?.results || [];
+    const quote = (n) => `"${String(n).replace(/"/g, '""')}"`;
+    const views = rows.filter((r) => r.type === "view"), virtuals = rows.filter((r) => r.type === "table" && /^\s*CREATE\s+VIRTUAL/i.test(r.sql || "")), tables = rows.filter((r) => r.type === "table" && !virtuals.includes(r));
+    for (const r of [...views.map((v) => `DROP VIEW IF EXISTS ${quote(v.name)}`), ...virtuals.map((v) => `DROP TABLE IF EXISTS ${quote(v.name)}`), ...tables.map((t) => `DROP TABLE IF EXISTS ${quote(t.name)}`)]) {
+      try { await infra.runD1Query(ctx.cfEnv, { databaseId, sql: `PRAGMA defer_foreign_keys = ON; ${r}` }); }
+      catch (e) { if (!/no such table|no such view/i.test(String(e?.message))) throw e; }   // a virtual table's shadow tables vanish with it
+    }
   }
 
   /** Last step of the window: Lummet stops serving, its old address redirects, the records point at the customer's account. */
@@ -433,6 +490,135 @@ export function createTransferService(infra, { templateService = tenantTemplate,
     return { host, redirectUntil: days > 0 ? until : null, keptLummetCopy: { d1: source.d1?.name || null, kv: source.kv?.name || null, r2: source.r2?.name || null } };
   }
 
+  // ------------------------------------------------------------------ copy: a NEW site in the customer's account, the original stays
+
+  /**
+   * Starts "copy this site to my Cloudflare account". The source stays exactly as it is on Lummet; a new site is created in the
+   * chosen account (its own name, address, tenant and credentials), the SAME release version is deployed to it, and the source's
+   * media, cache and database are copied in. Everything that can be refused is refused before anything is created.
+   */
+  async function startCopy(env, { organizationId, siteId, name, choice, actorUserId }) {
+    const src = await sites.getSite(env, siteId);
+    if (!src || src.organization_id !== organizationId) return { ok: false, status: 404, error: "site_not_found" };
+    if (src.status !== "active" || !src.tenant_id) return { ok: false, status: 409, error: "site_not_active", message: "Only a live site can be copied." };
+    if (await repo.getSiteHosting(env, siteId)) return { ok: false, status: 409, error: "copy_source_not_on_lummet", message: "Only a site hosted by Lummet can be copied to your account." };
+    if (await repo.openTransferForSite(env, siteId)) return { ok: false, status: 409, error: "transfer_already_running", message: "A move or copy of this site is already running." };
+    if (await repo.inflightDeploymentFor(env, siteId)) return { ok: false, status: 409, error: "deployment_in_progress" };
+    for (const t of ["d1", "kv", "r2", "worker"]) {
+      if (!(await siteResources.findActiveResource(env, siteId, t))) return { ok: false, status: 409, error: "site_resources_incomplete", missing: t };
+    }
+    const maxSites = await checkEntitlement(env, organizationId, "sites.max");
+    if (typeof maxSites === "number" && (await sites.countActiveSitesForOrganization(env, organizationId)) >= maxSites) return { ok: false, status: 403, error: "site_limit_reached", limit: maxSites, message: "A copy is a new site and counts against your plan's site limit." };
+    const copyName = String(name || `${src.name} copy`).trim().slice(0, 120);
+    const created = await sites.createSite(env, {
+      organizationId, name: copyName, productId: src.product_id, actorUserId,
+      hosting: { ...(choice || {}), mode: "custom" }, hostingInfra: infra
+    });
+    if (!created.ok) return created;
+    const hosting = await repo.getSiteHosting(env, created.siteId);
+    const id = crypto.randomUUID();
+    const job = await jobsModule.createJob(env, { type: COPY_JOB_TYPE, organizationId, siteId, createdBy: actorUserId, actorType: "customer_user", stepKeys: COPY_STEPS, payload: { transferId: id, targetSiteId: created.siteId } });
+    await repo.insertTransfer(env, { id, siteId, organizationId, accountRef: hosting.account_ref, jobId: job.jobId, landing: hosting.landing, hostname: hosting.hostname, zoneId: hosting.zone_id, zoneName: hosting.zone_name, sourceHost: src.primary_domain, requestedBy: actorUserId, kind: "copy", targetSiteId: created.siteId });
+    await repo.patchTransfer(env, id, { progress: { setupRequestId: created.setup?.requestId || null } });
+    return { ok: true, status: 202, transferId: id, jobId: job.jobId, targetSiteId: created.siteId, host: created.hosting?.host || null };
+  }
+
+  const COPY_IMPL = {
+    async provision({ env, transfer, targetSite }) {
+      let t = await sites.getSite(env, targetSite.id);
+      if (["provisioned", "active"].includes(t.status)) return { skipped: "already provisioned" };
+      let started;
+      if (t.status === "pending") started = await provisioningService.startProvisioning(env, t.id, { actorUserId: transfer.requested_by || undefined });
+      else if (t.status === "failed") started = await provisioningService.retryProvisioning(env, t.id, { actorUserId: transfer.requested_by || undefined });
+      else throw new Error(`the new site is ${t.status}; waiting for it to settle`);
+      if (!started.ok) throw new Error(`the new site could not be set up in your account: ${started.error || started.message || "refused"}`);
+      const ran = await provisioningService.runJob(env, started.jobId);
+      if (!ran.ok) throw new Error(`the new site could not be set up in your account: ${ran.error || "provisioning failed"}`);
+      // A provisioning run can end with the site marked failed (its own first deploy or health check); that is a failure of this step,
+      // so Retry provisions it again instead of the next step meeting a site it cannot deploy to.
+      let settled = await sites.getSite(env, t.id);
+      // The site was marked failed only by its first deploy (the provisioning job itself had finished): its resources exist, so after
+      // the retry it goes back to "provisioned" and the deploy step runs again.
+      if (ran.alreadyDone && settled?.status === "provisioning") {
+        await sites.transitionSiteStatus(env, t.id, "provisioned", { reason: "resources already created; deploy runs again", actorType: "system" });
+        settled = await sites.getSite(env, t.id);
+      }
+      if (!["provisioned", "active"].includes(settled?.status)) throw new Error(`the new site could not be set up in your account: it ended as "${settled?.status || "unknown"}"${settled?.status_reason ? ` (${settled.status_reason})` : ""}`);
+      return { siteId: t.id };
+    },
+
+    async deploy({ env, site, targetSite, spend }) {
+      spend(6);
+      const t = await sites.getSite(env, targetSite.id);
+      if (t.status === "active" && t.app_version && t.app_version === site.app_version) return { skipped: "already on the same release" };
+      const release = site.app_version ? await templateService.getReleaseByVersion(env, site.app_version) : await templateService.getCurrentReleaseForSite(env, site.id);
+      if (!release?.ok) throw new Error(`the release ${site.app_version || ""} the site runs could not be read`);
+      const started = await deploymentService.startDeployment(env, { siteId: t.id, version: release.version, migrations: release.migrations, scriptContent: release.scriptContent, actorType: "system" });
+      if (!started.ok) throw new Error(`the copy could not be deployed: ${started.error || started.message || "refused"}`);
+      const ran = await deploymentService.runJob(env, started.jobId);
+      if (!ran.ok) throw new Error(`the copy could not be deployed: ${ran.error || "deployment failed"}`);
+      return { version: release.version };
+    },
+
+    async copy_media(a) { a.state.progress.r2Started ||= Date.now(); return copyMedia(a, "r2", null); },
+    async copy_kv(a) { return copyKv(a, "kv"); },
+    // The new site's database already has the application's tables (the deployment migrated it); they are emptied first so the
+    // dump is imported over nothing, exactly as the source is.
+    async copy_database(a) { return copyDatabase(a, { wipeFirst: true }); },
+
+    async finalize({ env, ctx, state, targetSite, save }) {
+      const t = await sites.getSite(env, targetSite.id);
+      const url = `https://${t.primary_domain}/`;
+      const health = await infra.checkHealth(ctx.cfEnv, { url });
+      if (!health.ok) throw new Error(`the copy did not answer at ${url} after the data was copied (status ${health.statusCode ?? "unreachable"})`);
+      // The new site starts from the copied configuration: the first-run wizard planned for a blank site is marked done.
+      if (state.progress.setupRequestId) await setupRepo.setOutcome(env, state.progress.setupRequestId, "applied", null).catch(() => {});
+      return { host: t.primary_domain };
+    }
+  };
+
+  /** Fills state.target from the new site's own resources (its D1 / KV / R2 in the customer's account). */
+  async function loadCopyTargets(env, targetSiteId, state) {
+    for (const k of ["d1", "kv", "r2"]) {
+      const r = await siteResources.findActiveResource(env, targetSiteId, k);
+      if (r) state.target[k] = { id: r.resource_id, name: r.resource_name };
+    }
+  }
+
+  async function cancelCopy(env, { organizationId, siteId }) {
+    const t = await repo.latestTransferForSite(env, siteId, "copy");
+    if (!t || t.organization_id !== organizationId || !["queued", "running", "failed"].includes(t.status)) return { ok: false, status: 404, error: "no_open_copy" };
+    if (!(await repo.claimTransferLease(env, t.id, Date.now(), LEASE_MS))) return { ok: false, status: 409, error: "transfer_busy_try_again" };
+    // The new site is deleted through the normal site deletion (Worker, D1, KV, R2, domain, backups, address); the original is never touched.
+    const del = await teardownService.beginSiteDeletion(env, { siteId: t.target_site_id, organizationId, actorType: "customer_user", actorId: t.requested_by || null, reason: "copy cancelled" });
+    if (!del.ok && del.error !== "site_already_deleted") { await repo.releaseTransferLease(env, t.id); return { ok: false, status: del.status || 502, error: del.error || "cleanup_failed" }; }
+    if (t.job_id) await repo.cancelJob(env, t.job_id);
+    await repo.patchTransfer(env, t.id, { status: "cancelled", lease_until: null, completed_at: new Date().toISOString(), cleanup_report: { at: new Date().toISOString(), removed: ["the new site and its resources are being deleted"], left: [], errors: [] } });
+    return { ok: true, teardownJobId: del.jobId || null };
+  }
+
+  async function retryCopy(env, { organizationId, siteId }) {
+    const t = await repo.latestTransferForSite(env, siteId, "copy");
+    if (!t || t.organization_id !== organizationId || t.status !== "failed" || !t.job_id) return { ok: false, status: 404, error: "no_failed_copy" };
+    await repo.patchTransfer(env, t.id, { error_message: null, lease_until: null });
+    return { ok: true, jobId: t.job_id };
+  }
+
+  async function copyView(env, siteId) {
+    const t = await repo.latestTransferForSite(env, siteId, "copy");
+    if (!t) return null;
+    const job = t.job_id ? await jobsModule.getJob(env, t.job_id) : null;
+    const progress = parse(t.progress, {});
+    const target = t.target_site_id ? await sites.getSite(env, t.target_site_id) : null;
+    return {
+      id: t.id, status: t.status, targetSiteId: t.target_site_id, targetName: target?.name || null, targetHost: target?.primary_domain || null,
+      error: t.error_message, createdAt: t.created_at, completedAt: t.completed_at, jobId: t.job_id,
+      steps: job ? job.steps.map((s) => ({ key: s.step_key, status: s.status, error: s.error_message || null })) : [],
+      copied: { media: progress.r2?.copied || 0, mediaBytes: progress.r2?.bytes || 0, mediaSkippedTooLarge: progress.r2?.skippedCount || 0, kv: progress.kv?.copied || 0 },
+      canRetry: t.status === "failed", cleanup: parse(t.cleanup_report, null)
+    };
+  }
+
   /** Cancels a move that has not switched yet: what it created in the customer's account is removed, the site is untouched. */
   async function cancelTransfer(env, { organizationId, siteId }) {
     const t = await repo.openTransferForSite(env, siteId) || await repo.latestTransferForSite(env, siteId);
@@ -442,12 +628,22 @@ export function createTransferService(infra, { templateService = tenantTemplate,
     if (!(await repo.claimTransferLease(env, t.id, Date.now(), LEASE_MS))) return { ok: false, status: 409, error: "transfer_busy_try_again" };
     if (t.frozen_at) { try { await access.unfreeze(env, siteId); } catch (_) { /* the tick retries */ } await repo.patchTransfer(env, t.id, { frozen_at: null }); }
     const failures = await removeTargets(env, t);
-    if (failures.length) { await repo.releaseTransferLease(env, t.id); return { ok: false, status: 502, error: "cleanup_incomplete", failures }; }
+    const report = { at: new Date().toISOString(), removed: failures.removed || [], left: failures.left || [], errors: failures.map((f) => ({ step: f.step, error: f.error })) };
+    await repo.patchTransfer(env, t.id, { cleanup_report: report });
+    if (failures.length) { await repo.releaseTransferLease(env, t.id); return { ok: false, status: 502, error: "cleanup_incomplete", failures, message: "Some resources could not be removed from your Cloudflare account yet. Nothing else was changed; press Clean up again, or remove the listed items in Cloudflare yourself." }; }
     if (t.job_id) await repo.cancelJob(env, t.job_id);
     await repo.patchTransfer(env, t.id, { status: "cancelled", lease_until: null, completed_at: new Date().toISOString() });
     const h = await repo.getSiteHosting(env, siteId);
     if (h && h.status === "transferring") { await repo.deleteSiteHosting(env, siteId); await repo.deleteSecretRow(env, "site", siteId, "turnstile_secret"); }
     return { ok: true };
+  }
+
+  /** Runs a failed move again from where it stopped (finished steps and copied data are kept). The caller dispatches the job. */
+  async function retryTransfer(env, { organizationId, siteId }) {
+    const t = await repo.latestTransferForSite(env, siteId);
+    if (!t || t.organization_id !== organizationId || t.status !== "failed" || !t.job_id) return { ok: false, status: 404, error: "no_failed_transfer" };
+    await repo.patchTransfer(env, t.id, { error_message: null, lease_until: null });
+    return { ok: true, jobId: t.job_id };
   }
 
   /** The customer accepts that media files above the automatic-copy size are not carried over; a stopped move is queued again. */
@@ -487,11 +683,13 @@ export function createTransferService(infra, { templateService = tenantTemplate,
       frozen: !!t.frozen_at,
       needsConfirmation: (t.status === "failed" && progress.r2?.skippedCount > 0 && !t.confirm_skipped) || false,
       skippedMedia: (progress.r2?.skipped || []).slice(0, 20),
-      redirectUntil: parse(t.source_resources, {})?.redirect?.until || null
+      redirectUntil: parse(t.source_resources, {})?.redirect?.until || null,
+      canRetry: t.status === "failed",
+      cleanup: parse(t.cleanup_report, null)
     };
   }
 
-  return { startTransfer, runJob, cancelTransfer, confirmSkipped, removeOldCopy, transferView, removeTargets, TRANSFER_STEPS };
+  return { startTransfer, startCopy, cancelCopy, retryCopy, copyView, runJob, cancelTransfer, retryTransfer, confirmSkipped, removeOldCopy, transferView, removeTargets, TRANSFER_STEPS };
 }
 
 function bytesToBase64(bytes) {

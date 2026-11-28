@@ -128,6 +128,25 @@ export async function deleteWorkerScript(env, workerName) {
   return { ok: true };
 }
 
+/** The D1 database with exactly this name in the account, or null. Used to clean up what a failed attempt left behind. */
+export async function findDatabaseByName(env, { name }) {
+  const result = await cloudflareRequest(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/d1/database?name=${encodeURIComponent(name)}&per_page=100`);
+  const hit = (Array.isArray(result) ? result : []).find((d) => d.name === name);
+  return hit ? { resourceId: hit.uuid, name: hit.name } : null;
+}
+
+/** The KV namespace with exactly this title in the account, or null. */
+export async function findKVNamespaceByName(env, { title }) {
+  for (let page = 1; page <= 10; page++) {
+    const result = await cloudflareRequest(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/storage/kv/namespaces?per_page=100&page=${page}`);
+    const rows = Array.isArray(result) ? result : [];
+    const hit = rows.find((n) => n.title === title);
+    if (hit) return { resourceId: hit.id, title: hit.title };
+    if (rows.length < 100) break;
+  }
+  return null;
+}
+
 export async function deleteDatabase(env, resourceId) {
   await cloudflareRequest(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${resourceId}`);
   return { ok: true };

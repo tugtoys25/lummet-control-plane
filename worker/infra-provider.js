@@ -112,6 +112,8 @@
  * @property {(env: Object) => Promise<?string>} getWorkersSubdomain
  * @property {(env: Object, params: {subdomain: string}) => Promise<string>} createWorkersSubdomain
  * @property {(env: Object, params: {workerName: string, enabled: boolean}) => Promise<{ok: boolean}>} setWorkersDevEnabled
+ * @property {(env: Object, params: {name: string}) => Promise<?{resourceId: string, name: string}>} findDatabaseByName
+ * @property {(env: Object, params: {title: string}) => Promise<?{resourceId: string, title: string}>} findKVNamespaceByName
  * @property {(env: Object) => Promise<Array<{id: string, name: string, status: string, nameServers: string[], plan: ?string}>>} listAccountZones
  * @property {(env: Object, params?: {hostname?: string}) => Promise<Array<{id: string, hostname: string, service: string, zoneId: string}>>} listWorkerDomains
  * @property {(env: Object, params: {name: string, domains: string[]}) => Promise<{sitekey: string, secret: string}>} createTurnstileWidget
